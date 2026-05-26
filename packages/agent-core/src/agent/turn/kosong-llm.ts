@@ -57,7 +57,7 @@ export interface KosongLLMConfig {
   readonly generate?: GenerateFn | undefined;
   /**
    * Completion budget config resolved from agent/provider settings. The
-   * final cap is computed per request from the current messages and tools.
+   * final cap is applied to each request.
    */
   readonly completionBudgetConfig?: CompletionBudgetConfig | undefined;
 }
@@ -91,16 +91,10 @@ export class KosongLLM implements LLM {
     // throwaway shallow clone. `effectiveProvider` is local to this call
     // and never written back to `this.provider`, so retries (handled at
     // a higher layer) keep using the same long-lived provider/client.
-    // The clamp must see every input the provider will serialize on the
-    // wire — system prompt and tool schemas included — or a near-full
-    // context can still slip past the limit.
     const effectiveProvider = applyCompletionBudget({
       provider: this.provider,
       budget: this.completionBudgetConfig,
       capability: this.capability,
-      messages: params.messages,
-      systemPrompt: this.systemPrompt,
-      tools: params.tools,
     });
 
     const result = await this.generate(
