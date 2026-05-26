@@ -2462,7 +2462,15 @@ export class KimiTUI {
           is_error: event.isError,
         });
         return true;
-      case 'agent.status.updated':
+      case 'agent.status.updated': {
+        const usageObj = event.usage;
+        const totalUsage = usageObj?.total ?? usageObj?.currentTurn;
+        toolCall.updateSubagentMetrics({
+          contextTokens: event.contextTokens,
+          usage: totalUsage,
+        });
+        return true;
+      }
       case 'background.task.started':
       case 'background.task.updated':
       case 'background.task.terminated':
@@ -3007,6 +3015,7 @@ export class KimiTUI {
     const tc = this.state.pendingToolComponents.get(event.parentToolCallId);
     if (tc === undefined) return;
     tc.onSubagentCompleted({
+      contextTokens: event.contextTokens,
       usage: event.usage,
       resultSummary: event.resultSummary,
     });
