@@ -278,6 +278,7 @@ import { createTerminalState, type TerminalState } from './utils/terminal-state'
 import { installTerminalThemeTracking } from './utils/terminal-theme';
 import { detectTmuxKeyboardWarning } from './utils/tmux-keyboard';
 import { nextTranscriptId } from './utils/transcript-id';
+import { formatStepDebugTiming } from '#/utils/usage/debug-timing';
 
 export interface KimiTUIStartupInput {
   readonly cliOptions: CLIOptions;
@@ -2991,6 +2992,7 @@ export class KimiTUI {
   // notice pointing at the config knob.
   private handleStepCompleted(event: TurnStepCompletedEvent): void {
     this.flushStreamingUiUpdatesNow();
+    this.maybeShowDebugTiming(event);
     if (event.finishReason !== 'max_tokens') return;
 
     // Scope the truncation marking to tool calls that belong to the
@@ -3026,6 +3028,12 @@ export class KimiTUI {
       ? 'If this limit is wrong for your model, set `max_output_size` on the model alias in your kimi-code config.'
       : undefined;
     this.showNotice(title, detail);
+  }
+
+  private maybeShowDebugTiming(event: TurnStepCompletedEvent): void {
+    if (process.env['KIMI_CODE_DEBUG'] !== '1') return;
+    const text = formatStepDebugTiming(event);
+    if (text !== undefined) this.showStatus(text);
   }
 
   private isAnthropicSessionActive(): boolean {
