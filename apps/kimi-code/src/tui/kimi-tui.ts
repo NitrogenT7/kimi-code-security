@@ -8,8 +8,9 @@
  */
 
 import { writeFileSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { release as osRelease, type as osType } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
@@ -111,6 +112,7 @@ import { parseImageMeta } from '#/utils/image/image-mime';
 import { getInputHistoryFile } from '#/utils/paths';
 import { editInExternalEditor, resolveEditorCommand } from '#/utils/process/external-editor';
 import { detectFdPath } from '#/utils/process/fd-detect';
+import { buildExportMarkdown } from './utils/export-markdown';
 
 import {
   BUILTIN_SLASH_COMMANDS,
@@ -1589,6 +1591,9 @@ export class KimiTUI {
         return;
       case 'fork':
         await this.handleForkCommand(args);
+        return;
+      case 'export-md':
+        await this.handleExportMdCommand(args);
         return;
       case 'export-debug-zip':
         await this.handleExportDebugZipCommand();
@@ -5528,6 +5533,50 @@ export class KimiTUI {
     } catch (error) {
       const msg = formatErrorMessage(error);
       this.showError(`Failed to switch to forked session: ${msg}`);
+    }
+  }
+
+  private async handleExportMdCommand(args: string): Promise<void> {
+    const session = this.session;
+    if (session === undefined) {
+      this.showError(NO_ACTIVE_SESSION_MESSAGE);
+      return;
+    }
+
+    this.showStatus('Exporting session as Markdown…');
+    try {
+      const context = await session.getContext();
+      if (context.history.length === 0) {
+        this.showError('No messages to export.');
+        return;
+      }
+
+      const now = new Date();
+      const shortId = session.id.slice(0, 8);
+      const timestamp = now.toISOString().replaceAll(/[-:]/g, '').replace(/T/, '-').slice(0, 15);
+      const defaultName = `kimi-export-${shortId}-${timestamp}.md`;
+
+      const trimmedArgs = args.trim();
+      const outputPath = trimmedArgs.length > 0
+        ? resolve(trimmedArgs)
+        : resolve(this.state.appState.workDir, defaultName);
+
+      const md = buildExportMarkdown({
+        sessionId: session.id,
+        workDir: this.state.appState.workDir,
+        history: context.history,
+        tokenCount: context.tokenCount,
+        now,
+      });
+
+      await mkdir(dirname(outputPath), { recursive: true });
+      await writeFile(outputPath, md, 'utf-8');
+
+      const linked = toTerminalHyperlink(outputPath, pathToFileURL(outputPath).href);
+      this.showNotice(`Exported ${String(context.history.length)} messages`, linked);
+    } catch (error) {
+      const msg = formatErrorMessage(error);
+      this.showError(`Failed to export session: ${msg}`);
     }
   }
 
