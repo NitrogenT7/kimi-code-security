@@ -1925,12 +1925,11 @@ export class KimiTUI {
   }
 
   // Finalizes live thinking output and moves the live pane to the next mode.
+  // onThinkingEnd() is safe to call even when no component exists (it no-ops
+  // when activeThinkingComponent is undefined), and clearing an already-empty
+  // thinkingDraft is harmless, so we can unconditionally clean up.
   private flushThinkingToTranscript(nextMode: LivePaneState['mode'] = 'idle'): void {
     this.flushStreamingUiUpdatesNow();
-    if (this.state.thinkingDraft.length === 0) {
-      this.patchLivePane({ mode: nextMode });
-      return;
-    }
     this.state.thinkingDraft = '';
     this.onThinkingEnd();
     this.patchLivePane({ mode: nextMode });
@@ -3717,6 +3716,9 @@ export class KimiTUI {
 
   // Creates or updates the live thinking transcript component.
   private onThinkingUpdate(fullText: string): void {
+    // Avoid creating a component whose spinner will never stop when the text
+    // is empty and there is no existing component to update.
+    if (fullText.length === 0 && this.state.activeThinkingComponent === undefined) return;
     if (this.state.activeThinkingComponent === undefined) {
       this.state.pendingAgentGroup = null;
       this.state.pendingReadGroup = null;
