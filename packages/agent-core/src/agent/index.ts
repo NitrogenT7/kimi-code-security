@@ -42,6 +42,7 @@ import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
 import {
   AgentRecords,
+  BlobStore,
   FileSystemAgentRecordPersistence,
   type AgentRecord,
   type AgentRecordPersistence,
@@ -100,6 +101,7 @@ export class Agent {
   readonly hooks: HookEngine | undefined;
 
   readonly type: AgentType;
+  readonly blobStore: BlobStore | undefined;
   readonly records: AgentRecords;
   readonly fullCompaction: FullCompaction;
   readonly context: ContextMemory;
@@ -137,6 +139,9 @@ export class Agent {
 
     this.rpc = config.rpc;
     this.telemetry = config.telemetry ?? noopTelemetryClient;
+    this.blobStore = config.homedir
+      ? new BlobStore({ blobsDir: join(config.homedir, 'blobs') })
+      : undefined;
     this.records = new AgentRecords(
       this,
       config.persistence ??
@@ -145,6 +150,7 @@ export class Agent {
               onError: (error) => {
                 this.emitRecordsWriteError(error);
               },
+              blobStore: this.blobStore,
             })
           : undefined),
     );

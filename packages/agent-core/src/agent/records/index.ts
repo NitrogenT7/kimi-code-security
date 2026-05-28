@@ -16,6 +16,8 @@ export {
   InMemoryAgentRecordPersistence,
 } from './persistence';
 export type { FileSystemAgentRecordPersistenceOptions } from './persistence';
+export { BlobStore, isBlobRef } from './blobref';
+export type { BlobStoreOptions } from './blobref';
 
 // Contract: restore MUST NOT emit UI events, call the LLM, execute tools, or
 // touch the filesystem in a way that triggers external side effects. Each case
@@ -178,6 +180,11 @@ export class AgentRecords {
     if (shouldRewrite) {
       this.persistence.rewrite(replayedRecords);
       await this.persistence.flush();
+    }
+    if (this.agent.blobStore !== undefined) {
+      for (const msg of this.agent.context.history) {
+        await this.agent.blobStore.rehydrateParts(msg.content);
+      }
     }
     return { warning };
   }
