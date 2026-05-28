@@ -11,7 +11,6 @@ import { mcpResultToExecutableOutput } from '../../mcp/output';
 import { isMcpToolName, qualifyMcpToolName } from '../../mcp/tool-naming';
 import type { MCPClient } from '../../mcp/types';
 import { DEFAULT_AGENT_PROFILES } from '../../profile';
-import { withProviderRequestAuth } from '../../providers/request-auth';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import * as b from '../../tools/builtin';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
@@ -94,7 +93,7 @@ export class ToolManager {
         return {
           approvalRule: name,
           execute: async (context) => {
-            return this.agent.rpc.toolCall(
+            return this.agent.rpc!.toolCall(
               {
                 turnId: Number(context.turnId),
                 toolCallId: context.toolCallId,
@@ -370,7 +369,7 @@ export class ToolManager {
           new b.ReadMediaFileTool(kaos, workspace, modelCapabilities, videoUploader),
         new b.EnterPlanModeTool(this.agent),
         new b.ExitPlanModeTool(this.agent),
-        new b.AskUserQuestionTool(this.agent),
+        this.agent.rpc && new b.AskUserQuestionTool(this.agent),
         new b.TodoListTool(this.toolStore),
         new b.TaskListTool(background),
         new b.TaskOutputTool(background),
@@ -400,14 +399,12 @@ export class ToolManager {
     const uploadVideo = provider.uploadVideo?.bind(provider);
     if (uploadVideo === undefined) return undefined;
 
-    const modelAlias = this.agent.config.modelAlias;
-    const resolveAuth =
-      modelAlias === undefined
-        ? undefined
-        : this.agent.providerManager?.createAuthResolverForModel(modelAlias, {
-            log: this.agent.log,
-          });
-    return (input) => withProviderRequestAuth(resolveAuth, (auth) => uploadVideo(input, { auth }));
+    const modelAlias = this.agent.config.modelAlias!;
+    const withAuth = this.agent.providerManager?.createAuthResolverForModel(modelAlias, {
+      log: this.agent.log,
+    });
+    if (withAuth === undefined) return (input) => uploadVideo(input);
+    return (input) => withAuth((auth) => uploadVideo(input, { auth }));
   }
 
   get loopTools(): readonly ExecutableTool[] {

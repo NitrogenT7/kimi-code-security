@@ -16,8 +16,7 @@ import type { EnabledPluginSessionStart } from '#/plugin';
 
 import type { McpConnectionManager } from '../mcp';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
-import type { ProviderManager } from '../providers/provider-manager';
-import { withProviderRequestAuth } from '../providers/request-auth';
+import type { ProviderManager } from '../session/provider-manager';
 import type { RuntimeConfig } from '../runtime-types';
 import type { SessionSubagentHost } from '../session/subagent-host';
 import type { SkillRegistry } from '../skill';
@@ -64,20 +63,18 @@ export interface AgentConfig {
   readonly runtime: RuntimeConfig;
   readonly homedir?: string;
   readonly skills?: SkillRegistry;
-  readonly rpc: SDKAgentRPC;
+  readonly rpc?: SDKAgentRPC;
   readonly persistence?: AgentRecordPersistence;
   readonly type?: AgentType;
   readonly generate?: typeof generate;
   readonly compactionStrategy?: CompactionStrategy;
   readonly providerManager?: ProviderManager | undefined;
-  readonly sessionId?: string;
   readonly subagentHost?: SessionSubagentHost | undefined;
   readonly mcp?: McpConnectionManager;
   readonly hookEngine?: HookEngine;
   readonly backgroundMaxRunningTasks?: number;
   readonly backgroundSessionDir?: string;
   readonly permission?: PermissionManagerOptions | undefined;
-  /** Parent logger; the agent appends its own ctx (agentId already bound by session). */
   readonly log?: Logger;
   readonly telemetry?: TelemetryClient | undefined;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
@@ -89,7 +86,7 @@ export class Agent {
   readonly skills?: SkillManager;
   readonly pluginSessionStarts: readonly EnabledPluginSessionStart[];
   readonly rawGenerate: typeof generate;
-  readonly rpc: SDKAgentRPC;
+  readonly rpc?: SDKAgentRPC;
   readonly telemetry: TelemetryClient;
   readonly providerManager: ProviderManager | undefined;
   readonly subagentHost: SessionSubagentHost | undefined;
@@ -123,10 +120,7 @@ export class Agent {
     }
     this.pluginSessionStarts = config.pluginSessionStarts ?? [];
     this.rawGenerate = config.generate ?? generate;
-    this.providerManager =
-      config.sessionId === undefined
-        ? config.providerManager
-        : config.providerManager?.withPromptCacheKey(config.sessionId);
+    this.providerManager = config.providerManager;
     this.subagentHost = config.subagentHost;
     this.mcp = config.mcp;
     this.hooks = config.hookEngine;
@@ -173,14 +167,16 @@ export class Agent {
         return this.rawGenerate(provider, systemPrompt, tools, history, callbacks, options);
       }
       const modelAlias = this.config.modelAlias;
-      const resolveAuth =
+      const withAuth =
         modelAlias === undefined
           ? undefined
-          : this.providerManager?.createAuthResolverForModel(modelAlias, {
-              log: this.log,
-            });
-      return withProviderRequestAuth(resolveAuth, (auth) => {
-        const requestOptions = auth === undefined ? options : { ...options, auth };
+          : this.providerManager?.createAuthResolverForModel(modelAlias, { log: this.log });
+      if (withAuth === undefined) {
+        this.logLlmRequest(provider, systemPrompt, tools, history, options);
+        return this.rawGenerate(provider, systemPrompt, tools, history, callbacks, options);
+      }
+      return withAuth((auth) => {
+        const requestOptions = { ...options, auth };
         this.logLlmRequest(provider, systemPrompt, tools, history, requestOptions);
         return this.rawGenerate(provider, systemPrompt, tools, history, callbacks, requestOptions);
       });
@@ -298,21 +294,18 @@ export class Agent {
           this.telemetry.track('afk_toggle', { enabled: afkEnabled });
         }
       },
-      setModel: async (payload) => {
-        const previous = this.config.modelAlias;
-        const resolved = await this.providerManager?.resolveProviderForModel(payload.model);
-        if (resolved === undefined) {
-          throw new Error('Runtime provider model cannot be empty');
-        }
-        this.config.update({
-          modelAlias: resolved.modelName,
-        });
-        if (previous !== resolved.modelName) {
-          this.telemetry.track('model_switch', { model: resolved.modelName });
+      setModel: (payload) => {
+        // Validate the alias resolves before recording it so resume / runtime
+        // callers fail fast on missing aliases instead of deferring to the
+        // next prompt.
+        const resolved = this.providerManager?.resolveProviderConfig(payload.model);
+        if (this.config.modelAlias !== payload.model) {
+          this.config.update({ modelAlias: payload.model });
+          this.telemetry.track('model_switch', { model: payload.model });
         }
         return {
-          model: resolved.modelName,
-          providerName: resolved.providerName,
+          model: payload.model,
+          providerName: resolved?.providerName,
         };
       },
       getModel: () => {
@@ -369,7 +362,7 @@ export class Agent {
 
   emitEvent(event: AgentEvent): void {
     if (this.records.restoring) return;
-    void this.rpc.emitEvent(event);
+    void this.rpc?.emitEvent(event);
   }
 
   emitStatusUpdated(): void {
