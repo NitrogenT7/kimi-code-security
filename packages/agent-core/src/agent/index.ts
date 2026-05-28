@@ -479,7 +479,7 @@ function buildLlmRequestMetadata(
 
   const estimatedInputTokens =
     estimateTokens(systemPrompt) +
-    estimateTokensForMessages([...history]) +
+    estimateTokensForMessages(history) +
     estimateTokensForTools(tools);
 
   const metadata: LlmRequestMetadata = {
