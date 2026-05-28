@@ -181,6 +181,13 @@ export class Session {
 
   async close(): Promise<void> {
     try {
+      // Stop cron FIRST. `stopBackgroundTasksOnExit()` can await
+      // long-running background workers (especially with
+      // `background.keepAliveOnExit=false`); while we are waiting, a due
+      // cron tick would otherwise still call `turn.steer()` and start a
+      // fresh turn after shutdown has already begun, racing the
+      // metadata flush below.
+      await this.stopCronOnExit();
       await this.stopBackgroundTasksOnExit();
       await this.flushMetadata();
       await this.triggerSessionEnd('exit');
@@ -191,6 +198,15 @@ export class Session {
         await this.logHandle?.close();
       }
     }
+  }
+
+  // Stop every agent's cron scheduler on close. No keepAlive notion — cron
+  // intervals reference the agent/session graph and must die with the session.
+  // `allSettled` keeps one agent's failure from blocking the rest.
+  private async stopCronOnExit(): Promise<void> {
+    await Promise.allSettled(
+      Array.from(this.agents.values(), (agent) => agent.cron.stop()),
+    );
   }
 
   private async stopBackgroundTasksOnExit(): Promise<void> {
@@ -415,6 +431,7 @@ export class Session {
       mcp: this.mcp,
       backgroundMaxRunningTasks: this.config.background?.maxRunningTasks,
       backgroundSessionDir: homedir,
+      cronSessionDir: homedir,
       permission: this.permissionOptions(parentAgentId, config.permission),
       telemetry: this.telemetry,
       log: this.log.createChild({ agentId: id }),

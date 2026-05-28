@@ -29,6 +29,7 @@ import {
 import type { PromisableMethods } from '../utils/types';
 import { BackgroundManager } from './background';
 import { FullCompaction, type CompactionStrategy } from './compaction';
+import { CronManager } from './cron';
 import { ConfigState } from './config';
 import { ContextMemory } from './context';
 import { HookEngine } from './hooks';
@@ -74,6 +75,13 @@ export interface AgentConfig {
   readonly hookEngine?: HookEngine;
   readonly backgroundMaxRunningTasks?: number;
   readonly backgroundSessionDir?: string;
+  /**
+   * Per-session directory used by `CronManager` to persist scheduled
+   * tasks across `kimi resume`. When omitted the cron stack stays
+   * purely in-memory (subagents, ephemeral sessions). Set in parallel
+   * with {@link backgroundSessionDir} from the session homedir.
+   */
+  readonly cronSessionDir?: string;
   readonly permission?: PermissionManagerOptions | undefined;
   readonly log?: Logger;
   readonly telemetry?: TelemetryClient | undefined;
@@ -106,6 +114,7 @@ export class Agent {
   readonly usage: UsageRecorder;
   readonly tools: ToolManager;
   readonly background: BackgroundManager;
+  readonly cron: CronManager;
   readonly replayBuilder: ReplayBuilder;
   readonly log: Logger;
 
@@ -157,6 +166,25 @@ export class Agent {
       maxRunningTasks: config.backgroundMaxRunningTasks,
       sessionDir: config.backgroundSessionDir,
     });
+    this.cron = new CronManager(this, {
+      // Subagents stay in-memory: their default profiles don't expose
+      // cron tools, so attaching a sessionDir would only litter the
+      // subagent homedir with an empty `cron/` directory on first
+      // mkdir. Main / non-sub agents persist when the session supplied
+      // a directory.
+      sessionDir: this.type !== 'sub' ? config.cronSessionDir : undefined,
+    });
+    if (this.type !== 'sub') {
+      // Skip auto-tick for subagents: each session can spawn many
+      // subagents, and stacking 1s setInterval timers + SIGUSR1
+      // listeners per subagent serves no purpose — the default subagent
+      // profiles don't expose Cron tools, so the store stays empty.
+      // The scheduler unref()'s its setInterval so the cron timer never
+      // keeps the process alive on its own, and isKilled (reading
+      // KIMI_DISABLE_CRON) short-circuits every tick — no need to
+      // delay start when the killswitch is set.
+      this.cron.start();
+    }
     this.replayBuilder = new ReplayBuilder(this);
   }
 
@@ -254,6 +282,12 @@ export class Agent {
     const result = await this.records.replay();
     await this.background.loadFromDisk();
     await this.background.reconcile();
+    // Rehydrate cron tasks scheduled in the previous CLI invocation.
+    // No-op when this agent was constructed without a `cronSessionDir`
+    // (subagents, ephemeral sessions). The scheduler's `createdAt`-based
+    // baseline then handles any fire times missed during downtime via
+    // `coalescedCount` (and the 7-day stale flag) without further wiring.
+    await this.cron.loadFromDisk();
     this.turn.finishResume();
     return result;
   }
