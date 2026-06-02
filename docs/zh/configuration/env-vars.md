@@ -119,6 +119,20 @@ export KIMI_DISABLE_TELEMETRY="1"
 
 `KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT` 的优先级高于 `config.toml`。例如临时运行 `KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT=0 kimi -p "..."` 时，即使配置文件里写了 `keep_alive_on_exit = true`，本次进程退出前也会请求停止后台任务。
 
+## 实验功能 flag
+
+实验功能通过 `KIMI_CODE_EXPERIMENTAL_*` 环境变量控制，并且**默认关闭**。每个 flag 都接受真值（`1`、`true`、`yes`、`on`）；主开关 `KIMI_CODE_EXPERIMENTAL_FLAG` 会强制启用所有实验功能。这些 flag 不会从 `config.toml` 读取。
+
+| 环境变量 | 用途 | 默认值 |
+| --- | --- | --- |
+| `KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND` | 启用 `/goal` 命令和自主 goal 模式。Kimi Code 会围绕指定目标自动续跑多个轮次，直到目标完成、暂停或进入 blocked 状态。停止条件应写在目标本身里，例如「如果仍被阻塞，20 轮后停止」。详见 [斜杠命令：自主 goal](../reference/slash-commands.md#自主-goal)。 | `false`（关闭） |
+| `KIMI_CODE_EXPERIMENTAL_FLAG` | 主开关：强制启用所有实验功能 | `false`（关闭） |
+
+```sh
+# 单次启动时试用 goal 模式
+KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND=1 kimi
+```
+
 ## 诊断日志
 
 下列变量控制 `kimi` 的诊断日志。日志会写入两个位置：全局诊断日志在 `$KIMI_CODE_HOME/logs/kimi-code.log`，每个会话自身的诊断日志在 `<sessionDir>/logs/kimi-code.log`（路径细节见 [数据路径](./data-locations.md#日志与更新状态)）。所有变量都只在进程启动时读取一次。

@@ -12,6 +12,12 @@ import type { FlagDefinitionInput } from './types';
  */
 export const FLAG_DEFINITIONS = [
   {
+    id: 'goal-command',
+    env: 'KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND',
+    default: false,
+    surface: 'both',
+  },
+  {
     id: 'micro-compaction',
     env: 'KIMI_CODE_EXPERIMENTAL_MICRO_COMPACTION',
     default: false,
