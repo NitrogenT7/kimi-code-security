@@ -495,7 +495,7 @@ export class KimiTUI {
           if (target.workDir !== workDir) {
             this.state.ui.stop();
             process.stderr.write(
-              `${chalk.yellow(
+              `${chalk.hex(this.state.theme.colors.warning)(
                 `Session "${startup.sessionFlag}" was created under a different directory.\n` +
                   `  cd "${target.workDir}" && kimi -r ${startup.sessionFlag}`,
               )}\n\n`,
