@@ -346,6 +346,7 @@ export class SessionReplayRenderer {
       skillActivationId: skill.activationId,
       skillName: skill.skillName,
       skillArgs: skill.skillArgs,
+      skillTrigger: skill.trigger,
     });
   }
 
