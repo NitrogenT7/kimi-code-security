@@ -108,6 +108,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return this.session.generateAgentsMd();
   }
 
+  async startBtw({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>): Promise<string> {
+    return this.getAgent(agentId).startBtw(payload);
+  }
+
   // --- Goal lifecycle (delegates to the session goal store) -------------
 
   createGoal(payload: CreateGoalPayload) {

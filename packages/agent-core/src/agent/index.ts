@@ -387,6 +387,7 @@ export class Agent {
         }
         this.skills.activate(payload);
       },
+      startBtw: () => this.subagentHost!.startBtw(),
       getBackgroundOutput: (payload) => this.background.readOutput(payload.taskId, payload.tail),
       getContext: () => this.context.data(),
       getConfig: () => this.config.data(),

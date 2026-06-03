@@ -15,12 +15,14 @@ import {
 } from './resolve';
 import type { BuiltinSlashCommandName } from './registry';
 import type { AuthFlowController } from '../controllers/auth-flow';
+import type { BtwPanelController } from '../controllers/btw-panel';
 import type { StreamingUIController } from '../controllers/streaming-ui';
 import type { TasksBrowserController } from '../controllers/tasks-browser';
 import type { AppState, LoginProgressSpinnerHandle, QueuedMessage } from '../types';
 import type { TUIState } from '../tui-state';
 
 import { handleLoginCommand, handleLogoutCommand } from './auth';
+import { handleBtwCommand } from './btw';
 import { tryHandleDanceCommand } from '../easter-eggs/dance';
 import {
   handleAutoCommand,
@@ -55,6 +57,7 @@ export {
   handleLoginCommand,
   handleLogoutCommand,
 } from './auth';
+export { handleBtwCommand } from './btw';
 export {
   handleAutoCommand,
   handleCompactCommand,
@@ -132,6 +135,7 @@ export interface SlashCommandHost {
 
   // Controller refs
   readonly streamingUI: StreamingUIController;
+  readonly btwPanelController: BtwPanelController;
   readonly tasksBrowserController: TasksBrowserController;
   readonly authFlow: AuthFlowController;
 }
@@ -257,6 +261,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'feedback':
       await handleFeedbackCommand(host);
+      return;
+    case 'btw':
+      await handleBtwCommand(host, args);
       return;
     case 'title':
       await handleTitleCommand(host, args);

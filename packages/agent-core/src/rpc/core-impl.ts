@@ -579,6 +579,10 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).generateAgentsMd(payload);
   }
 
+  startBtw({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>): Promise<string> {
+    return this.sessionApi(sessionId).startBtw(payload);
+  }
+
   createGoal({
     sessionId,
     ...payload

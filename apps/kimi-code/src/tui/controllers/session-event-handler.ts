@@ -62,6 +62,7 @@ import { setProcessTitle } from '../utils/proctitle';
 import { errorReportHintLine } from '../constant/feedback';
 import { formatStepDebugTiming } from '#/utils/usage/debug-timing';
 import { nextTranscriptId } from '../utils/transcript-id';
+import type { BtwPanelController } from './btw-panel';
 import type { StreamingUIController } from './streaming-ui';
 import type { TasksBrowserController } from './tasks-browser';
 import type {
@@ -92,6 +93,7 @@ export interface SessionEventHost {
   appendTranscriptEntry(entry: TranscriptEntry): void;
   sendQueuedMessage(session: Session, item: QueuedMessage): void;
   shiftQueuedMessage(): QueuedMessage | undefined;
+  readonly btwPanelController: BtwPanelController;
   readonly tasksBrowserController: TasksBrowserController;
 }
 
@@ -234,8 +236,11 @@ export class SessionEventHandler {
     if (subagentId === MAIN_AGENT_ID) return false;
 
     const { streamingUI } = this.host;
+    if (this.host.btwPanelController.routeEvent(event)) return true;
+
     const info = this.subagentInfo.get(subagentId);
-    if (info === undefined || info.parentToolCallId.length === 0) return true;
+    if (info === undefined) return true;
+    if (info.parentToolCallId.length === 0) return true;
     const { parentToolCallId } = info;
     const sourceName = info.name;
     const toolCall = streamingUI.getToolComponent(parentToolCallId);

@@ -104,6 +104,11 @@ export class Session {
     await this.rpc.generateAgentsMd({ sessionId: this.id });
   }
 
+  async startBtw(): Promise<string> {
+    this.ensureOpen();
+    return this.rpc.startBtw({ sessionId: this.id });
+  }
+
   async cancel(): Promise<void> {
     this.ensureOpen();
     await this.rpc.cancel({ sessionId: this.id });
