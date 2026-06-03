@@ -1100,7 +1100,7 @@ describe('KimiTUI message flow', () => {
           coalescedCount: 1,
           stale: false,
         },
-        prompt: '提醒用户：这是每分钟提醒',
+        prompt: 'Remind the user: this is a once-per-minute reminder',
       } as Event,
       vi.fn(),
     );
@@ -1108,7 +1108,7 @@ describe('KimiTUI message flow', () => {
     const entry = driver.state.transcriptEntries.at(-1);
     expect(entry).toMatchObject({
       kind: 'cron',
-      content: '提醒用户：这是每分钟提醒',
+      content: 'Remind the user: this is a once-per-minute reminder',
       cronData: {
         jobId: 'deadbeef',
         cron: '* * * * *',
@@ -1120,7 +1120,7 @@ describe('KimiTUI message flow', () => {
     const transcript = stripSgr(driver.state.transcriptContainer.render(120).join('\n'));
     expect(transcript).toContain('Scheduled reminder fired');
     expect(transcript).toContain('* * * * *');
-    expect(transcript).toContain('提醒用户：这是每分钟提醒');
+    expect(transcript).toContain('Remind the user: this is a once-per-minute reminder');
     expect(transcript).not.toContain('<cron-fire');
   });
 
@@ -1352,13 +1352,13 @@ describe('KimiTUI message flow', () => {
     driver.state.appState.streamingPhase = 'composing';
     driver.state.livePane.mode = 'thinking';
 
-    driver.handleUserInput('/btw 你现在在做啥？');
+    driver.handleUserInput('/btw What are you working on right now?');
 
     await vi.waitFor(() => {
       expect(session.startBtw).toHaveBeenCalledWith();
     });
     await vi.waitFor(() => {
-      expect(session.prompt).toHaveBeenCalledWith('你现在在做啥？');
+      expect(session.prompt).toHaveBeenCalledWith('What are you working on right now?');
     });
     expect(session.steer).not.toHaveBeenCalled();
     expect(driver.state.appState.streamingPhase).toBe('composing');
@@ -1366,10 +1366,46 @@ describe('KimiTUI message flow', () => {
     expect(harness.track).toHaveBeenCalledWith('input_command', { command: 'btw' });
   });
 
+  it('opens /btw without a question and sends the first panel input to a side agent', async () => {
+    const session = makeSession();
+    const { driver } = await makeDriver(session);
+
+    driver.handleUserInput('/btw');
+
+    await vi.waitFor(() => {
+      expect(session.startBtw).toHaveBeenCalledWith();
+    });
+    expect(session.prompt).not.toHaveBeenCalled();
+    expect(stripSgr(renderBtwPanel(driver))).toContain('Ready for a side question...');
+
+    driver.handleUserInput('What are you working on right now?');
+
+    await vi.waitFor(() => {
+      expect(session.prompt).toHaveBeenCalledWith('What are you working on right now?');
+    });
+    expect(session.steer).not.toHaveBeenCalled();
+    expect(stripSgr(renderBtwPanel(driver))).toContain('Q: What are you working on right now?');
+  });
+
+  it('cancels an unused /btw side agent when closing an empty panel', async () => {
+    const session = makeSession();
+    const { driver } = await makeDriver(session);
+
+    driver.handleUserInput('/btw');
+
+    await vi.waitFor(() => {
+      expect(session.startBtw).toHaveBeenCalledWith();
+    });
+    driver.state.editor.onEscape?.();
+
+    expect(session.cancel).toHaveBeenCalledOnce();
+    expect(driver.state.btwPanelContainer.children).toHaveLength(0);
+  });
+
   it('renders /btw output in a dedicated panel instead of an Agent tool card', async () => {
     const session = makeSession();
     const { driver } = await makeDriver(session);
-    await openBtwPanel(driver, session, '你现在在做啥？');
+    await openBtwPanel(driver, session, 'What are you working on right now?');
 
     driver.sessionEventHandler.handleEvent(
       {
@@ -1377,7 +1413,7 @@ describe('KimiTUI message flow', () => {
         agentId: 'agent-btw',
         sessionId: 'ses-1',
         turnId: 0,
-        delta: '正在实现 /btw 的独立面板。',
+        delta: 'I am implementing the dedicated /btw panel.',
       } as Event,
       () => {},
     );
@@ -1414,12 +1450,12 @@ describe('KimiTUI message flow', () => {
     expect(panel).not.toContain('BTW failed');
     expect(panel).not.toContain('Ask:');
     expect(panel).not.toContain('Type follow-up');
-    expect(panel).toContain('Q: 你现在在做啥？');
-    expect(panel).toContain('正在实现 /btw 的独立面板。');
+    expect(panel).toContain('Q: What are you working on right now?');
+    expect(panel).toContain('I am implementing the dedicated /btw panel.');
     expect(panel).not.toContain('Agent');
     expect(transcript).not.toContain('BTW');
     expect(transcript).not.toContain('Esc close');
-    expect(transcript).not.toContain('正在实现 /btw 的独立面板。');
+    expect(transcript).not.toContain('I am implementing the dedicated /btw panel.');
   });
 
   it('keeps the /btw panel closest to the input after later transcript output', async () => {
@@ -1921,15 +1957,16 @@ describe('KimiTUI message flow', () => {
     expect(renderedPanel).toContain('answer from new side agent');
   });
 
-  it('does not run /btw without a question or selected model', async () => {
+  it('does not run /btw without a selected model', async () => {
     const { driver, session } = await makeDriver();
 
+    driver.state.appState.model = '';
     driver.handleUserInput('/btw');
     expect(session.startBtw).not.toHaveBeenCalled();
-    expect(stripSgr(renderTranscript(driver))).toContain('Usage: /btw <question>');
+    expect(driver.state.btwPanelContainer.children).toHaveLength(0);
+    expect(stripSgr(renderTranscript(driver))).toContain('LLM not set');
 
-    driver.state.appState.model = '';
-    driver.handleUserInput('/btw 现在在做什么？');
+    driver.handleUserInput('/btw What are you doing now?');
 
     expect(session.startBtw).not.toHaveBeenCalled();
     expect(stripSgr(renderTranscript(driver))).toContain('LLM not set');
