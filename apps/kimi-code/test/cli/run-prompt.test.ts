@@ -46,6 +46,7 @@ const mocks = vi.hoisted(() => {
     agentEvent,
     mainEvent,
     kimiHarnessConstructor: vi.fn(),
+    harnessCheckRuntimeEnvironment: vi.fn(async () => undefined),
     harnessEnsureConfigFile: vi.fn(),
     harnessGetConfig: vi.fn(
       async (): Promise<{ providers: {}; defaultModel?: string; telemetry: boolean }> => ({
@@ -89,6 +90,7 @@ vi.mock('@moonshot-ai/kimi-code-sdk', async (importOriginal) => {
       return {
         homeDir,
         auth: { getCachedAccessToken: mocks.harnessGetCachedAccessToken },
+        checkRuntimeEnvironment: mocks.harnessCheckRuntimeEnvironment,
         ensureConfigFile: mocks.harnessEnsureConfigFile,
         getConfig: mocks.harnessGetConfig,
         getExperimentalFeatures: mocks.harnessGetExperimentalFeatures,
@@ -187,6 +189,7 @@ describe('runPrompt', () => {
     mocks.resolveKimiHome.mockImplementation(
       (homeDir?: string) => homeDir ?? '/tmp/kimi-code-test-home',
     );
+    mocks.harnessCheckRuntimeEnvironment.mockResolvedValue(undefined);
     mocks.harnessCreatesDeviceIdOnConstruction = false;
   });
 
@@ -198,6 +201,10 @@ describe('runPrompt', () => {
 
     expect(mocks.kimiHarnessConstructor).toHaveBeenCalledWith(
       expect.objectContaining({ skillDirs: ['/skills'], uiMode: 'print' }),
+    );
+    expect(mocks.harnessCheckRuntimeEnvironment).toHaveBeenCalledOnce();
+    expect(mocks.harnessCheckRuntimeEnvironment.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.harnessEnsureConfigFile.mock.invocationCallOrder[0]!,
     );
     expect(mocks.harnessCreateSession).toHaveBeenCalledWith({
       workDir: process.cwd(),
@@ -212,6 +219,23 @@ describe('runPrompt', () => {
     expect(stderr.text()).toBe('To resume this session: kimi -r ses_prompt\n');
     expect(mocks.shutdownTelemetry).toHaveBeenCalled();
     expect(mocks.harnessClose).toHaveBeenCalled();
+  });
+
+  it('stops prompt startup when runtime environment check fails', async () => {
+    const stdout = writer();
+    const stderr = writer();
+    mocks.harnessCheckRuntimeEnvironment.mockRejectedValueOnce(new Error('Git Bash missing'));
+
+    await expect(runPrompt(opts(), '1.2.3-test', { stdout, stderr })).rejects.toThrow(
+      'Git Bash missing',
+    );
+
+    expect(mocks.harnessCheckRuntimeEnvironment).toHaveBeenCalledOnce();
+    expect(mocks.harnessEnsureConfigFile).not.toHaveBeenCalled();
+    expect(mocks.harnessGetConfig).not.toHaveBeenCalled();
+    expect(mocks.harnessCreateSession).not.toHaveBeenCalled();
+    expect(mocks.session.prompt).not.toHaveBeenCalled();
+    expect(mocks.harnessClose).toHaveBeenCalledOnce();
   });
 
   it('uses the CLI model override when creating a fresh prompt session', async () => {

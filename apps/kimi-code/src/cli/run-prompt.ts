@@ -110,6 +110,7 @@ export async function runPrompt(
   removeTerminationCleanup = installPromptTerminationCleanup(promptProcess, cleanupPromptRun);
 
   try {
+    await harness.checkRuntimeEnvironment();
     await harness.ensureConfigFile();
     const config = await harness.getConfig();
     const { session, resumed, restorePermission, telemetryModel, goalModel } =

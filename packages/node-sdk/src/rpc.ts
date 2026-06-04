@@ -99,6 +99,11 @@ export abstract class SDKRpcClientBase {
 
   protected abstract getRpc(): Promise<ResolvedCoreAPI>;
 
+  async checkRuntimeEnvironment(): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.checkRuntimeEnvironment({});
+  }
+
   async createSession(input: CreateSessionOptions): Promise<SessionSummary> {
     const rpc = await this.getRpc();
     const { planMode, ...coreInput } = input;
