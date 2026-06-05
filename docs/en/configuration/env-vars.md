@@ -163,6 +163,21 @@ The CLI also reads several standard system variables to detect the runtime envir
 - `WSL_DISTRO_NAME`, `WSLENV`: detect WSL for the clipboard PowerShell bridge
 - `LOCALAPPDATA`: used on Windows when probing for the Git Bash installation path
 
+## HTTP proxy
+
+Kimi Code honors the standard proxy environment variables for all outbound traffic — model API calls, MCP servers, web tools, telemetry, sign-in, and update checks:
+
+- `HTTP_PROXY` / `http_proxy`: proxy for `http://` requests
+- `HTTPS_PROXY` / `https_proxy`: proxy for `https://` requests
+- `ALL_PROXY` / `all_proxy`: fallback proxy used when the scheme-specific variable is unset; this is where a SOCKS proxy is usually set
+- `NO_PROXY` / `no_proxy`: comma-separated hosts that bypass the proxy
+
+Both HTTP(S) and SOCKS proxies are supported. A SOCKS proxy is recognized by its scheme — `socks5://`, `socks5h://`, `socks4://`, or `socks://` (an alias for `socks5://`) — and is typically set via `ALL_PROXY` (the form used by tools like Clash and V2RayN). An HTTP(S) proxy takes precedence over `ALL_PROXY` for HTTP/HTTPS traffic.
+
+The proxy is applied only when one of these variables is set; otherwise connections are made directly. Loopback hosts (`localhost`, `127.0.0.1`, `::1`) always bypass the proxy, so a local server such as a localhost MCP server keeps working when a proxy is configured — add your own internal hosts to `NO_PROXY` to exempt them too.
+
+Stdio MCP servers that run as Node child processes honor `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` automatically when the child's Node version supports `NODE_USE_ENV_PROXY` (Node ≥ 22.21 or ≥ 24.5); SOCKS proxying applies to Kimi Code's own traffic only.
+
 ## Next steps
 
 - [Config overrides](./overrides.md) — how environment variables, CLI options, and the config file interact by priority
