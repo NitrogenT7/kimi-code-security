@@ -22,6 +22,7 @@ import type {
   Session,
 } from '@moonshot-ai/kimi-code-sdk';
 import chalk from 'chalk';
+import { resolve } from 'pathe';
 
 import type { CLIOptions } from '#/cli/options';
 import { MigrationScreenComponent, type MigrationScreenResult } from '#/migration/index';
@@ -512,7 +513,7 @@ export class KimiTUI {
           if (target === undefined) {
             throw new Error(`Session "${startup.sessionFlag}" not found.`);
           }
-          if (target.workDir !== workDir) {
+          if (resolve(target.workDir) !== resolve(workDir)) {
             this.state.ui.stop();
             process.stderr.write(
               `${chalk.hex(this.state.theme.colors.warning)(
