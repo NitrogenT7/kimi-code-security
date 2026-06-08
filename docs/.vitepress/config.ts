@@ -66,7 +66,6 @@ const config = withMermaid(defineConfig({
                 { text: 'Model Context Protocol', link: '/zh/customization/mcp' },
                 { text: 'Agent Skills', link: '/zh/customization/skills' },
                 { text: 'Plugins', link: '/zh/customization/plugins' },
-                { text: 'Kimi Datasource', link: '/zh/customization/datasource' },
                 { text: 'Agent 与子 Agent', link: '/zh/customization/agents' },
                 { text: 'Hooks', link: '/zh/customization/hooks' },
               ],
@@ -143,7 +142,6 @@ const config = withMermaid(defineConfig({
                 { text: 'Model Context Protocol', link: '/en/customization/mcp' },
                 { text: 'Agent Skills', link: '/en/customization/skills' },
                 { text: 'Plugins', link: '/en/customization/plugins' },
-                { text: 'Kimi Datasource', link: '/en/customization/datasource' },
                 { text: 'Agents and Subagents', link: '/en/customization/agents' },
                 { text: 'Hooks', link: '/en/customization/hooks' },
               ],
@@ -186,6 +184,11 @@ const config = withMermaid(defineConfig({
     },
   },
 
+  redirects: {
+    '/zh/customization/datasource': '/zh/customization/plugins',
+    '/en/customization/datasource': '/en/customization/plugins',
+  },
+
   themeConfig: {
     outline: [2, 3],
     search: { provider: 'local' },
@@ -198,7 +201,28 @@ const config = withMermaid(defineConfig({
     optimizeDeps: {
       include: mermaidOptimizeDeps.map((dep) => `mermaid > ${dep}`),
     },
-    plugins: [llmstxt()],
+    plugins: [
+      llmstxt(),
+      {
+        name: 'dev-redirects',
+        configureServer(server) {
+          const map: Record<string, string> = {
+            '/zh/customization/datasource': '/zh/customization/plugins',
+            '/en/customization/datasource': '/en/customization/plugins',
+          }
+          server.middlewares.use((req, res, next) => {
+            const url = (req.url ?? '').split('?')[0].replace(/\.html$/, '')
+            const target = map[url]
+            if (target) {
+              res.writeHead(302, { Location: target })
+              res.end()
+              return
+            }
+            next()
+          })
+        },
+      },
+    ],
   },
 }))
 
