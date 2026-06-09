@@ -612,6 +612,7 @@ describe('handleGoalCommand', () => {
     await handleGoalCommand(host, 'resume');
     expect(session.resumeGoal).toHaveBeenCalledOnce();
     expect(host.track).toHaveBeenCalledWith('goal_resume');
+    expect(host.showStatus).not.toHaveBeenCalledWith('Goal resumed.');
     expect(host.sendNormalUserInput).toHaveBeenCalledWith('Resume the active goal.');
   });
 
@@ -619,6 +620,8 @@ describe('handleGoalCommand', () => {
     await handleGoalCommand(host, 'cancel');
     expect(session.cancelGoal).toHaveBeenCalledOnce();
     expect(host.track).toHaveBeenCalledWith('goal_cancel');
+    expect(host.showNotice).toHaveBeenCalledWith('Goal cancelled.');
+    expect(host.showStatus).not.toHaveBeenCalledWith('Goal cancelled.');
     expect(host.sendNormalUserInput).not.toHaveBeenCalled();
   });
 

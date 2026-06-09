@@ -52,9 +52,9 @@ const GOAL_FORK_CLEARED_REMINDER = [
  * and resumable via `/goal resume`" — differing only in *who* stopped it (the
  * user vs the system) and the human-readable `reason`. There is no separate
  * `impossible`, `budget_limited`, `error`, or `cancelled` status: an
- * unachievable goal, an exhausted budget, or a non-retryable runtime failure
- * becomes `blocked(+reason)`, retryable runtime stops become `paused(+reason)`,
- * and `cancelGoal` discards the record entirely. See {@link GoalMode}
+ * unachievable goal or an exhausted budget becomes `blocked(+reason)`,
+ * runtime/model/provider failures become `paused(+reason)`, and `cancelGoal`
+ * discards the record entirely. See {@link GoalMode}
  * for the setters and the per-status notes below.
  */
 export type GoalStatus =
@@ -70,18 +70,17 @@ export type GoalStatus =
    * `/goal resume`. Reached three ways: the user pauses (`pauseGoal`); a live
    * turn is aborted mid-flight, e.g. Esc/shutdown (`pauseOnInterrupt`); or a
    * agent is resumed from disk, where an `active` goal cannot still be running
-   * and is demoted (`normalizeAfterReplay`); or a retryable runtime stop such as a
-   * provider rate limit parked it via `pauseActiveGoal`.
+   * and is demoted (`normalizeAfterReplay`); or a runtime/model/provider failure
+   * parked it via `pauseActiveGoal`.
    */
   | 'paused'
   /**
    * The *system* stopped pursuing the goal, for a reason carried in
    * `terminalReason`: the model reported it cannot proceed via
    * `UpdateGoal('blocked')` (an external blocker, or an objective it deems
-   * unachievable); a configured hard budget (token/turn/time) was reached; or a
-   * non-retryable runtime failure occurred. Set by `markBlocked` (from the
-   * model's `UpdateGoal`, the budget check in the goal driver, and the driver's
-   * turn-failure catch).
+   * unachievable); or a configured hard budget (token/turn/time) was reached.
+   * Set by `markBlocked` from the model's `UpdateGoal`, the budget check in the
+   * goal driver, and prompt-hook blocks.
    * Resumable like `paused` — `/goal resume` re-activates it; a plain message
    * just runs one normal turn without reactivating the loop. Editing the goal
    * while blocked takes effect on the next turn.
@@ -96,7 +95,7 @@ export type GoalStatus =
   | 'complete';
 
 /** Who performed a goal action. `cleared` is a record action, not a status. */
-type GoalActor = 'user' | 'model' | 'runtime' | 'system';
+export type GoalActor = 'user' | 'model' | 'runtime' | 'system';
 
 export interface GoalBudgetLimits {
   readonly tokenBudget?: number;
@@ -184,6 +183,7 @@ export interface GoalChange {
   readonly status?: GoalStatus;
   readonly reason?: string;
   readonly stats?: GoalChangeStats;
+  readonly actor?: GoalActor;
 }
 
 export interface CreateGoalInput {
@@ -202,17 +202,18 @@ interface GoalReasonInput {
  * Lifecycle rules (see the {@link GoalStatus} union for the full per-status map):
  * - Success: `markComplete` records success then clears the record (transient).
  *   The model marks completion via the `UpdateGoal('complete')` tool; the turn
- *   driver reads the status at the turn boundary. `markComplete` emits a final
- *   snapshot event, then clears the record.
- * - System stop: `markBlocked(reason)` sets `blocked` for any reason the system
- *   stops pursuing — the model's `UpdateGoal('blocked')`, a hard budget, or a
- *   runtime error. `blocked` is resumable.
- * - User stop: `pauseGoal` and the interrupt path `pauseOnInterrupt` set `paused`
- *   (resumable); `cancelGoal` discards the record entirely (no status — this is
- *   what `/goal cancel` does, the single remove action).
- * - An aborted turn (Esc / shutdown) is not terminal: it pauses the goal, so it
- *   stays resumable — mirroring how `normalizeAfterReplay` demotes an `active`
- *   goal to `paused` on agent resume.
+ *   driver reads the status at the turn boundary. `markComplete` announces, then
+ *   clears the record.
+ * - Task stop: `markBlocked(reason)` sets `blocked` when the model cannot
+ *   proceed, a prompt hook blocks, or a hard budget is reached. `blocked` is
+ *   resumable.
+ * - Pause: `pauseGoal`, `pauseActiveGoal`, and the interrupt path
+ *   `pauseOnInterrupt` set `paused` (resumable); `cancelGoal` discards the
+ *   record entirely (no status — this is what `/goal cancel` does, the single
+ *   remove action).
+ * - An aborted or failed turn is not terminal: it pauses the goal, so it stays
+ *   resumable — mirroring how `normalizeAfterReplay` demotes an `active` goal to
+ *   `paused` on agent resume.
  */
 export class GoalMode {
   private state: GoalState | undefined;
@@ -299,11 +300,13 @@ export class GoalMode {
             status,
             reason: record.reason,
             stats: this.statsOf(state),
+            actor: record.actor,
           }
         : {
             kind: 'lifecycle',
             status,
             reason: record.reason,
+            actor: record.actor,
           },
     });
   }
@@ -404,7 +407,7 @@ export class GoalMode {
     this.applyStatus(state, 'paused');
     state.terminalReason = input.reason;
     this.persistState(state, {
-      change: { kind: 'lifecycle', status: 'paused', reason: input.reason },
+      change: { kind: 'lifecycle', status: 'paused', reason: input.reason, actor },
     });
     this.appendStatusUpdate(state, actor, input.reason);
     return this.toSnapshot(state);
@@ -424,7 +427,7 @@ export class GoalMode {
     this.applyStatus(state, 'paused');
     state.terminalReason = input.reason;
     this.persistState(state, {
-      change: { kind: 'lifecycle', status: 'paused', reason: input.reason },
+      change: { kind: 'lifecycle', status: 'paused', reason: input.reason, actor },
     });
     this.appendStatusUpdate(state, actor, input.reason);
     return this.toSnapshot(state);
@@ -444,7 +447,7 @@ export class GoalMode {
     state.terminalReason = undefined;
     this.applyStatus(state, 'active');
     this.persistState(state, {
-      change: { kind: 'lifecycle', status: 'active', reason: input.reason },
+      change: { kind: 'lifecycle', status: 'active', reason: input.reason, actor },
     });
     this.appendStatusUpdate(state, actor, input.reason);
     return this.toSnapshot(state);
@@ -491,7 +494,7 @@ export class GoalMode {
   /**
    * Marks the goal `blocked`: the system stopped pursuing it for `reason` — the
    * model's `UpdateGoal('blocked')` (incl. objectives it deems unachievable), a
-   * hard budget reached by the goal driver, or a runtime failure in the driver.
+   * hard budget reached by the goal driver, or a prompt-hook block.
    * `blocked` is persisted and **resumable** via
    * `/goal resume` (it is a sibling of `paused`, not a dead end), so it emits a
    * `lifecycle` change. No-ops for a goal that is missing or not active, so a
@@ -506,7 +509,7 @@ export class GoalMode {
     this.applyStatus(state, 'blocked');
     state.terminalReason = input.reason;
     this.persistState(state, {
-      change: { kind: 'lifecycle', status: 'blocked', reason: input.reason },
+      change: { kind: 'lifecycle', status: 'blocked', reason: input.reason, actor },
     });
     this.appendStatusUpdate(state, actor, input.reason);
     return this.toSnapshot(state);
@@ -535,6 +538,7 @@ export class GoalMode {
       status: 'complete',
       reason: input.reason,
       stats: this.statsOf(state),
+      actor,
     });
     // ...then clear the durable record (emits onGoalUpdated(null) → box clears).
     this.clearInternal(actor);
@@ -599,6 +603,7 @@ export class GoalMode {
       status: state.status,
       reason,
       wallClockMs: liveWallClockMs(state, Date.now()),
+      actor,
     });
     this.track('goal_status_changed', {
       actor,

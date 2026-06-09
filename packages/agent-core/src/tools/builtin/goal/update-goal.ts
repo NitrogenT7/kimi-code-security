@@ -13,15 +13,18 @@
 import type { Agent } from '#/agent';
 import { z } from 'zod';
 
+import {
+  GOAL_BLOCKED_REMINDER_NAME,
+  GOAL_COMPLETION_REMINDER_NAME,
+} from '../../../agent/turn';
+import {
+  buildGoalBlockedReasonPrompt,
+  buildGoalCompletionSummaryPrompt,
+} from './outcome-prompts';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
 import { toInputJsonSchema } from '../../support/input-schema';
 import DESCRIPTION from './update-goal.md';
-
-const GOAL_COMPLETED_CONTEXT_REMINDER = [
-  'The current goal was marked complete and cleared.',
-  'Handle the next user request normally unless the user starts or resumes a goal.',
-].join(' ');
 
 export const UpdateGoalToolInputSchema = z
   .object({
@@ -54,21 +57,27 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
         }
         if (args.status === 'complete') {
           const completed = await goal.markComplete({}, 'model');
-          // `complete` is transient — markComplete announces then clears the
-          // record. Add a neutral context reminder so the next provider
-          // request ends with a user message after the UpdateGoal tool result.
-          // Anthropic-compatible providers reject trailing assistant messages
-          // as unsupported prefill.
+          // `complete` is transient: markComplete announces then clears the
+          // record. Store the summary request as a system reminder, so the next
+          // provider request ends with a user message after the UpdateGoal tool
+          // result. Anthropic-compatible providers reject trailing assistant
+          // messages as unsupported prefill.
           if (completed !== null) {
-            this.agent.context.appendSystemReminder(GOAL_COMPLETED_CONTEXT_REMINDER, {
+            this.agent.context.appendSystemReminder(buildGoalCompletionSummaryPrompt(completed), {
               kind: 'system_trigger',
-              name: 'goal_completion',
+              name: GOAL_COMPLETION_REMINDER_NAME,
             });
           }
           return { output: 'Goal marked complete.', stopTurn: true };
         }
         if (args.status === 'blocked') {
-          await goal.markBlocked({}, 'model');
+          const blocked = await goal.markBlocked({}, 'model');
+          if (blocked !== null) {
+            this.agent.context.appendSystemReminder(buildGoalBlockedReasonPrompt(blocked), {
+              kind: 'system_trigger',
+              name: GOAL_BLOCKED_REMINDER_NAME,
+            });
+          }
           return { output: 'Goal marked blocked.', stopTurn: true };
         }
         await goal.pauseGoal({}, 'model');

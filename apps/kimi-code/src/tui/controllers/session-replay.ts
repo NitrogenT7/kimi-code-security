@@ -256,7 +256,14 @@ export class SessionReplayRenderer {
     if (isGoalForkClearedSystemReminder(message)) {
       return;
     }
-    if (isGoalCompletionSystemReminder(message)) {
+    const goalReminder = goalOutcomeReminderFromSystemMessage(message);
+    if (goalReminder !== null) {
+      if (goalReminder !== undefined) {
+        this.flushAssistant(context);
+        this.host.appendTranscriptEntry(
+          replayEntry(context, 'assistant', goalReminder, 'markdown'),
+        );
+      }
       return;
     }
 
@@ -384,13 +391,23 @@ export class SessionReplayRenderer {
       case 'lifecycle': {
         const lifecycleChange: GoalReplayLifecycleChange = { ...change, kind: 'lifecycle' };
         if (isResumeNormalizationGoalPause(lifecycleChange)) return;
-        this.host.appendTranscriptEntry({
-          ...replayEntry(context, 'goal', goalLifecycleReplayContent(lifecycleChange), 'plain'),
-          goalData: { kind: 'lifecycle', change: lifecycleChange },
-        });
+        if (isModelBlockedGoalLifecycle(lifecycleChange)) {
+          return;
+        }
+        this.appendGoalLifecycleReplayEntry(context, lifecycleChange);
         return;
       }
     }
+  }
+
+  private appendGoalLifecycleReplayEntry(
+    context: ReplayRenderContext,
+    change: GoalReplayLifecycleChange,
+  ): void {
+    this.host.appendTranscriptEntry({
+      ...replayEntry(context, 'goal', goalLifecycleReplayContent(change), 'plain'),
+      goalData: { kind: 'lifecycle', change },
+    });
   }
 
   private renderHookResult(context: ReplayRenderContext, message: ContextMessage): void {
@@ -613,8 +630,16 @@ function goalLifecycleReplayContent(change: GoalReplayLifecycleChange): string {
   }
 }
 
-function isGoalCompletionSystemReminder(message: ContextMessage): boolean {
-  return message.origin?.kind === 'system_trigger' && message.origin.name === 'goal_completion';
+function isModelBlockedGoalLifecycle(change: GoalReplayLifecycleChange): boolean {
+  return change.status === 'blocked' && change.actor === 'model';
+}
+
+function goalOutcomeReminderFromSystemMessage(message: ContextMessage): string | undefined | null {
+  if (message.origin?.kind !== 'system_trigger') return null;
+  if (message.origin.name !== 'goal_completion' && message.origin.name !== 'goal_blocked') {
+    return null;
+  }
+  return undefined;
 }
 
 function isGoalForkClearedSystemReminder(message: ContextMessage): boolean {

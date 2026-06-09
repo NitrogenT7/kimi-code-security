@@ -12,6 +12,7 @@
 
 import { readMediaSummary } from './media';
 import { shellExecutionResultRenderer } from '../shell-execution';
+import { goalSummary } from './goal';
 import {
   editSummary,
   fetchSummary,
@@ -57,6 +58,11 @@ export function pickResultRenderer(toolName: string): ResultRenderer {
       return editSummary;
     case 'Write':
       return writeSummary;
+    case 'CreateGoal':
+    case 'GetGoal':
+    case 'SetGoalBudget':
+    case 'UpdateGoal':
+      return goalSummary;
     default:
       return renderTruncated;
   }

@@ -406,6 +406,144 @@ describe('KimiTUI resume message replay', () => {
     expect(transcript).not.toContain('Paused after agent resume');
   });
 
+  it('renders replayed goal completion records as assistant completion messages', async () => {
+    const driver = await replayIntoDriver([
+      goalReplay(
+        goalSnapshot({
+          status: 'complete',
+          turnsUsed: 1,
+          tokensUsed: 4_300_000,
+          wallClockMs: 435_000,
+        }),
+        {
+          kind: 'completion',
+          status: 'complete',
+          stats: { turnsUsed: 1, tokensUsed: 4_300_000, wallClockMs: 435_000 },
+        },
+      ),
+    ]);
+
+    const entry = driver.state.transcriptEntries.find((item) =>
+      item.content.includes('Goal complete'),
+    );
+    expect(entry).toMatchObject({
+      kind: 'assistant',
+      renderMode: 'markdown',
+      content: '✓ Goal complete.\nWorked 1 turn over 7m15s, using 4.3M tokens.',
+    });
+  });
+
+  it('does not replay model-facing goal completion prompts as transcript messages', async () => {
+    const driver = await replayIntoDriver([
+      message(
+        'user',
+        [
+          {
+            type: 'text',
+            text: '<system-reminder>\nGoal completed successfully.\nWorked 1 turn over 7m15s, using 4.3M tokens.\n\nWrite a concise final message for the user.\n</system-reminder>',
+          },
+        ],
+        { origin: { kind: 'system_trigger', name: 'goal_completion' } },
+      ),
+    ]);
+
+    const content = driver.state.transcriptEntries.map((item) => item.content).join('\n');
+    expect(content).not.toContain('Goal completed successfully');
+    expect(content).not.toContain('Write a concise final message for the user');
+  });
+
+  it('does not replay model-facing goal blocked prompts as transcript messages', async () => {
+    const driver = await replayIntoDriver([
+      message(
+        'user',
+        [
+          {
+            type: 'text',
+            text: '<system-reminder>\nGoal blocked.\nWorked 1 turn over 7m15s, using 4.3M tokens.\n\nWrite a concise final message for the user.\n</system-reminder>',
+          },
+        ],
+        { origin: { kind: 'system_trigger', name: 'goal_blocked' } },
+      ),
+    ]);
+
+    const content = driver.state.transcriptEntries.map((item) => item.content).join('\n');
+    expect(content).not.toContain('Goal blocked.');
+    expect(content).not.toContain('Write a concise final message for the user');
+  });
+
+  it('does not replay the model-blocked lifecycle marker when the follow-up is replayed', async () => {
+    const driver = await replayIntoDriver([
+      goalReplay(
+        goalSnapshot({ status: 'blocked' }),
+        { kind: 'lifecycle', status: 'blocked', actor: 'model' },
+      ),
+      message(
+        'user',
+        [
+          {
+            type: 'text',
+            text: '<system-reminder>\nGoal blocked.\nWorked 1 turn over 7m15s, using 4.3M tokens.\n\nWrite a concise final message for the user.\n</system-reminder>',
+          },
+        ],
+        { origin: { kind: 'system_trigger', name: 'goal_blocked' } },
+      ),
+      message(
+        'assistant',
+        [{ type: 'text', text: 'I am blocked because I need credentials.' }],
+      ),
+    ]);
+
+    expect(driver.state.transcriptEntries.filter((entry) => entry.kind === 'goal')).toEqual([]);
+    const content = driver.state.transcriptEntries.map((item) => item.content).join('\n');
+    expect(content).not.toContain('Goal blocked');
+    expect(content).toContain('I am blocked because I need credentials.');
+  });
+
+  it('does not replay model-blocked lifecycle markers without a follow-up', async () => {
+    const driver = await replayIntoDriver([
+      goalReplay(
+        goalSnapshot({ status: 'blocked' }),
+        { kind: 'lifecycle', status: 'blocked', actor: 'model' },
+      ),
+    ]);
+
+    expect(
+      driver.state.transcriptEntries
+        .filter((entry) => entry.kind === 'goal')
+        .map((entry) => entry.content),
+    ).toEqual([]);
+  });
+
+  it('keeps replayed blocked lifecycle markers when actor is unavailable', async () => {
+    const driver = await replayIntoDriver([
+      goalReplay(
+        goalSnapshot({ status: 'blocked' }),
+        { kind: 'lifecycle', status: 'blocked' },
+      ),
+    ]);
+
+    expect(
+      driver.state.transcriptEntries
+        .filter((entry) => entry.kind === 'goal')
+        .map((entry) => entry.content),
+    ).toEqual(['Goal blocked']);
+  });
+
+  it('keeps replayed runtime-blocked lifecycle markers', async () => {
+    const driver = await replayIntoDriver([
+      goalReplay(
+        goalSnapshot({ status: 'blocked' }),
+        { kind: 'lifecycle', status: 'blocked', actor: 'runtime' },
+      ),
+    ]);
+
+    expect(
+      driver.state.transcriptEntries
+        .filter((entry) => entry.kind === 'goal')
+        .map((entry) => entry.content),
+    ).toEqual(['Goal blocked']);
+  });
+
   it('groups replayed Agent calls from one assistant message using live grouping', async () => {
     const replay: AgentReplayRecord[] = [
       message('user', [{ type: 'text', text: 'run two agents' }]),

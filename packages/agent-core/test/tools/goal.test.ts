@@ -206,7 +206,7 @@ describe('SetGoalBudgetTool', () => {
 });
 
 describe('UpdateGoalTool', () => {
-  // The complete path appends a context reminder, so the agent needs a context
+  // Terminal paths append follow-up reminders, so the agent needs a context
   // exposing appendSystemReminder.
   function agentWithContext(
     store: GoalMode,
@@ -227,6 +227,7 @@ describe('UpdateGoalTool', () => {
     for (const status of ['active', 'complete', 'paused', 'blocked']) {
       expect(UpdateGoalToolInputSchema.safeParse({ status }).success).toBe(true);
     }
+    expect(UpdateGoalToolInputSchema.safeParse({ status: 'blocked', reason: 'x' }).success).toBe(false);
     for (const status of ['impossible', 'cancelled', '']) {
       expect(UpdateGoalToolInputSchema.safeParse({ status }).success).toBe(false);
     }
@@ -243,25 +244,27 @@ describe('UpdateGoalTool', () => {
     expect(result.isError).toBeFalsy();
     expect(result.stopTurn).toBe(true);
     expect(store.getGoal().goal).toBeNull();
-    expect(reminders).toEqual([
-      {
-        content:
-          'The current goal was marked complete and cleared. ' +
-          'Handle the next user request normally unless the user starts or resumes a goal.',
-        origin: { kind: 'system_trigger', name: 'goal_completion' },
-      },
-    ]);
+    expect(reminders).toHaveLength(1);
+    expect(reminders[0]?.origin).toEqual({ kind: 'system_trigger', name: 'goal_completion' });
+    expect(reminders[0]?.content).toContain('Goal completed successfully.');
+    expect(reminders[0]?.content).toContain('Write a concise final message for the user');
   });
 
-  it('`blocked` marks the goal blocked (resumable)', async () => {
+  it('`blocked` marks the goal blocked (resumable) and asks for a blocker reason', async () => {
     const store = makeStore();
+    const reminders: Array<{ readonly content: string; readonly origin: unknown }> = [];
     await store.createGoal({ objective: 'work' });
     const result = await executeTool(
-      new UpdateGoalTool(agentWithContext(store)),
+      new UpdateGoalTool(agentWithContext(store, reminders)),
       ctx({ status: 'blocked' }),
     );
     expect(result.stopTurn).toBe(true);
     expect(store.getGoal().goal?.status).toBe('blocked');
+    expect(store.getGoal().goal?.terminalReason).toBeUndefined();
+    expect(reminders).toHaveLength(1);
+    expect(reminders[0]?.origin).toEqual({ kind: 'system_trigger', name: 'goal_blocked' });
+    expect(reminders[0]?.content).toContain('Goal blocked.');
+    expect(reminders[0]?.content).toContain('concrete blocker');
   });
 
   it('`paused` marks the goal paused', async () => {

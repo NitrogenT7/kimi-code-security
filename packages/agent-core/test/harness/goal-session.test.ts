@@ -2,11 +2,13 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 
-import { APIStatusError, type ProviderConfig } from '@moonshot-ai/kosong';
+import { APIConnectionError, APIStatusError, type ProviderConfig } from '@moonshot-ai/kosong';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ProviderManager } from '../../src/session/provider-manager';
 import type { AgentOptions } from '../../src/agent';
+import type { KimiConfig } from '../../src/config';
+import { ErrorCodes, KimiError } from '../../src/errors';
 import type { HookDef } from '../../src/session/hooks';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
@@ -78,6 +80,7 @@ async function setupSession(
   tools: readonly string[],
   generate?: NonNullable<AgentOptions['generate']>,
   hooks?: readonly HookDef[],
+  config?: KimiConfig,
 ) {
   const scripted = createScriptedGenerate();
   const session = track(
@@ -89,6 +92,7 @@ async function setupSession(
       skills: { explicitDirs: [join(sessionDir, 'missing')] },
       providerManager: testProviderManager(),
       hooks,
+      config,
     }),
   );
   const { agent } = await session.createAgent(
@@ -110,14 +114,18 @@ describe('goal session end-to-end', () => {
     await api.createGoal({ agentId: 'main', objective: 'Ship feature X' });
 
     // Turn 1 stops without deciding -> the driver runs a second turn. In turn 2
-    // the model calls UpdateGoal('complete'), which clears the goal and ends the
-    // drive. No evaluator: the model's own tool call is the decision.
+    // the model calls UpdateGoal('complete'), which clears the goal. The turn
+    // then gives the model one final step to summarize how it finished.
     scripted.mockNextResponse({ type: 'text', text: 'Working on the objective.' });
     scripted.mockNextResponse({
       type: 'function',
       id: 'c1',
       name: 'UpdateGoal',
       arguments: JSON.stringify({ status: 'complete' }),
+    });
+    scripted.mockNextResponse({
+      type: 'text',
+      text: 'I completed the goal by updating the feature and running the tests.',
     });
 
     agent.turn.prompt([{ type: 'text', text: 'Ship feature X' }]);
@@ -139,14 +147,16 @@ describe('goal session end-to-end', () => {
     expect(continuationHistory).toContain('Keep the self-audit brief');
     expect(continuationHistory).toContain('do not run another goal turn');
 
-    // Terminal UpdateGoal ends the turn immediately. A neutral context reminder
-    // is appended after the tool result, so any later request ends with a user
-    // message rather than an assistant prefill.
-    expect(scripted.calls).toHaveLength(2);
+    // Terminal UpdateGoal asks the model for one final user-facing summary.
+    expect(scripted.calls).toHaveLength(3);
+    const summaryHistory = JSON.stringify(scripted.calls[2]?.history ?? []);
+    expect(summaryHistory).toContain('Goal completed successfully.');
+    expect(summaryHistory).toContain('Write a concise final message for the user');
     const lastContextMessage = agent.context.history.at(-1);
-    expect(lastContextMessage?.role).toBe('user');
-    expect(JSON.stringify(lastContextMessage?.content)).toContain('<system-reminder>');
-    expect(JSON.stringify(lastContextMessage?.content)).toContain('marked complete and cleared');
+    expect(lastContextMessage?.role).toBe('assistant');
+    expect(JSON.stringify(lastContextMessage?.content)).toContain(
+      'I completed the goal by updating the feature and running the tests.',
+    );
 
     // Completion is transient: it announces, then clears the durable record, so
     // the goal box disappears and nothing is left on disk.
@@ -217,14 +227,94 @@ describe('goal session end-to-end', () => {
       name: 'UpdateGoal',
       arguments: JSON.stringify({ status: 'complete' }),
     });
+    scripted.mockNextResponse({ type: 'text', text: 'I completed the resumed goal.' });
 
     agent.turn.prompt([{ type: 'text', text: 'Keep working on the goal' }]);
     await agent.turn.waitForCurrentTurn();
 
-    expect(scripted.calls.length).toBeGreaterThanOrEqual(3);
+    expect(scripted.calls.length).toBeGreaterThanOrEqual(4);
     expect(JSON.stringify(scripted.calls[0]?.history ?? [])).toContain('currently paused');
     expect(JSON.stringify(scripted.calls[2]?.history ?? [])).toContain('Continue working toward the active goal');
+    expect(JSON.stringify(scripted.calls[3]?.history ?? [])).toContain('Write a concise final message for the user');
     expect((await api.getGoal({ agentId: 'main' })).goal).toBeNull();
+  });
+
+  it('asks the model to explain why it marked a goal blocked', async () => {
+    const sessionDir = await makeTempDir();
+    const events: Array<Record<string, unknown>> = [];
+    const { session, agent, scripted } = await setupSession(sessionDir, events, ['GetGoal', 'UpdateGoal']);
+    const api = new SessionAPIImpl(session);
+    await api.createGoal({ agentId: 'main', objective: 'work' });
+
+    scripted.mockNextResponse({
+      type: 'function',
+      id: 'blocked',
+      name: 'UpdateGoal',
+      arguments: JSON.stringify({ status: 'blocked' }),
+    });
+    scripted.mockNextResponse({
+      type: 'text',
+      text: 'I blocked the goal because credentials are required before I can continue.',
+    });
+
+    agent.turn.prompt([{ type: 'text', text: 'work' }]);
+    await agent.turn.waitForCurrentTurn();
+
+    expect(scripted.calls).toHaveLength(2);
+    const reasonHistory = JSON.stringify(scripted.calls[1]?.history ?? []);
+    expect(reasonHistory).toContain('Goal blocked.');
+    expect(reasonHistory).toContain('State that the goal is blocked');
+    const lastContextMessage = agent.context.history.at(-1);
+    expect(lastContextMessage?.role).toBe('assistant');
+    expect(JSON.stringify(lastContextMessage?.content)).toContain(
+      'I blocked the goal because credentials are required before I can continue.',
+    );
+    const goal = (await api.getGoal({ agentId: 'main' })).goal;
+    expect(goal?.status).toBe('blocked');
+    expect(goal?.terminalReason).toBeUndefined();
+  });
+
+  it('does not force a goal outcome summary after maxStepsPerTurn is exhausted', async () => {
+    const sessionDir = await makeTempDir();
+    const events: Array<Record<string, unknown>> = [];
+    const { session, agent, scripted } = await setupSession(
+      sessionDir,
+      events,
+      ['GetGoal', 'UpdateGoal'],
+      undefined,
+      undefined,
+      { providers: {}, loopControl: { maxStepsPerTurn: 1 } },
+    );
+    const api = new SessionAPIImpl(session);
+    await api.createGoal({ agentId: 'main', objective: 'work' });
+
+    scripted.mockNextResponse({
+      type: 'function',
+      id: 'complete',
+      name: 'UpdateGoal',
+      arguments: JSON.stringify({ status: 'complete' }),
+    });
+    scripted.mockNextResponse({ type: 'text', text: 'This summary should not run.' });
+
+    agent.turn.prompt([{ type: 'text', text: 'work' }]);
+    await agent.turn.waitForCurrentTurn();
+
+    expect(scripted.calls).toHaveLength(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'turn.ended',
+        reason: 'completed',
+      }),
+    );
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        type: 'turn.ended',
+        reason: 'failed',
+        error: expect.objectContaining({ code: ErrorCodes.LOOP_MAX_STEPS_EXCEEDED }),
+      }),
+    );
+    expect((await api.getGoal({ agentId: 'main' })).goal).toBeNull();
+    expect(JSON.stringify(agent.context.history)).not.toContain('Write a concise final message');
   });
 
   it('pauses the goal on provider rate limits', async () => {
@@ -242,6 +332,74 @@ describe('goal session end-to-end', () => {
     const goal = (await api.getGoal({ agentId: 'main' })).goal;
     expect(goal?.status).toBe('paused');
     expect(goal?.terminalReason).toBe('Paused after provider rate limit');
+  });
+
+  it('pauses the goal on provider connection errors', async () => {
+    const sessionDir = await makeTempDir();
+    const events: Array<Record<string, unknown>> = [];
+    const { session, agent } = await setupSession(sessionDir, events, ['GetGoal'], async () => {
+      throw new APIConnectionError('socket hang up');
+    });
+    const api = new SessionAPIImpl(session);
+    await api.createGoal({ agentId: 'main', objective: 'work' });
+
+    agent.turn.prompt([{ type: 'text', text: 'work' }]);
+    await agent.turn.waitForCurrentTurn();
+
+    const goal = (await api.getGoal({ agentId: 'main' })).goal;
+    expect(goal?.status).toBe('paused');
+    expect(goal?.terminalReason).toBe('Paused after provider connection error: socket hang up');
+  });
+
+  it('pauses the goal on provider authentication errors', async () => {
+    const sessionDir = await makeTempDir();
+    const events: Array<Record<string, unknown>> = [];
+    const { session, agent } = await setupSession(sessionDir, events, ['GetGoal'], async () => {
+      throw new APIStatusError(401, 'Unauthorized', 'req-401');
+    });
+    const api = new SessionAPIImpl(session);
+    await api.createGoal({ agentId: 'main', objective: 'work' });
+
+    agent.turn.prompt([{ type: 'text', text: 'work' }]);
+    await agent.turn.waitForCurrentTurn();
+
+    const goal = (await api.getGoal({ agentId: 'main' })).goal;
+    expect(goal?.status).toBe('paused');
+    expect(goal?.terminalReason).toBe('Paused after provider authentication error: Unauthorized');
+  });
+
+  it('pauses the goal on model configuration errors', async () => {
+    const sessionDir = await makeTempDir();
+    const events: Array<Record<string, unknown>> = [];
+    const { session, agent } = await setupSession(sessionDir, events, ['GetGoal'], async () => {
+      throw new KimiError(ErrorCodes.MODEL_NOT_CONFIGURED, 'Model not set');
+    });
+    const api = new SessionAPIImpl(session);
+    await api.createGoal({ agentId: 'main', objective: 'work' });
+
+    agent.turn.prompt([{ type: 'text', text: 'work' }]);
+    await agent.turn.waitForCurrentTurn();
+
+    const goal = (await api.getGoal({ agentId: 'main' })).goal;
+    expect(goal?.status).toBe('paused');
+    expect(goal?.terminalReason).toBe('Paused after model configuration error: LLM not set, send "/login" to login');
+  });
+
+  it('pauses the goal on runtime errors', async () => {
+    const sessionDir = await makeTempDir();
+    const events: Array<Record<string, unknown>> = [];
+    const { session, agent } = await setupSession(sessionDir, events, ['GetGoal'], async () => {
+      throw new Error('unexpected failure');
+    });
+    const api = new SessionAPIImpl(session);
+    await api.createGoal({ agentId: 'main', objective: 'work' });
+
+    agent.turn.prompt([{ type: 'text', text: 'work' }]);
+    await agent.turn.waitForCurrentTurn();
+
+    const goal = (await api.getGoal({ agentId: 'main' })).goal;
+    expect(goal?.status).toBe('paused');
+    expect(goal?.terminalReason).toBe('Paused after runtime error: unexpected failure');
   });
 
   it('blocks the goal when the initial prompt hook blocks the objective', async () => {
