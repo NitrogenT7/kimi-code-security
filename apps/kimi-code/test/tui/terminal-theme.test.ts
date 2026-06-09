@@ -173,5 +173,3 @@ describe('ColorPalette warning token', () => {
     expect(getBuiltInPalette('light')).toBe(lightColors);
   });
 });
-
-
