@@ -447,6 +447,73 @@ describe('AnthropicChatProvider', () => {
       });
     });
 
+    it('user audio/video parts degrade to placeholder text, consecutive same-kind collapse', async () => {
+      // The Messages API cannot carry audio or video. Dropping the parts
+      // silently would leave the model unaware an attachment ever existed,
+      // so each unsupported part degrades to a placeholder text block.
+      const provider = createProvider();
+      const history: Message[] = [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Listen and watch:' },
+            { type: 'audio_url', audioUrl: { url: 'https://example.com/a.mp3' } },
+            { type: 'audio_url', audioUrl: { url: 'https://example.com/b.mp3' } },
+            { type: 'video_url', videoUrl: { url: 'https://example.com/c.mp4' } },
+          ] satisfies ContentPart[],
+          toolCalls: [],
+        },
+      ];
+      const body = await captureRequestBody(provider, '', [], history);
+      const messages = body['messages'] as Record<string, unknown>[];
+
+      expect(messages[0]?.['content']).toEqual([
+        { type: 'text', text: 'Listen and watch:' },
+        { type: 'text', text: '(audio omitted: not supported by this provider)' },
+        {
+          type: 'text',
+          text: '(video omitted: not supported by this provider)',
+          cache_control: { type: 'ephemeral' },
+        },
+      ]);
+    });
+
+    it('tool result audio degrades to placeholder text inside tool_result', async () => {
+      const provider = createProvider();
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Say hi' }], toolCalls: [] },
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [{ type: 'function', id: 'call_tts', name: 'tts', arguments: '{}' }],
+        },
+        {
+          role: 'tool',
+          content: [
+            { type: 'audio_url', audioUrl: { url: 'https://example.com/hi.mp3' } },
+          ] satisfies ContentPart[],
+          toolCallId: 'call_tts',
+          toolCalls: [],
+        },
+      ];
+      const body = await captureRequestBody(provider, '', [], history);
+      const messages = body['messages'] as Record<string, unknown>[];
+
+      expect(messages[2]).toEqual({
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'call_tts',
+            content: [
+              { type: 'text', text: '(audio omitted: not supported by this provider)' },
+            ],
+            cache_control: { type: 'ephemeral' },
+          },
+        ],
+      });
+    });
+
     it('parallel tool calls and tool results (request body capture)', async () => {
       const provider = createProvider();
       const tcAdd: ToolCall = {

@@ -412,6 +412,15 @@ interface AnthropicImageBlock {
   cache_control?: { type: 'ephemeral' };
 }
 
+// The Messages API has no representation for audio or video input. Instead of
+// silently dropping such parts (the model would not even know an attachment
+// existed), emit a placeholder text block so it can acknowledge the gap.
+// Consecutive parts of the same kind collapse into a single placeholder.
+const OMITTED_MEDIA_PLACEHOLDER = {
+  audio_url: '(audio omitted: not supported by this provider)',
+  video_url: '(video omitted: not supported by this provider)',
+} as const;
+
 const SUPPORTED_B64_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
 function imageUrlPartToAnthropic(url: string): AnthropicImageBlock {
@@ -458,8 +467,13 @@ function toolResultToBlock(toolCallId: string, content: ContentPart[]): ToolResu
       }
     } else if (part.type === 'image_url') {
       blocks.push(imageUrlPartToAnthropic(part.imageUrl.url));
+    } else if (part.type === 'audio_url' || part.type === 'video_url') {
+      const placeholder = OMITTED_MEDIA_PLACEHOLDER[part.type];
+      const last = blocks.at(-1);
+      if (!(last?.type === 'text' && last.text === placeholder)) {
+        blocks.push({ type: 'text', text: placeholder });
+      }
     }
-    // Other types not supported by Anthropic in tool results
   }
   return {
     type: 'tool_result',
@@ -522,8 +536,13 @@ function convertMessage(message: Message, model: string): MessageParam {
       } else if (part.think !== '' && shouldPreserveUnsignedThinking(model)) {
         blocks.push({ type: 'thinking', thinking: part.think } as unknown as ThinkingBlockParam);
       }
+    } else if (part.type === 'audio_url' || part.type === 'video_url') {
+      const placeholder = OMITTED_MEDIA_PLACEHOLDER[part.type];
+      const last = blocks.at(-1);
+      if (!(last?.type === 'text' && last.text === placeholder)) {
+        blocks.push({ type: 'text', text: placeholder } satisfies TextBlockParam);
+      }
     }
-    // audio_url, video_url: not supported by Anthropic, skip
   }
 
   // Tool calls -> ToolUseBlockParam

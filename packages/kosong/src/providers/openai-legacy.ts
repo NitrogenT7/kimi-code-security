@@ -21,6 +21,8 @@ import {
   isFunctionToolCall,
   normalizeOpenAIFinishReason,
   type OpenAIContentPart,
+  TOOL_RESULT_MEDIA_PLACEHOLDER,
+  TOOL_RESULT_MEDIA_PROMPT,
   type ToolMessageConversion,
   reasoningEffortToThinkingEffort,
   thinkingEffortToReasoningEffort,
@@ -50,8 +52,6 @@ const OPENAI_CHAT_TOOL_CALL_ID_POLICY: ToolCallIdPolicy = {
   normalize: (id) => sanitizeToolCallId(id, 64),
   maxLength: 64,
 };
-const TOOL_RESULT_IMAGE_PROMPT = 'Attached image(s) from tool result:';
-const TOOL_RESULT_IMAGE_PLACEHOLDER = '(see attached image)';
 
 function extractReasoningContent(
   source: unknown,
@@ -220,46 +220,55 @@ function convertMessage(
   return result;
 }
 
+// Chat Completions has no url-based audio/video content part (only base64
+// `input_audio`), so unlike images these cannot be reattached as user input.
+// Note the omission inline in the tool message text instead.
+const OMITTED_AUDIO_PLACEHOLDER = '(audio omitted: not supported by this provider)';
+const OMITTED_VIDEO_PLACEHOLDER = '(video omitted: not supported by this provider)';
+
 function convertToolMessageContentForChat(
   message: Message,
   conversion: ToolMessageConversion,
 ): string | OpenAIContentPart[] {
   const content = convertToolMessageContent(message, conversion);
-  if (
-    typeof content === 'string' &&
-    content.length === 0 &&
-    message.content.some((part) => part.type === 'image_url')
-  ) {
-    return TOOL_RESULT_IMAGE_PLACEHOLDER;
+  if (typeof content !== 'string') {
+    return content;
   }
-  return content;
+  const lines: string[] = content.length > 0 ? [content] : [];
+  if (message.content.some((part) => part.type === 'audio_url')) {
+    lines.push(OMITTED_AUDIO_PLACEHOLDER);
+  }
+  if (message.content.some((part) => part.type === 'video_url')) {
+    lines.push(OMITTED_VIDEO_PLACEHOLDER);
+  }
+  if (lines.length === 0 && message.content.some((part) => part.type === 'image_url')) {
+    return TOOL_RESULT_MEDIA_PLACEHOLDER;
+  }
+  return lines.join('\n');
 }
 
 function toolResultImageParts(message: Message): OpenAIContentPart[] {
   const images: OpenAIContentPart[] = [];
   for (const part of message.content) {
     if (part.type !== 'image_url') continue;
-    images.push({
-      type: 'image_url',
-      image_url:
-        part.imageUrl.id === undefined
-          ? { url: part.imageUrl.url }
-          : { url: part.imageUrl.url, id: part.imageUrl.id },
-    });
+    const converted = convertContentPart(part);
+    if (converted !== null) {
+      images.push(converted);
+    }
   }
   return images;
 }
 
-function appendToolResultImagesMessage(
+function appendToolResultMediaMessage(
   messages: OpenAIMessage[],
-  pendingToolResultImages: OpenAIContentPart[],
+  pendingToolResultMedia: OpenAIContentPart[],
 ): void {
-  if (pendingToolResultImages.length === 0) return;
+  if (pendingToolResultMedia.length === 0) return;
   messages.push({
     role: 'user',
-    content: [{ type: 'text', text: TOOL_RESULT_IMAGE_PROMPT }, ...pendingToolResultImages],
+    content: [{ type: 'text', text: TOOL_RESULT_MEDIA_PROMPT }, ...pendingToolResultMedia],
   });
-  pendingToolResultImages.length = 0;
+  pendingToolResultMedia.length = 0;
 }
 
 function convertHistoryMessages(
@@ -268,19 +277,19 @@ function convertHistoryMessages(
   toolMessageConversion: ToolMessageConversion,
 ): OpenAIMessage[] {
   const messages: OpenAIMessage[] = [];
-  const pendingToolResultImages: OpenAIContentPart[] = [];
+  const pendingToolResultMedia: OpenAIContentPart[] = [];
 
   for (const msg of history) {
     if (msg.role !== 'tool') {
-      appendToolResultImagesMessage(messages, pendingToolResultImages);
+      appendToolResultMediaMessage(messages, pendingToolResultMedia);
     }
     messages.push(convertMessage(msg, reasoningKey, toolMessageConversion));
     if (msg.role === 'tool') {
-      pendingToolResultImages.push(...toolResultImageParts(msg));
+      pendingToolResultMedia.push(...toolResultImageParts(msg));
     }
   }
 
-  appendToolResultImagesMessage(messages, pendingToolResultImages);
+  appendToolResultMediaMessage(messages, pendingToolResultMedia);
   return messages;
 }
 export class OpenAILegacyStreamedMessage implements StreamedMessage {

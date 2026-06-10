@@ -332,10 +332,75 @@ describe('OpenAILegacyChatProvider', () => {
       expect(messages[3]).toEqual({
         role: 'user',
         content: [
-          { type: 'text', text: 'Attached image(s) from tool result:' },
+          { type: 'text', text: 'Attached media from tool result:' },
           { type: 'image_url', image_url: { url: 'https://example.com/image.png' } },
         ],
       });
+    });
+
+    it('tool call with audio result notes the omission inline without reattaching', async () => {
+      // Chat Completions has no url-based audio/video content part (only
+      // base64 input_audio), so unlike images these cannot be reattached as
+      // a user message — a standard OpenAI endpoint would reject the request
+      // with a 400. The tool message notes the omission inline instead.
+      const provider = createProvider();
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Say hi' }], toolCalls: [] },
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [{ type: 'function', id: 'call_tts', name: 'tts', arguments: '{}' }],
+        },
+        {
+          role: 'tool',
+          content: [
+            { type: 'audio_url', audioUrl: { url: 'https://example.com/hi.mp3' } },
+          ] satisfies ContentPart[],
+          toolCallId: 'call_tts',
+          toolCalls: [],
+        },
+      ];
+      const body = await captureRequestBody(provider, '', [], history);
+
+      const messages = body['messages'] as Record<string, unknown>[];
+      expect(messages[2]).toEqual({
+        role: 'tool',
+        content: '(audio omitted: not supported by this provider)',
+        tool_call_id: 'call_tts',
+      });
+      // No follow-up user message: audio_url is not a standard Chat
+      // Completions content part and must not reach the wire.
+      expect(messages).toHaveLength(3);
+    });
+
+    it('tool call with text and video result appends the omission note to the text', async () => {
+      const provider = createProvider();
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Record it' }], toolCalls: [] },
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [{ type: 'function', id: 'call_rec', name: 'record', arguments: '{}' }],
+        },
+        {
+          role: 'tool',
+          content: [
+            { type: 'text', text: 'recorded 5s clip' },
+            { type: 'video_url', videoUrl: { url: 'https://example.com/rec.mp4' } },
+          ] satisfies ContentPart[],
+          toolCallId: 'call_rec',
+          toolCalls: [],
+        },
+      ];
+      const body = await captureRequestBody(provider, '', [], history);
+
+      const messages = body['messages'] as Record<string, unknown>[];
+      expect(messages[2]).toEqual({
+        role: 'tool',
+        content: 'recorded 5s clip\n(video omitted: not supported by this provider)',
+        tool_call_id: 'call_rec',
+      });
+      expect(messages).toHaveLength(3);
     });
 
     it('groups consecutive tool result images after all matching tool messages', async () => {
@@ -388,12 +453,12 @@ describe('OpenAILegacyChatProvider', () => {
             },
           ],
         },
-        { role: 'tool', content: '(see attached image)', tool_call_id: 'call_first' },
+        { role: 'tool', content: '(see attached media)', tool_call_id: 'call_first' },
         { role: 'tool', content: 'second', tool_call_id: 'call_second' },
         {
           role: 'user',
           content: [
-            { type: 'text', text: 'Attached image(s) from tool result:' },
+            { type: 'text', text: 'Attached media from tool result:' },
             { type: 'image_url', image_url: { url: 'https://example.com/first.png' } },
             { type: 'image_url', image_url: { url: 'https://example.com/second.png' } },
           ],
