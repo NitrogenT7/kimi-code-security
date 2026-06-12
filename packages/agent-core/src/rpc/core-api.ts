@@ -241,6 +241,10 @@ export interface LoadMcpGroupPayload {
   readonly name: string;
 }
 
+export interface SetMcpGroupModePayload {
+  readonly groupName: string | null;
+}
+
 export interface InstallPluginPayload {
   readonly source: string;
 }
@@ -359,6 +363,7 @@ export interface SessionAPI extends AgentAPIWithId {
   getMcpStartupMetrics: (payload: EmptyPayload) => McpStartupMetrics;
   reconnectMcpServer: (payload: ReconnectMcpServerPayload) => void;
   loadMcpGroup: (payload: LoadMcpGroupPayload) => void;
+  setMcpGroupMode: (payload: SetMcpGroupModePayload) => void;
   generateAgentsMd: (payload: EmptyPayload) => void;
 }
 

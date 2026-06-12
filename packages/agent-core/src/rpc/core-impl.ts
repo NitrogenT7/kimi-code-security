@@ -72,6 +72,7 @@ import type {
   LoadMcpGroupPayload,
   McpServerInfo,
   McpStartupMetrics,
+  SetMcpGroupModePayload,
   PluginInfo,
   PluginSummary,
   PromptPayload,
@@ -681,6 +682,13 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     ...payload
   }: SessionScopedPayload<LoadMcpGroupPayload>): Promise<void> {
     return this.sessionApi(sessionId).loadMcpGroup(payload);
+  }
+
+  setMcpGroupMode({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<SetMcpGroupModePayload>): Promise<void> {
+    return this.sessionApi(sessionId).setMcpGroupMode(payload);
   }
 
   generateAgentsMd({ sessionId, ...payload }: SessionScopedPayload<EmptyPayload>): Promise<void> {

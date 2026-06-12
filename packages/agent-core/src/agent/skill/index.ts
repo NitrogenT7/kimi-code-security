@@ -24,6 +24,17 @@ export class SkillManager {
       throw new KimiError(ErrorCodes.SKILL_TYPE_UNSUPPORTED, `Skill "${skill.name}" cannot be activated by the user`);
     }
 
+    const allowedPrefixes = this.agent.allowedSkillPrefixes;
+    if (allowedPrefixes !== null && allowedPrefixes.length > 0) {
+      const matches = allowedPrefixes.some((prefix) => skill.name.startsWith(prefix));
+      if (!matches) {
+        throw new KimiError(
+          ErrorCodes.SKILL_NOT_FOUND,
+          `Skill "${skill.name}" is not allowed in the current MCP group mode. Allowed prefixes: ${allowedPrefixes.join(', ')}`,
+        );
+      }
+    }
+
     const skillArgs = input.args ?? '';
     const skillContent = this.registry.renderSkillPrompt(skill, skillArgs);
     const wrapped = [

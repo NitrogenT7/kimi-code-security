@@ -128,6 +128,7 @@ export class Agent {
   readonly swarmMode: SwarmMode;
   readonly usage: UsageRecorder;
   readonly skills: SkillManager | null;
+  allowedSkillPrefixes: string[] | null = null;
   readonly tools: ToolManager;
   readonly background: BackgroundManager;
   readonly cron: CronManager | null;

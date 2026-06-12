@@ -50,6 +50,7 @@ import {
   handleFeedbackCommand,
   handleLoadMcpGroupCommand,
   handleMcpCommand,
+  handleMcpGroupOffCommand,
   showMcpServers,
   showStatusReport,
   showUsage,
@@ -94,6 +95,7 @@ export {
   handleFeedbackCommand,
   handleLoadMcpGroupCommand,
   handleMcpCommand,
+  handleMcpGroupOffCommand,
   showMcpServers,
   showStatusReport,
   showUsage,
@@ -182,8 +184,26 @@ export function dispatchInput(host: SlashCommandHost, text: string): void {
 async function executeSlashCommand(host: SlashCommandHost, input: string): Promise<void> {
   const parsedCommand = parseSlashInput(input);
 
-  // /mcp:<group> one-shot loader
+  // /mcp:<group> one-shot loader and /mcp:off reset
   if (parsedCommand !== null) {
+    if (parsedCommand.name === 'mcp:off') {
+      const busyReason = slashCommandBusyReason({
+        isStreaming: host.state.appState.streamingPhase !== 'idle',
+        isCompacting: host.state.appState.isCompacting,
+      });
+      if (busyReason !== undefined) {
+        host.showError(slashBusyMessage(parsedCommand.name, busyReason));
+        return;
+      }
+      host.track('input_command', { command: 'mcp:off' });
+      try {
+        await handleMcpGroupOffCommand(host);
+      } catch (error) {
+        host.showError(formatErrorMessage(error));
+      }
+      return;
+    }
+
     const mcpGroupMatch = parsedCommand.name.match(/^mcp:(.+)$/);
     if (mcpGroupMatch !== null) {
       const groupName = mcpGroupMatch[1]!.trim();

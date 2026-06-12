@@ -49,6 +49,7 @@ export function mcpArgumentCompletions(argumentPrefix: string): AutocompleteItem
     { value: 'audit', description: 'Load code audit MCP group' },
     { value: 'binary', description: 'Load binary reverse-engineering MCP group' },
     { value: 'full', description: 'Load all MCP servers' },
+    { value: 'off', description: 'Clear MCP group mode and skill restrictions' },
   ];
   return completeLeadingArg(MCP_GROUP_COMPLETIONS, argumentPrefix);
 }

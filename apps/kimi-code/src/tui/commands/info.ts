@@ -163,6 +163,7 @@ export async function handleLoadMcpGroupCommand(host: SlashCommandHost, groupNam
   const spinner = host.showProgressSpinner(`Loading MCP group: ${groupName}`);
   try {
     await session.loadMcpGroup(groupName);
+    await session.setMcpGroupMode(groupName);
     spinner.stop({ ok: true, label: `MCP group "${groupName}" loaded` });
     await showMcpServers(host);
   } catch (error) {
@@ -171,10 +172,27 @@ export async function handleLoadMcpGroupCommand(host: SlashCommandHost, groupNam
   }
 }
 
+export async function handleMcpGroupOffCommand(host: SlashCommandHost): Promise<void> {
+  const session = host.requireSession();
+  const spinner = host.showProgressSpinner('Clearing MCP group mode');
+  try {
+    await session.setMcpGroupMode(null);
+    spinner.stop({ ok: true, label: 'MCP group mode cleared' });
+    await showMcpServers(host);
+  } catch (error) {
+    spinner.stop({ ok: false, label: 'Failed to clear MCP group mode' });
+    host.showError(`Failed to clear MCP group mode: ${formatErrorMessage(error)}`);
+  }
+}
+
 export async function handleMcpCommand(host: SlashCommandHost, args: string): Promise<void> {
   const groupName = args.trim();
   if (groupName.length === 0) {
     await showMcpServers(host);
+    return;
+  }
+  if (groupName.toLowerCase() === 'off') {
+    await handleMcpGroupOffCommand(host);
     return;
   }
   await handleLoadMcpGroupCommand(host, groupName);

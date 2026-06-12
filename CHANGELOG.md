@@ -13,6 +13,7 @@ All notable changes to this security-research fork of Kimi Code are documented i
 - **`/changelog` slash command**: displays the local `CHANGELOG.md` preview or opens the upstream changelog URL when a local file is unavailable.
 - **Global install helper scripts**: added `scripts/install-to-global.ps1` and `scripts/install-to-global.sh` to build the fork and copy `apps/kimi-code/dist` over the npm-global `@moonshot-ai/kimi-code` package, with automatic backup/restore and cross-platform prefix detection.
 - **One-shot MCP group loader**: `/mcp:<group>` and `/mcp <group>` now load a lazy MCP group directly in the current session (e.g. `/mcp:web`), with argument completion for the default security-research groups.
+- **MCP group skill sandbox**: loading a group via `/mcp:<group>` also restricts skill activation to the group's `skillPrefixes`. Use `/mcp:off` or `/mcp off` to clear the restriction.
 
 ### Changed
 - `McpServerStatus`/`McpServerInfo` now include a `registered` state for lazy-loaded servers.
