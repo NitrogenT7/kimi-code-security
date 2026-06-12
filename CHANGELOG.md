@@ -11,6 +11,7 @@ All notable changes to this security-research fork of Kimi Code are documented i
 - **`MCPManager` runtime tool**: agents can list MCP groups, load a group, and inspect server statuses at runtime.
 - **Security subagent roles**: added `security-analyst`, `android-reverser`, `web-pentester`, `binary-reverser`, and `code-auditor` subagent profiles, bound to the corresponding MCP groups.
 - **`/changelog` slash command**: displays the local `CHANGELOG.md` preview or opens the upstream changelog URL when a local file is unavailable.
+- **Global install helper scripts**: added `scripts/install-to-global.ps1` and `scripts/install-to-global.sh` to build the fork and copy `apps/kimi-code/dist` over the npm-global `@moonshot-ai/kimi-code` package, with automatic backup/restore and cross-platform prefix detection.
 
 ### Changed
 - `McpServerStatus`/`McpServerInfo` now include a `registered` state for lazy-loaded servers.
