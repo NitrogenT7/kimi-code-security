@@ -41,6 +41,18 @@ export function swarmArgumentCompletions(argumentPrefix: string): AutocompleteIt
   return completeLeadingArg(SWARM_ARG_COMPLETIONS, argumentPrefix);
 }
 
+/** Argument autocompletion for the `/mcp` command (group names). */
+export function mcpArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  const MCP_GROUP_COMPLETIONS: readonly ArgCompletionSpec[] = [
+    { value: 'web', description: 'Load web penetration MCP group' },
+    { value: 'android', description: 'Load Android reverse-engineering MCP group' },
+    { value: 'audit', description: 'Load code audit MCP group' },
+    { value: 'binary', description: 'Load binary reverse-engineering MCP group' },
+    { value: 'full', description: 'Load all MCP servers' },
+  ];
+  return completeLeadingArg(MCP_GROUP_COMPLETIONS, argumentPrefix);
+}
+
 export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'yolo',
@@ -135,9 +147,10 @@ export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'mcp',
     aliases: [],
-    description: 'Show MCP server status',
+    description: 'Show MCP server status or load a group (/mcp <group> or /mcp:<group>)',
     priority: 60,
     availability: 'always',
+    completeArgs: mcpArgumentCompletions,
   },
   {
     name: 'plugins',

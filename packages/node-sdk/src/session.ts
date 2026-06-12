@@ -348,6 +348,11 @@ export class Session {
     await this.rpc.reconnectMcpServer({ sessionId: this.id, name });
   }
 
+  async loadMcpGroup(name: string): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.loadMcpGroup({ sessionId: this.id, name });
+  }
+
   async listPlugins(): Promise<readonly PluginSummary[]> {
     this.ensureOpen();
     return this.rpc.listPlugins();

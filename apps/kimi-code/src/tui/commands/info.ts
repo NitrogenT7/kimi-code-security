@@ -158,6 +158,28 @@ export async function showStatusReport(host: SlashCommandHost): Promise<void> {
   host.state.ui.requestRender();
 }
 
+export async function handleLoadMcpGroupCommand(host: SlashCommandHost, groupName: string): Promise<void> {
+  const session = host.requireSession();
+  const spinner = host.showProgressSpinner(`Loading MCP group: ${groupName}`);
+  try {
+    await session.loadMcpGroup(groupName);
+    spinner.stop({ ok: true, label: `MCP group "${groupName}" loaded` });
+    await showMcpServers(host);
+  } catch (error) {
+    spinner.stop({ ok: false, label: `Failed to load "${groupName}"` });
+    host.showError(`Failed to load MCP group "${groupName}": ${formatErrorMessage(error)}`);
+  }
+}
+
+export async function handleMcpCommand(host: SlashCommandHost, args: string): Promise<void> {
+  const groupName = args.trim();
+  if (groupName.length === 0) {
+    await showMcpServers(host);
+    return;
+  }
+  await handleLoadMcpGroupCommand(host, groupName);
+}
+
 export async function showMcpServers(host: SlashCommandHost): Promise<void> {
   let servers: readonly McpServerInfo[];
   try {

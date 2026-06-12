@@ -529,6 +529,11 @@ export abstract class SDKRpcClientBase {
     return rpc.reconnectMcpServer({ sessionId: input.sessionId, name: input.name });
   }
 
+  async loadMcpGroup(input: SessionIdRpcInput & { name: string }): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.loadMcpGroup({ sessionId: input.sessionId, name: input.name });
+  }
+
   async listPlugins(): Promise<readonly PluginSummary[]> {
     const rpc = await this.getRpc();
     return rpc.listPlugins({});

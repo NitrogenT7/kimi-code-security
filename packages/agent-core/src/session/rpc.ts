@@ -10,6 +10,7 @@ import type {
   EnterSwarmPayload,
   GetBackgroundOutputPayload,
   GetBackgroundPayload,
+  LoadMcpGroupPayload,
   McpServerInfo,
   McpStartupMetrics,
   PromptPayload,
@@ -84,6 +85,14 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   async reconnectMcpServer(payload: ReconnectMcpServerPayload): Promise<void> {
     await this.session.mcp.reconnect(payload.name);
+  }
+
+  async loadMcpGroup(payload: LoadMcpGroupPayload): Promise<void> {
+    const registry = this.session.mcpGroupRegistry;
+    if (registry === undefined) {
+      throw new KimiError(ErrorCodes.MCP_SERVER_NOT_FOUND, 'No MCP groups are configured.');
+    }
+    await this.session.mcp.loadGroup(payload.name, registry);
   }
 
   generateAgentsMd(_payload: EmptyPayload): Promise<void> {

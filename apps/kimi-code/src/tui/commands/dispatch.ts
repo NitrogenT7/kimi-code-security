@@ -12,6 +12,7 @@ import { parseSlashInput } from './parse';
 import {
   resolveSlashCommandInput,
   slashBusyMessage,
+  slashCommandBusyReason,
 } from './resolve';
 import type { BuiltinSlashCommandName } from './registry';
 import type { AuthFlowController } from '../controllers/auth-flow';
@@ -44,7 +45,15 @@ import {
 } from './config';
 import { handleGoalCommand } from './goal';
 import { handleProviderCommand } from './provider';
-import { handleChangelogCommand, handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } from './info';
+import {
+  handleChangelogCommand,
+  handleFeedbackCommand,
+  handleLoadMcpGroupCommand,
+  handleMcpCommand,
+  showMcpServers,
+  showStatusReport,
+  showUsage,
+} from './info';
 import { handlePluginsCommand } from './plugins';
 import { handleReloadCommand, handleReloadTuiCommand } from './reload';
 import { handleSwarmCommand } from './swarm';
@@ -83,6 +92,8 @@ export { handleSwarmCommand } from './swarm';
 export {
   handleChangelogCommand,
   handleFeedbackCommand,
+  handleLoadMcpGroupCommand,
+  handleMcpCommand,
   showMcpServers,
   showStatusReport,
   showUsage,
@@ -170,6 +181,34 @@ export function dispatchInput(host: SlashCommandHost, text: string): void {
 
 async function executeSlashCommand(host: SlashCommandHost, input: string): Promise<void> {
   const parsedCommand = parseSlashInput(input);
+
+  // /mcp:<group> one-shot loader
+  if (parsedCommand !== null) {
+    const mcpGroupMatch = parsedCommand.name.match(/^mcp:(.+)$/);
+    if (mcpGroupMatch !== null) {
+      const groupName = mcpGroupMatch[1]!.trim();
+      if (groupName.length === 0) {
+        host.showError('Usage: /mcp:<group>');
+        return;
+      }
+      const busyReason = slashCommandBusyReason({
+        isStreaming: host.state.appState.streamingPhase !== 'idle',
+        isCompacting: host.state.appState.isCompacting,
+      });
+      if (busyReason !== undefined) {
+        host.showError(slashBusyMessage(parsedCommand.name, busyReason));
+        return;
+      }
+      host.track('input_command', { command: 'mcp:group', group: groupName });
+      try {
+        await handleLoadMcpGroupCommand(host, groupName);
+      } catch (error) {
+        host.showError(formatErrorMessage(error));
+      }
+      return;
+    }
+  }
+
   const intent = resolveSlashCommandInput({
     input,
     skillCommandMap: host.skillCommandMap,
@@ -256,7 +295,7 @@ async function handleBuiltInSlashCommand(
       void host.tasksBrowserController.show();
       return;
     case 'mcp':
-      void showMcpServers(host);
+      void handleMcpCommand(host, args);
       return;
     case 'plugins':
       void handlePluginsCommand(host, args);
