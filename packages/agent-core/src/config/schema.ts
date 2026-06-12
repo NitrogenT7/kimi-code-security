@@ -158,7 +158,7 @@ export const McpServerStdioConfigSchema = z.object({
 export type McpServerStdioConfig = z.infer<typeof McpServerStdioConfigSchema>;
 
 export const McpServerHttpConfigSchema = z.object({
-  transport: z.literal('http'),
+  transport: z.enum(['http', 'streamable-http', 'sse']),
   url: z.string().url(),
   headers: StringRecordSchema.optional(),
   // Indirect secret reference: the bearer token is looked up from
@@ -177,7 +177,14 @@ const McpServerConfigDiscriminatedSchema = z.discriminatedUnion('transport', [
 export const McpServerConfigSchema = z.preprocess((raw) => {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
   const obj = raw as Record<string, unknown>;
-  if ('transport' in obj) return obj;
+  if ('transport' in obj) {
+    // Normalize legacy/alias transports so old mcp.json files keep working.
+    const transport = obj['transport'];
+    if (transport === 'streamable-http') {
+      return { ...obj, transport: 'http' };
+    }
+    return obj;
+  }
   if (typeof obj['command'] === 'string') return { ...obj, transport: 'stdio' };
   if (typeof obj['url'] === 'string') return { ...obj, transport: 'http' };
   return obj;

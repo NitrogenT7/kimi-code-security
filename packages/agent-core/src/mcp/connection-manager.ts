@@ -15,7 +15,7 @@ export type McpServerStatus = 'pending' | 'connected' | 'failed' | 'disabled' | 
 
 export interface McpServerEntry {
   readonly name: string;
-  readonly transport: 'stdio' | 'http';
+  readonly transport: 'stdio' | 'http' | 'sse' | 'streamable-http';
   readonly status: McpServerStatus;
   readonly toolCount: number;
   readonly error?: string;

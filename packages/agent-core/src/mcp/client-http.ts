@@ -2,6 +2,7 @@ import { ErrorCodes, KimiError } from '#/errors';
 import type { McpServerHttpConfig } from '#/config/schema';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import {
@@ -44,7 +45,7 @@ export interface HttpMcpClientOptions {
  */
 export class HttpMcpClient implements MCPClient {
   private readonly client: Client;
-  private readonly transport: StreamableHTTPClientTransport;
+  private readonly transport: StreamableHTTPClientTransport | SSEClientTransport;
   private readonly toolCallTimeoutMs?: number;
   private started = false;
   private closed = false;
@@ -67,11 +68,19 @@ export class HttpMcpClient implements MCPClient {
     const envLookup = options.envLookup ?? ((name) => process.env[name]);
     const headers = buildMcpHttpHeaders(config, envLookup);
 
-    this.transport = new StreamableHTTPClientTransport(new URL(config.url), {
-      requestInit: headers !== undefined ? { headers } : undefined,
-      fetch: options.fetch,
-      authProvider: options.oauthProvider,
-    });
+    if (config.transport === 'sse') {
+      this.transport = new SSEClientTransport(new URL(config.url), {
+        requestInit: headers !== undefined ? { headers } : undefined,
+        fetch: options.fetch,
+        authProvider: options.oauthProvider,
+      });
+    } else {
+      this.transport = new StreamableHTTPClientTransport(new URL(config.url), {
+        requestInit: headers !== undefined ? { headers } : undefined,
+        fetch: options.fetch,
+        authProvider: options.oauthProvider,
+      });
+    }
     this.client = new Client({
       name: options.clientName ?? KIMI_MCP_CLIENT_NAME,
       version: options.clientVersion ?? KIMI_MCP_CLIENT_VERSION,
