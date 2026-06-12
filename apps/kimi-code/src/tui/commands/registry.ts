@@ -290,6 +290,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 20,
     availability: 'always',
   },
+  {
+    name: 'changelog',
+    aliases: [],
+    description: 'Show recent changelog entries',
+    priority: 20,
+    availability: 'always',
+  },
 ] as const satisfies readonly KimiSlashCommand[];
 
 export type BuiltinSlashCommand = (typeof BUILTIN_SLASH_COMMANDS)[number];

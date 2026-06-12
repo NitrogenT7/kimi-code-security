@@ -41,3 +41,13 @@ subagents:
     description: Fast codebase exploration with prompt-enforced read-only behavior.
   plan:
     description: Read-only implementation planning and architecture design.
+  security-analyst:
+    description: General security-research coordinator; can load any MCP group on demand.
+  android-reverser:
+    description: Mobile security role bound to the android MCP group (APK, Jadx, Frida, ADB).
+  web-pentester:
+    description: Web vulnerability role bound to the web MCP group (Playwright, DevTools, JS hooking).
+  binary-reverser:
+    description: Desktop binary reverse-engineering role bound to the binary MCP group (IDA, GDB, Frida).
+  code-auditor:
+    description: Static code-audit role bound to the audit MCP group (Semgrep and scanners).

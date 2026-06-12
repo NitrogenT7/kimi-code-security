@@ -194,7 +194,7 @@ describe('loadMcpServers', () => {
     const home = makeTempDir();
     const cwd = makeTempDir();
     await writeJson(join(home, 'mcp.json'), {
-      mcpServers: { bad: { transport: 'sse', url: 'https://x' } },
+      mcpServers: { bad: { transport: 'ws', url: 'wss://x' } },
     });
     await expect(loadMcpServers({ cwd, homeDir: home })).rejects.toMatchObject({
       code: ErrorCodes.CONFIG_INVALID,

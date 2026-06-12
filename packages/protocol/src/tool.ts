@@ -20,7 +20,7 @@ export const mcpServerStatusSchema = z.enum([
 ]);
 export type McpServerStatus = z.infer<typeof mcpServerStatusSchema>;
 
-export const mcpServerTransportSchema = z.enum(['stdio', 'http', 'sse']);
+export const mcpServerTransportSchema = z.enum(['stdio', 'http', 'sse', 'streamable-http']);
 export type McpServerTransport = z.infer<typeof mcpServerTransportSchema>;
 
 export const mcpServerSchema = z.object({

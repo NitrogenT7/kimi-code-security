@@ -418,6 +418,8 @@ export class ToolManager {
           new b.AgentSwarmTool(this.agent.subagentHost, this.agent.swarmMode),
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
+        (this.agent.mcp !== undefined || this.agent.mcpGroupRegistry !== undefined) &&
+          new b.MCPManagerTool(this.agent),
       ]
         .filter((tool) => !!tool)
         .map((tool) => [tool.name, tool] as const),

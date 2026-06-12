@@ -15,6 +15,7 @@ import { parseBooleanEnv, resolveConfigValue, type BackgroundConfig } from '../c
 import { makeErrorPayload } from '../errors';
 import {
   McpConnectionManager,
+  McpGroupRegistry,
   McpOAuthService,
   type McpServerEntry,
   type SessionMcpConfig,
@@ -141,6 +142,7 @@ export class Session {
   readonly skills: SkillRegistry;
   readonly agents: Map<string, AgentEntry> = new Map();
   readonly mcp: McpConnectionManager;
+  readonly mcpGroupRegistry: McpGroupRegistry | undefined;
   readonly log: Logger;
   private readonly logHandle: SessionLogHandle | undefined;
   readonly hookEngine: HookEngine;
@@ -189,6 +191,7 @@ export class Session {
       oauthService: new McpOAuthService({ kimiHomeDir: options.kimiHomeDir }),
       log: this.log,
     });
+    this.mcpGroupRegistry = options.mcpConfig?.groupRegistry;
     this.mcp.onStatusChange((entry) => {
       this.onMcpServerStatusChange(entry);
     });
@@ -492,6 +495,24 @@ export class Session {
   private async loadMcpServers(): Promise<void> {
     const servers = this.options.mcpConfig?.servers;
     if (servers === undefined || Object.keys(servers).length === 0) return;
+
+    const hasGroups =
+      this.options.mcpConfig?.groups !== undefined &&
+      Object.keys(this.options.mcpConfig.groups).length > 0;
+
+    if (hasGroups) {
+      this.mcp.registerLazyServers(servers);
+      const entries = this.mcp.list();
+      const registeredCount = entries.filter((entry) => entry.status === 'registered').length;
+      const disabledCount = entries.filter((entry) => entry.status === 'disabled').length;
+      this.telemetry.track('mcp_registered', {
+        registered_count: registeredCount,
+        disabled_count: disabledCount,
+        total_count: entries.length,
+      });
+      return;
+    }
+
     await this.mcp.connectAll(servers);
     const entries = this.mcp.list().filter((entry) => entry.status !== 'disabled');
     const totalCount = entries.length;
@@ -569,6 +590,7 @@ export class Session {
       hookEngine: config.hookEngine ?? this.hookEngine,
       subagentHost: config.subagentHost ?? new SessionSubagentHost(this, id),
       mcp: this.mcp,
+      mcpGroupRegistry: this.mcpGroupRegistry,
       permission: this.permissionOptions(parentAgentId, config.permission),
       telemetry: this.telemetry,
       log: this.log.createChild({ agentId: id }),

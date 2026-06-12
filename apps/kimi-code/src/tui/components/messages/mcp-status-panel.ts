@@ -10,13 +10,15 @@ const STATUS_PRIORITY: Record<McpServerInfo['status'], number> = {
   failed: 0,
   'needs-auth': 1,
   pending: 2,
-  connected: 3,
-  disabled: 4,
+  registered: 3,
+  connected: 4,
+  disabled: 5,
 };
 
 const STATUS_LABEL: Record<McpServerInfo['status'], string> = {
   connected: 'connected',
   pending: 'pending',
+  registered: 'registered',
   'needs-auth': 'needs auth',
   failed: 'failed',
   disabled: 'disabled',
@@ -24,6 +26,7 @@ const STATUS_LABEL: Record<McpServerInfo['status'], string> = {
 
 const SUMMARY_ORDER: readonly McpServerInfo['status'][] = [
   'connected',
+  'registered',
   'pending',
   'needs-auth',
   'failed',
@@ -42,6 +45,7 @@ function statusPainter(
     case 'pending':
       return (text) => currentTheme.fg('warning', text);
     case 'disabled':
+    case 'registered':
       return (text) => currentTheme.fg('textDim', text);
   }
 }

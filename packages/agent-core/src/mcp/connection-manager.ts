@@ -10,8 +10,9 @@ import type { UnexpectedCloseReason } from './client-shared';
 import { StdioMcpClient } from './client-stdio';
 import type { McpOAuthService } from './oauth';
 import { assertMcpInputSchema, type MCPClient } from './types';
+import type { McpGroupRegistry } from './group-registry';
 
-export type McpServerStatus = 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
+export type McpServerStatus = 'registered' | 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
 
 export interface McpServerEntry {
   readonly name: string;
@@ -216,6 +217,38 @@ export class McpConnectionManager {
       }
     }
     await Promise.allSettled(tasks);
+  }
+
+  /**
+   * Register servers as "known but not connected". This is the lazy-loading
+   * entry point: the servers are visible in `list()` with status `registered`,
+   * but no transport is started until `loadGroup` or `connect` is called.
+   */
+  registerLazyServers(configs: Record<string, McpServerConfig>): void {
+    for (const [name, config] of Object.entries(configs)) {
+      const existing = this.entries.get(name);
+      if (existing !== undefined) continue;
+      const disabled = config.enabled === false;
+      const entry: InternalEntry = {
+        name,
+        config,
+        attemptId: 0,
+        status: disabled ? 'disabled' : 'registered',
+      };
+      this.entries.set(name, entry);
+      this.emit(entry);
+    }
+  }
+
+  /**
+   * Resolve a group from the registry and connect all of its servers.
+   */
+  async loadGroup(groupName: string, registry: McpGroupRegistry): Promise<void> {
+    const configs = registry.resolveServers(groupName);
+    if (configs === undefined) {
+      throw new KimiError(ErrorCodes.MCP_SERVER_NOT_FOUND, `Unknown MCP group: ${groupName}`);
+    }
+    await this.connectAll(configs);
   }
 
   async reconnect(name: string): Promise<void> {

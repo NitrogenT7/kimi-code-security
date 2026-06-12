@@ -44,7 +44,7 @@ import {
 } from './config';
 import { handleGoalCommand } from './goal';
 import { handleProviderCommand } from './provider';
-import { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } from './info';
+import { handleChangelogCommand, handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } from './info';
 import { handlePluginsCommand } from './plugins';
 import { handleReloadCommand, handleReloadTuiCommand } from './reload';
 import { handleSwarmCommand } from './swarm';
@@ -81,6 +81,7 @@ export {
 } from './config';
 export { handleSwarmCommand } from './swarm';
 export {
+  handleChangelogCommand,
   handleFeedbackCommand,
   showMcpServers,
   showStatusReport,
@@ -240,6 +241,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'version':
       host.showStatus(`Kimi Code v${host.state.appState.version}`);
+      return;
+    case 'changelog':
+      await handleChangelogCommand(host);
       return;
     case 'new':
       await host.createNewSession();
