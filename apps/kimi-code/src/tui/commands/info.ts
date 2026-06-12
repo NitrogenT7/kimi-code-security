@@ -1,4 +1,6 @@
+import { readFile } from 'node:fs/promises';
 import { release as osRelease, type as osType } from 'node:os';
+import { join } from 'pathe';
 
 import type { McpServerInfo, SessionStatus, SessionUsage } from '@moonshot-ai/kimi-code-sdk';
 
@@ -19,6 +21,7 @@ import {
 import { isManagedUsageProvider } from '../constant/kimi-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import { openUrl } from '#/utils/open-url';
+import { CHANGELOG_URL } from '../../cli/update/prompt';
 import { promptFeedbackInput } from './prompts';
 import type { SlashCommandHost } from './dispatch';
 
@@ -63,6 +66,31 @@ export async function handleFeedbackCommand(host: SlashCommandHost): Promise<voi
 
   spinner.stop({ ok: false, label: res.message });
   fallback(FEEDBACK_STATUS_FALLBACK);
+}
+
+const CHANGELOG_PREVIEW_LINES = 40;
+
+export async function handleChangelogCommand(host: SlashCommandHost): Promise<void> {
+  let localChangelog: string | undefined;
+  try {
+    localChangelog = await readFile(join(process.cwd(), 'CHANGELOG.md'), 'utf-8');
+  } catch {
+    localChangelog = undefined;
+  }
+
+  if (localChangelog !== undefined && localChangelog.trim().length > 0) {
+    const lines = localChangelog.split('\n');
+    const preview = lines.slice(0, CHANGELOG_PREVIEW_LINES).join('\n');
+    const truncated = lines.length > CHANGELOG_PREVIEW_LINES;
+    host.showNotice(
+      'Changelog',
+      `${preview}${truncated ? '\n\n... (truncated)' : ''}\n\nFull changelog: ${CHANGELOG_URL}`,
+    );
+    return;
+  }
+
+  host.showNotice('Changelog', CHANGELOG_URL);
+  openUrl(CHANGELOG_URL);
 }
 
 // ---------------------------------------------------------------------------

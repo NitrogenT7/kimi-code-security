@@ -14,7 +14,7 @@ import {
 
 import type { EnabledPluginSessionStart } from '#/plugin';
 
-import type { McpConnectionManager } from '../mcp';
+import type { McpConnectionManager, McpGroupRegistry } from '../mcp';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { ModelProvider } from '../session/provider-manager';
@@ -81,6 +81,7 @@ export interface AgentOptions {
   readonly subagentHost?: SessionSubagentHost | undefined;
   readonly skills?: SkillRegistry;
   readonly mcp?: McpConnectionManager;
+  readonly mcpGroupRegistry?: McpGroupRegistry;
   readonly hookEngine?: HookEngine;
   readonly permission?: PermissionManagerOptions | undefined;
   readonly log?: Logger;
@@ -107,6 +108,7 @@ export class Agent {
   readonly modelProvider?: ModelProvider;
   readonly subagentHost?: SessionSubagentHost;
   readonly mcp?: McpConnectionManager;
+  readonly mcpGroupRegistry?: McpGroupRegistry;
   readonly hooks?: HookEngine;
   readonly log: Logger;
   readonly telemetry: TelemetryClient;
@@ -146,6 +148,7 @@ export class Agent {
     this.modelProvider = options.modelProvider;
     this.subagentHost = options.subagentHost;
     this.mcp = options.mcp;
+    this.mcpGroupRegistry = options.mcpGroupRegistry;
     this.hooks = options.hookEngine;
     this.appVersion = options.appVersion;
     this.log = options.log ?? log;

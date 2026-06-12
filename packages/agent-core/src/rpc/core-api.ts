@@ -224,7 +224,7 @@ export interface ActivateSkillPayload {
 export interface McpServerInfo {
   readonly name: string;
   readonly transport: 'stdio' | 'http' | 'sse' | 'streamable-http';
-  readonly status: 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
+  readonly status: 'registered' | 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
   readonly toolCount: number;
   readonly error?: string;
 }

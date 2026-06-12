@@ -10,6 +10,7 @@ export * from './collaboration/ask-user';
 export * from './collaboration/skill-tool';
 export * from './file/edit';
 export * from './file/glob';
+export * from './mcp/mcp-manager';
 export * from './file/grep';
 export * from './file/read';
 export * from './file/read-media';

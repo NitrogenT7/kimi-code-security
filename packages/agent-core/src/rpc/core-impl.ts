@@ -29,7 +29,12 @@ import {
   type ExperimentalFeatureState,
 } from '../flags';
 import type { Logger } from '../logging/types';
-import { resolveSessionMcpConfig, mergeCallerMcpServers, type SessionMcpConfig } from '../mcp';
+import {
+  McpGroupRegistry,
+  resolveSessionMcpConfig,
+  mergeCallerMcpServers,
+  type SessionMcpConfig,
+} from '../mcp';
 import { Session, type SessionMeta, type SessionSkillConfig } from '../session';
 import { exportSessionDirectory } from '../session/export';
 import {
@@ -829,11 +834,14 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   private mergePluginMcpConfig(base: SessionMcpConfig | undefined): SessionMcpConfig | undefined {
     const pluginServers = this.withManagedKimiPluginEnv(this.plugins.enabledMcpServers());
     if (Object.keys(pluginServers).length === 0) return base;
+    const servers = {
+      ...base?.servers,
+      ...pluginServers,
+    };
     return {
-      servers: {
-        ...base?.servers,
-        ...pluginServers,
-      },
+      servers,
+      groups: base?.groups ?? {},
+      groupRegistry: base?.groupRegistry ?? new McpGroupRegistry(base?.groups ?? {}, servers),
     };
   }
 

@@ -26,11 +26,22 @@ describe('default agent profiles', () => {
   it('lists the goal tools on the agent profile but not on subagent profiles', () => {
     const agentTools = DEFAULT_AGENT_PROFILES['agent']?.tools ?? [];
     expect(agentTools).toEqual(expect.arrayContaining(['CreateGoal', 'GetGoal']));
-    for (const name of ['coder', 'explore', 'plan']) {
+    for (const name of ['coder', 'explore', 'plan', 'security-analyst', 'android-reverser', 'web-pentester', 'binary-reverser', 'code-auditor']) {
       const tools = DEFAULT_AGENT_PROFILES[name]?.tools ?? [];
       expect(tools).not.toContain('CreateGoal');
       expect(tools).not.toContain('GetGoal');
     }
+  });
+
+  it('exposes security-research subagent profiles on the main agent profile', () => {
+    const subagents = Object.keys(DEFAULT_AGENT_PROFILES['agent']?.subagents ?? {});
+    expect(subagents).toEqual(expect.arrayContaining([
+      'security-analyst',
+      'android-reverser',
+      'web-pentester',
+      'binary-reverser',
+      'code-auditor',
+    ]));
   });
 
   it('fails loudly when an embedded system prompt source is missing', () => {
