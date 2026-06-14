@@ -129,6 +129,7 @@ export class Agent {
   readonly usage: UsageRecorder;
   readonly skills: SkillManager | null;
   allowedSkillPrefixes: string[] | null = null;
+  mcpGroupMode: string | null = null;
   readonly tools: ToolManager;
   readonly background: BackgroundManager;
   readonly cron: CronManager | null;

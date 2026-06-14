@@ -30,6 +30,7 @@ import {
   resolveCompletionBudget,
 } from '../../utils/completion-budget';
 import compactionInstructionTemplate from './compaction-instruction.md?raw';
+import retentionPlanInstructionTemplate from './retention-plan-instruction.md?raw';
 import { renderMessagesToText } from './render-messages';
 import { renderTodoList, type TodoItem } from '../../tools/builtin/state/todo-list';
 import type { CompactionBeginData, CompactionResult } from './types';
@@ -233,6 +234,51 @@ export class FullCompaction {
     }
   }
 
+  private async generateRetentionPlan(
+    signal: AbortSignal,
+    messagesToCompact: readonly Message[],
+    customInstruction: string | undefined,
+  ): Promise<string | undefined> {
+    if (!this.agent.experimentalFlags.enabled('retention_plan_compaction')) {
+      return undefined;
+    }
+
+    const provider = applyCompletionBudget({
+      provider: this.agent.config.provider,
+      budget: { hardCap: RETENTION_PLAN_MAX_TOKENS },
+      capability: this.agent.config.modelCapabilities,
+    });
+
+    const messages = [
+      ...this.agent.context.project(messagesToCompact),
+      {
+        role: 'user',
+        content: [{ type: 'text', text: RETENTION_PLAN_INSTRUCTION() }],
+        toolCalls: [],
+      } satisfies Message,
+    ];
+
+    try {
+      const response = await this.agent.generate(
+        provider,
+        this.agent.config.systemPrompt,
+        [], // retention planning does not need tools
+        messages,
+        undefined,
+        { signal },
+      );
+      if (response.finishReason === 'truncated') {
+        return undefined;
+      }
+      return extractCompactionSummary(response);
+    } catch (error) {
+      this.agent.log.warn('retention plan generation failed; falling back to standard compaction', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  }
+
   private async compactionWorker(
     signal: AbortSignal,
     data: Readonly<CompactionBeginData>,
@@ -259,6 +305,17 @@ export class FullCompaction {
       const delays = retryBackoffDelays(MAX_COMPACTION_RETRY_ATTEMPTS);
       let usage: TokenUsage | null;
       let summary: string;
+
+      // Stage 1: ask the model to produce a retention plan for what should be kept.
+      // The plan is then injected into the compaction instruction used in stage 2.
+      const initialMessagesToCompact = originalHistory.slice(0, compactedCount);
+      const retentionPlan = await this.generateRetentionPlan(
+        signal,
+        initialMessagesToCompact,
+        data.instruction,
+      );
+      const compactionInstruction = buildCompactionInstruction(data.instruction, retentionPlan);
+
       while (true) {
         const messagesToCompact = originalHistory.slice(0, compactedCount);
         const messages = [
@@ -268,7 +325,7 @@ export class FullCompaction {
             content: [
               {
                 type: 'text',
-                text: COMPACTION_INSTRUCTION(data.instruction),
+                text: compactionInstruction,
               },
             ],
             toolCalls: [],
@@ -438,6 +495,25 @@ function extractCompactionSummary(response: GenerateResult): string {
 
 export const COMPACTION_INSTRUCTION = (customInstruction = ''): string =>
   renderPrompt(compactionInstructionTemplate, { customInstruction });
+
+export const RETENTION_PLAN_INSTRUCTION = (): string =>
+  renderPrompt(retentionPlanInstructionTemplate, {});
+
+// Small completion cap for the retention-plan stage so the planning call
+// stays cheap and does not itself bloat the context window.
+const RETENTION_PLAN_MAX_TOKENS = 2048;
+
+export function buildCompactionInstruction(
+  customInstruction: string | undefined,
+  retentionPlan: string | undefined,
+): string {
+  const base = customInstruction?.trim() ?? '';
+  if (!retentionPlan || retentionPlan.trim().length === 0) {
+    return COMPACTION_INSTRUCTION(base);
+  }
+  const combined = `${base.length > 0 ? `${base}\n\n` : ''}Use the following retention plan when deciding what to keep in the summary:\n\n${retentionPlan.trim()}`;
+  return COMPACTION_INSTRUCTION(combined);
+}
 
 function compactionTelemetryTrigger(
   trigger: CompactionBeginData['source'] | undefined,

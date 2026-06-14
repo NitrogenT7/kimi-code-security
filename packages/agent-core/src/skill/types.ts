@@ -9,6 +9,13 @@ export interface SkillMetadata {
   readonly isSubSkill?: boolean | undefined;
   readonly safe?: boolean | undefined;
   readonly arguments?: readonly unknown[] | string | undefined;
+  /**
+   * MCP groups this skill is allowed in. `'*'` means all groups.
+   * When a group mode is active, a skill is allowed if its `mcpGroups`
+   * includes the active group name or `'*'`, or if its name matches the
+   * group's allowed prefixes.
+   */
+  readonly mcpGroups?: readonly string[] | string | undefined;
   readonly [key: string]: unknown;
 }
 

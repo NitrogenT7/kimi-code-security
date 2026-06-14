@@ -93,6 +93,13 @@ export class MCPManagerTool implements BuiltinTool<MCPManagerInput> {
         }
         try {
           await manager.loadGroup(groupName, registry);
+          // Loading a group also activates its skill-filtering mode, matching the
+          // behavior of the interactive `/mcp:<group>` slash command.
+          const group = registry.get(groupName);
+          if (group !== undefined) {
+            this.agent.mcpGroupMode = groupName;
+            this.agent.allowedSkillPrefixes = group.skillPrefixes.length > 0 ? [...group.skillPrefixes] : null;
+          }
           return { output: `MCP group "${groupName}" loaded successfully.` };
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);

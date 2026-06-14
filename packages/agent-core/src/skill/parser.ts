@@ -67,6 +67,8 @@ const METADATA_ALIASES: Readonly<Record<string, string>> = {
   when_to_use: 'whenToUse',
   'disable-model-invocation': 'disableModelInvocation',
   disable_model_invocation: 'disableModelInvocation',
+  'mcp-groups': 'mcpGroups',
+  mcp_groups: 'mcpGroups',
 };
 
 export async function parseSkillFromFile(options: ParseSkillOptions): Promise<SkillDefinition> {
@@ -238,7 +240,24 @@ function normalizeMetadata(raw: Record<string, unknown>): SkillMetadata {
   const description = nonEmptyString(out['description']);
   if (description !== undefined) out['description'] = description;
 
+  const mcpGroups = normalizeStringArray(out['mcpGroups']);
+  if (mcpGroups.length > 0) out['mcpGroups'] = mcpGroups;
+
   return out as SkillMetadata;
+}
+
+function normalizeStringArray(value: unknown): readonly string[] {
+  if (value === undefined || value === null) return [];
+  if (typeof value === 'string') {
+    return value
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+  }
+  return [];
 }
 
 function descriptionFromBody(body: string): string {

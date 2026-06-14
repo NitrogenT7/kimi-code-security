@@ -101,6 +101,7 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     const registry = this.session.mcpGroupRegistry;
     if (payload.groupName === null || registry === undefined) {
       agent.allowedSkillPrefixes = null;
+      agent.mcpGroupMode = null;
       return;
     }
     const group = registry.get(payload.groupName);
@@ -109,6 +110,7 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     }
     const prefixes = group.skillPrefixes;
     agent.allowedSkillPrefixes = prefixes.length > 0 ? [...prefixes] : null;
+    agent.mcpGroupMode = payload.groupName;
   }
 
   generateAgentsMd(_payload: EmptyPayload): Promise<void> {

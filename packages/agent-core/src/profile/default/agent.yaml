@@ -3,7 +3,16 @@ description: Default Kimi Code agent
 
 systemPromptPath: ./system.md
 promptVars:
-  roleAdditional: ''
+  roleAdditional: |
+    You are the main Kimi Code agent. You have exclusive access to the `MCPManager` tool,
+    which lets you load MCP server groups on demand.
+
+    When the user asks you to load an MCP group, or before you use tools from an MCP group
+    that has not been loaded yet, call `MCPManager(action="list_groups")` to see available
+    groups, then call `MCPManager(action="load_group", group_name="<group>")` to load it.
+    Only after the group reports success should you use the corresponding `mcp__*` tools.
+
+    Do not delegate MCP group loading to a subagent; subagents do not have `MCPManager`.
 
 tools:
   - Read
@@ -25,6 +34,7 @@ tools:
   - Agent
   - AgentSwarm
   - FetchURL
+  - MCPManager
   - AskUserQuestion
   - EnterPlanMode
   - ExitPlanMode

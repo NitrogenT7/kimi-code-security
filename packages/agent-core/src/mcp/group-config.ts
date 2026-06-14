@@ -116,22 +116,28 @@ export function generateDefaultMcpGroups(serverNames: readonly string[]): Record
     android: {
       description: '移动安全组：APK反编译 + 二进制逆向 + WebView调试 + ADB设备控制 + Frida动态插桩',
       servers: ['ida', 'jadx', 'jshook', 'adb', 'frida'],
-      skillPrefixes: ['android-', 'apk-'],
+      // Allow the Android-specific skills plus generic audit/review skills that
+      // are commonly used inside an Android audit workflow (e.g. review/validate).
+      skillPrefixes: ['android-', 'apk-', 'audit-'],
     },
     web: {
       description: 'Web挖洞组：浏览器自动化 + 深度调试 + JS逆向 + 云端渗透',
       servers: ['playwright', 'chrome-devtools', 'jshook'],
-      skillPrefixes: ['web-', 'cloud-'],
+      // Web/cloud skills plus generic audit/review skills used for web findings.
+      skillPrefixes: ['web-', 'cloud-', 'audit-'],
     },
     audit: {
       description: '代码审计组：静态安全扫描',
       servers: ['semgrep'],
-      skillPrefixes: ['audit-'],
+      // Audit skills plus the code-security-review skill (code- prefix).
+      skillPrefixes: ['audit-', 'code-'],
     },
     binary: {
       description: '桌面二进制逆向：IDA静态分析 + GDB动态调试 + Frida插桩',
       servers: ['ida', 'gdb', 'frida'],
-      skillPrefixes: ['audit-'],
+      // Fix: was mistakenly set to ['audit-']. Allow binary-specific skills,
+      // generic audit/review skills, and code review skills.
+      skillPrefixes: ['binary-', 'audit-', 'code-'],
     },
     full: {
       description: '全量模式（所有服务器）',

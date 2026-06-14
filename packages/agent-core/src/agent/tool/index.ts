@@ -418,7 +418,10 @@ export class ToolManager {
           new b.AgentSwarmTool(this.agent.subagentHost, this.agent.swarmMode),
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
-        (this.agent.mcp !== undefined || this.agent.mcpGroupRegistry !== undefined) &&
+        // MCPManager is main-agent-only: subagents should not load or manage MCP groups
+        // on their own; the main agent loads groups before dispatching work.
+        this.agent.type === 'main' &&
+          (this.agent.mcp !== undefined || this.agent.mcpGroupRegistry !== undefined) &&
           new b.MCPManagerTool(this.agent),
       ]
         .filter((tool) => !!tool)
