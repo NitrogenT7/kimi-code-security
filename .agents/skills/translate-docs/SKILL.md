@@ -1,6 +1,7 @@
 ---
 name: translate-docs
 description: Translate and sync bilingual user documentation between docs/zh/ and docs/en/ following the source-of-truth rules in docs/AGENTS.md.
+mcpGroups: ['*']
 ---
 
 # Translate Docs

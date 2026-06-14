@@ -1,0 +1,22 @@
+/pdfs
+.DS_Store
+
+# OS-generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Dependencies (if applicable)
+node_modules/
+/.factory
+__pycache__/
+*.pyc

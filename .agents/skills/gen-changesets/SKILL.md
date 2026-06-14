@@ -1,6 +1,7 @@
 ---
 name: gen-changesets
 description: Use when generating changesets in the kimi-code repository, including package bump selection, internal package and CLI bundle handling, bump levels, major confirmation, and English changelog wording.
+mcpGroups: ['*']
 ---
 
 # Generate Changesets

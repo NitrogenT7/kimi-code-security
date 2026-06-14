@@ -1,6 +1,7 @@
 ---
 name: sync-changelog
 description: Use after a release succeeds, when maintainers need to sync apps/kimi-code/CHANGELOG.md into docs/en/release-notes/changelog.md and docs/zh/release-notes/changelog.md.
+mcpGroups: ['*']
 ---
 
 # Sync Changelog
