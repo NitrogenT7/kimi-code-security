@@ -1,30 +1,42 @@
-Use this tool to maintain a structured TODO list as you work through a multi-step task. Use it proactively and often when progress tracking helps the current work. This is especially useful in Plan mode, long-running investigations, and implementation tasks with several tool calls.
+Use this tool to maintain a structured question list as you investigate a problem. Unlike a traditional task-oriented TODO list, each item is a **question** that needs to be answered, tracked with hypotheses, evidence, blockers, and confidence.
 
 **When to use:**
-- Multi-step tasks that span several tool calls
-- Tracking investigation progress across a large codebase search
-- Planning a sequence of edits before making them
-- After receiving new multi-step instructions, capture the requirements as todos
-- Before starting a tracked task, mark exactly one item as `in_progress`
-- Immediately after finishing a tracked task, mark it `done`; do not batch completions at the end
+- Multi-step investigations where each sub-problem is a question to answer
+- Security audits: tracking questions like "Can primitive A be reached from external input?"
+- Tracking evidence collected across the investigation
+- After receiving new instructions, break down the unknowns into questions
+- Before starting, mark exactly one question as `investigating`
+- Mark a question `resolved` immediately after you can answer it with sufficient evidence
 
 **When NOT to use:**
 - Single-shot answers that complete in one or two tool calls
 - Trivial requests where tracking adds no clarity
 - Purely conversational or informational replies
+- Simple procedural steps (use Goal mode instead)
+
+**Question statuses:**
+- `pending` — question identified but not yet investigated
+- `investigating` — actively collecting evidence
+- `resolved` — question answered with conclusion + evidence
+- `inconclusive` — cannot be answered (dead end, blocked by external factors)
+
+**Evidence item statuses:**
+- `checking` — currently verifying this piece of evidence
+- `confirmed` — evidence verified, supports the hypothesis
+- `refuted` — evidence contradicts the hypothesis
 
 **Avoid churn:**
-- Do not re-call this tool when nothing meaningful has changed since the last call — update the list only after real progress.
+- Do not re-call this tool when nothing meaningful has changed — update only after real progress.
 - When unsure of the current state, call query mode first (omit `todos`) to check the list before deciding what to update.
-- If no available tool can move any task forward, tell the user where you are stuck instead of repeatedly re-ordering the same todos.
+- If no available tool can move any investigation forward, tell the user where you are stuck instead of repeatedly re-ordering the same questions.
 
 **How to use:**
-- Call with `todos: [...]` to replace the full list. Statuses: pending / in_progress / done.
+- Call with `todos: [...]` to replace the full list.
 - Call with no arguments to retrieve the current list without changing it.
 - Call with `todos: []` to clear the list.
-- Keep titles short and actionable (e.g. "Read session-control.ts", "Add planMode flag to TurnManager").
-- Update statuses as you make progress.
-- When work is underway, keep exactly one task `in_progress`.
-- Only mark a task `done` when it is fully accomplished.
-- Never mark a task `done` if tests are failing, implementation is partial, unresolved errors remain, or required files/dependencies could not be found.
-- If you encounter a blocker, keep the blocked task `in_progress` or add a new pending task describing what must be resolved.
+- Use `id` (UUID) to reference questions for parent-child relationships (max 2 levels: parent → child).
+- When marking a question `resolved`, you **must** include `conclusion` and at least one `evidence` item.
+- Mark questions `inconclusive` if investigation shows the question cannot be answered.
+- Keep confidence (`low`/`medium`/`high`) and depth (`quick`/`deep`) updated.
+- When investigation reveals a sub-question, create a child question with `parentId` set to the parent's `id`.
+- Never mark a question `resolved` if it has open child questions that are not `resolved` or `inconclusive`.

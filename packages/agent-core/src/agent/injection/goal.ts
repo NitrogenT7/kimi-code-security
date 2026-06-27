@@ -48,6 +48,11 @@ function buildBlockedNote(goal: GoalSnapshot): string {
   );
   lines.push('');
   lines.push(`<untrusted_objective>\n${escapeUntrustedText(goal.objective)}\n</untrusted_objective>`);
+  if (goal.purpose !== undefined) {
+    lines.push(
+      `<untrusted_purpose>\n${escapeUntrustedText(goal.purpose)}\n</untrusted_purpose>`,
+    );
+  }
   if (goal.completionCriterion !== undefined) {
     lines.push(
       `<untrusted_completion_criterion>\n${escapeUntrustedText(goal.completionCriterion)}\n</untrusted_completion_criterion>`,
@@ -75,6 +80,11 @@ function buildPausedNote(goal: GoalSnapshot): string {
   );
   lines.push('');
   lines.push(`<untrusted_objective>\n${escapeUntrustedText(goal.objective)}\n</untrusted_objective>`);
+  if (goal.purpose !== undefined) {
+    lines.push(
+      `<untrusted_purpose>\n${escapeUntrustedText(goal.purpose)}\n</untrusted_purpose>`,
+    );
+  }
   if (goal.completionCriterion !== undefined) {
     lines.push(
       `<untrusted_completion_criterion>\n${escapeUntrustedText(goal.completionCriterion)}\n</untrusted_completion_criterion>`,
@@ -100,6 +110,11 @@ function buildGoalReminder(goal: GoalSnapshot): string {
   );
   lines.push('');
   lines.push(`<untrusted_objective>\n${escapeUntrustedText(goal.objective)}\n</untrusted_objective>`);
+  if (goal.purpose !== undefined) {
+    lines.push(
+      `<untrusted_purpose>\n${escapeUntrustedText(goal.purpose)}\n</untrusted_purpose>`,
+    );
+  }
   if (goal.completionCriterion !== undefined) {
     lines.push(
       `<untrusted_completion_criterion>\n${escapeUntrustedText(goal.completionCriterion)}\n</untrusted_completion_criterion>`,

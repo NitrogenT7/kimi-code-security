@@ -33,7 +33,11 @@ import compactionInstructionTemplate from './compaction-instruction.md?raw';
 import retentionPlanInstructionTemplate from './retention-plan-instruction.md?raw';
 import { renderMessagesToText } from './render-messages';
 import { renderTodoList, type TodoItem } from '../../tools/builtin/state/todo-list';
-import type { CompactionBeginData, CompactionResult } from './types';
+import type {
+  CompactionBeginData,
+  CompactionResult,
+  CompactionSource,
+} from './types';
 import {
   DEFAULT_COMPACTION_CONFIG,
   DefaultCompactionStrategy,
@@ -238,7 +242,11 @@ export class FullCompaction {
     signal: AbortSignal,
     messagesToCompact: readonly Message[],
     customInstruction: string | undefined,
+    source: CompactionSource,
   ): Promise<string | undefined> {
+    if (source !== 'auto') {
+      return undefined;
+    }
     if (!this.agent.experimentalFlags.enabled('retention_plan_compaction')) {
       return undefined;
     }
@@ -313,6 +321,7 @@ export class FullCompaction {
         signal,
         initialMessagesToCompact,
         data.instruction,
+        data.source,
       );
       const compactionInstruction = buildCompactionInstruction(data.instruction, retentionPlan);
 

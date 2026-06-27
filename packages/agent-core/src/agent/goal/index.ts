@@ -107,6 +107,7 @@ export interface GoalBudgetLimits {
 interface GoalState {
   goalId: string;
   objective: string;
+  purpose?: string;
   completionCriterion?: string;
   status: GoalStatus;
   turnsUsed: number;
@@ -143,6 +144,7 @@ export interface GoalBudgetReport {
 export interface GoalSnapshot {
   readonly goalId: string;
   readonly objective: string;
+  readonly purpose?: string;
   readonly completionCriterion?: string;
   readonly status: GoalStatus;
   readonly turnsUsed: number;
@@ -188,6 +190,7 @@ export interface GoalChange {
 
 export interface CreateGoalInput {
   readonly objective: string;
+  readonly purpose?: string;
   readonly completionCriterion?: string;
   readonly replace?: boolean;
 }
@@ -257,6 +260,7 @@ export class GoalMode {
     const state: GoalState = {
       goalId: record.goalId,
       objective: record.objective,
+      purpose: record.purpose,
       completionCriterion: record.completionCriterion,
       status: 'active',
       turnsUsed: 0,
@@ -370,9 +374,11 @@ export class GoalMode {
     }
 
     const completionCriterion = normalizeCompletionCriterion(input.completionCriterion);
+    const purpose = normalizePurpose(input.purpose);
     const state: GoalState = {
       goalId: randomUUID(),
       objective,
+      purpose,
       completionCriterion,
       status: 'active',
       turnsUsed: 0,
@@ -387,6 +393,7 @@ export class GoalMode {
       type: 'goal.create',
       goalId: state.goalId,
       objective: state.objective,
+      purpose: state.purpose,
       completionCriterion: state.completionCriterion,
     });
     this.trackGoalCreated(actor, input.replace === true);
@@ -697,6 +704,7 @@ export class GoalMode {
     return {
       goalId: state.goalId,
       objective: state.objective,
+      purpose: state.purpose,
       completionCriterion: state.completionCriterion,
       status: state.status,
       turnsUsed: state.turnsUsed,
@@ -759,6 +767,11 @@ function budgetTelemetryProperties(limits: GoalBudgetLimits): TelemetryPropertie
 }
 
 function normalizeCompletionCriterion(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed?.length ? trimmed : undefined;
+}
+
+function normalizePurpose(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed?.length ? trimmed : undefined;
 }

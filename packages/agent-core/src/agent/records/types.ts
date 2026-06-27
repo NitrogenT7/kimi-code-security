@@ -88,6 +88,7 @@ export interface AgentRecordEvents {
   'goal.create': {
     goalId: string;
     objective: string;
+    purpose?: string;
     completionCriterion?: string;
   };
   'goal.update': {

@@ -71,6 +71,7 @@ export type PermissionMode = 'yolo' | 'manual' | 'auto';
 
 export interface CreateGoalInput {
   readonly objective: string;
+  readonly purpose?: string;
   readonly replace?: boolean;
 }
 

@@ -59,6 +59,7 @@ export type ParsedGoalCommand =
   | {
       readonly kind: 'create';
       readonly objective: string;
+      readonly purpose?: string;
       readonly replace: boolean;
     }
   | { readonly kind: 'next-add'; readonly objective: string }
@@ -75,6 +76,10 @@ const CONTROL_SUBCOMMANDS = new Set(['pause', 'resume', 'cancel']);
  * current goal.) Stop conditions are expressed in the objective in natural
  * language (e.g. "…or stop after 20 turns"); the model honors them when it
  * self-audits each turn and reports `complete`/`blocked` via UpdateGoal.
+ *
+ * Purpose syntax (two forms):
+ *   1. `/goal <objective>\n  目的：<purpose>`  — 中文换行格式
+ *   2. `/goal <objective> --purpose "<purpose>"` — 显式参数格式
  */
 export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
   const args = rawArgs.trim();
@@ -101,7 +106,32 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
     index += 1;
   }
 
-  const objective = tokens.slice(index).join(' ').trim();
+  // Parse purpose from the raw args. Two forms:
+  // 1. `--purpose "<text>"` anywhere in the args
+  // 2. `目的：<text>` at end of args (typically on a new line)
+  let purpose: string | undefined;
+
+  // Form 1: --purpose "<text>"
+  const purposeMatch = args.match(/--purpose\s+"([^"]+)"/);
+  if (purposeMatch !== null && purposeMatch[1] !== undefined) {
+    purpose = purposeMatch[1].trim();
+  }
+
+  // Form 2: 目的：<text> (remove from the objective text)
+  const chinesePurposeMatch = args.match(/目的[：:]\s*(.+)/);
+  if (chinesePurposeMatch !== null && chinesePurposeMatch[1] !== undefined) {
+    purpose = chinesePurposeMatch[1].trim();
+  }
+
+  // Build the objective by stripping purpose-related markers
+  const sliceStart = index === 0 ? 0 : args.indexOf(tokens[index] ?? '');
+  let objectiveText = args.slice(sliceStart);
+  // Remove --purpose "..." from the objective
+  objectiveText = objectiveText.replace(/--purpose\s+"[^"]+"/g, '').trim();
+  // Remove 目的：... from the objective
+  objectiveText = objectiveText.replace(/目的[：:]\s*.+/g, '').trim();
+
+  const objective = objectiveText;
   if (objective.length === 0) {
     // A usage hint, not a failure — shown in the same calm style as the other
     // "nothing to act on" messages (no goal to pause/resume/cancel).
@@ -117,7 +147,7 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
       message: `Goal objective is too long (max ${MAX_GOAL_OBJECTIVE_LENGTH} characters). Reference long details by file path.`,
     };
   }
-  return { kind: 'create', objective, replace };
+  return { kind: 'create', objective, purpose, replace };
 }
 
 export async function handleGoalCommand(host: SlashCommandHost, args: string): Promise<void> {
@@ -397,6 +427,7 @@ async function startGoal(
   try {
     await host.requireSession().createGoal({
       objective: parsed.objective,
+      purpose: parsed.purpose,
       replace: parsed.replace,
     });
   } catch (error) {
