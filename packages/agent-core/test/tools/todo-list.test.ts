@@ -258,10 +258,9 @@ describe('TodoListTool', () => {
       }),
       makeQuestion({
         question: 'Is JNI call present?',
-        status: 'resolved',
-        conclusion: 'No .so files found',
-        evidence: [{ status: 'confirmed', description: 'lib/ directory empty' }],
-        confidence: 'high',
+        status: 'investigating',
+        hypothesis: 'Probably not, need to check lib/',
+        confidence: 'low',
         depth: 'quick',
       }),
     ]);
@@ -279,7 +278,7 @@ describe('TodoListTool', () => {
     expect(result.output).toContain('阻碍：Need to check Android 12+');
     expect(result.output).toContain('  1.1. [resolved] Is entry B exported?');
     expect(result.output).toContain('结论：Yes, exported=true');
-    expect(result.output).toContain('2. [resolved] Is JNI call present?');
+    expect(result.output).toContain('2. [investigating] Is JNI call present?');
   });
 
   it('rejects items with invalid parentId references', async () => {
@@ -381,5 +380,96 @@ describe('TodoListTool', () => {
     expect(readExecution.description).toBe('Reading question list');
     expect(clearExecution.description).toBe('Clearing question list');
     expect(updateExecution.description).toBe('Updating question list');
+  });
+
+  it('archives removed resolved items to findings board', async () => {
+    const store: Record<string, unknown> = {};
+    const toolStore: ToolStore = {
+      get: (key) => store[key],
+      set: (key, value) => { store[key] = value; },
+    };
+    const tool = new TodoListTool(toolStore);
+
+    // Step 1: Write a list with one investigating and one resolved item
+    const resolvedId = 'resolved-1';
+    const initialTodos = [
+      makeQuestion({ id: 'active-1', question: 'Active question?', status: 'investigating' }),
+      makeQuestion({
+        id: resolvedId,
+        question: 'Was this reachable?',
+        status: 'resolved',
+        conclusion: 'Yes, through path X',
+        evidence: [{ status: 'confirmed', description: 'Confirmed in source' }],
+        confidence: 'high',
+        depth: 'deep',
+      }),
+    ];
+
+    const r1 = await executeTool(tool, {
+      turnId: 't1', toolCallId: 'call_1', args: { todos: initialTodos }, signal,
+    });
+    expect(r1).toMatchObject({ isError: false });
+
+    // Step 2: Write a new list that removes the resolved item
+    const updatedTodos = [
+      makeQuestion({ id: 'active-1', question: 'Active question?', status: 'investigating' }),
+    ];
+
+    const r2 = await executeTool(tool, {
+      turnId: 't2', toolCallId: 'call_2', args: { todos: updatedTodos }, signal,
+    });
+    expect(r2).toMatchObject({ isError: false });
+
+    // Check findings board
+    const findings = store['findings'] as readonly unknown[];
+    expect(findings).toHaveLength(1);
+    const finding = findings[0] as Record<string, unknown>;
+    expect(finding['id']).toBe(resolvedId);
+    expect(finding['question']).toBe('Was this reachable?');
+    expect(finding['conclusion']).toBe('Yes, through path X');
+    expect(finding['status']).toBe('resolved');
+    expect(finding['resolvedAt']).toBeGreaterThan(0);
+  });
+
+  it('does not archive pending/investigating items removed from the list', async () => {
+    const store: Record<string, unknown> = {};
+    const toolStore: ToolStore = {
+      get: (key) => store[key],
+      set: (key, value) => { store[key] = value; },
+    };
+    const tool = new TodoListTool(toolStore);
+
+    // Write list with an investigating item, then remove it
+    const initial = [makeQuestion({ id: 'active-1', question: 'Active?', status: 'investigating' })];
+    await executeTool(tool, { turnId: 't1', toolCallId: 'call_1', args: { todos: initial }, signal });
+
+    // Remove it
+    await executeTool(tool, { turnId: 't2', toolCallId: 'call_2', args: { todos: [] }, signal });
+
+    const findings = store['findings'] as readonly unknown[];
+    expect(findings).toBeUndefined();
+  });
+
+  it('query mode hides resolved/inconclusive items from output', async () => {
+    const { tool } = makeTool([
+      makeQuestion({ id: 'active-1', question: 'Active?', status: 'investigating' }),
+      makeQuestion({
+        id: 'done-1',
+        question: 'Done?',
+        status: 'resolved',
+        conclusion: 'Yes',
+        evidence: [{ status: 'confirmed', description: 'Confirmed' }],
+      }),
+    ]);
+
+    const result = await executeTool(tool, {
+      turnId: 't1', toolCallId: 'call_1', args: {}, signal,
+    });
+
+    console.log('OUTPUT:', result.output);
+
+    expect(result).toMatchObject({ isError: false });
+    expect(result.output).toContain('Active?');
+    expect(result.output).not.toContain('Done?');
   });
 });

@@ -109,10 +109,10 @@ describe('Agent resume', () => {
       {
         type: 'tools.update_store',
         key: 'todo',
-        value: [
+        value: ([
           { title: 'Inspect resume snapshot', status: 'done' },
           { title: 'Hydrate TUI todo panel', status: 'in_progress' },
-        ],
+        ] as any),
       },
     ]);
     const ctx = testAgent({ persistence });

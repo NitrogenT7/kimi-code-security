@@ -1719,10 +1719,10 @@ describe('FullCompaction', () => {
     ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
     ctx.appendExchange(2, 'recent user two', 'recent assistant two', 80);
 
-    ctx.agent.tools.updateStore('todo', [
-      { title: 'Fix the auth bug', status: 'in_progress' },
-      { title: 'Add tests', status: 'pending' },
-    ]);
+    ctx.agent.tools.updateStore('todo' as any, [
+      { title: 'Fix the auth bug', status: 'in_progress' } as any,
+      { title: 'Add tests', status: 'pending' } as any,
+    ] as any);
 
     const compacted = new Promise<void>((resolve) => {
       ctx.emitter.once('context.apply_compaction', () => {
