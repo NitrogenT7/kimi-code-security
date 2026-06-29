@@ -30,6 +30,10 @@ import type {
   WarningEvent,
 } from '@moonshot-ai/kimi-code-sdk';
 
+import type {
+  UiFindingItem,
+  UiQuestionItem,
+} from '../components/chrome/investigation-board';
 import { MoonLoader } from '../components/chrome/moon-loader';
 import { buildGoalMarker } from '../components/messages/goal-markers';
 import { StatusMessageComponent } from '../components/messages/status-message';
@@ -46,7 +50,7 @@ import {
   argsRecord,
   formatErrorPayload,
   formatErrorMessage,
-  isTodoItemShape,
+  isQuestionItemShape,
   serializeToolResultOutput,
   stringValue,
 } from '../utils/event-payload';
@@ -325,10 +329,6 @@ export class SessionEventHandler {
     if (event.reason === 'cancelled') {
       this.markActiveAgentSwarmsCancelled();
     }
-    const todos = this.host.state.todoPanel.getTodos();
-    if (todos.length > 0 && todos.every((t) => t.status === 'done')) {
-      this.host.streamingUI.setTodoList([]);
-    }
     this.host.streamingUI.resetToolUi();
     this.host.streamingUI.finalizeTurn(sendQueued);
     this.renderPendingModelBlockedFallback();
@@ -546,12 +546,25 @@ export class SessionEventHandler {
     if (matchedCall !== undefined && matchedCall.name === 'TodoList' && !event.isError) {
       const rawTodos = (matchedCall.args as { todos?: unknown }).todos;
       if (Array.isArray(rawTodos)) {
-        const sanitized = rawTodos
-          .filter((todo): todo is { title: string; status: 'pending' | 'in_progress' | 'done' } =>
-            isTodoItemShape(todo),
-          )
-          .map((t) => ({ title: t.title, status: t.status }));
-        streamingUI.setTodoList(sanitized);
+        const questions: UiQuestionItem[] = [];
+        const findings: UiFindingItem[] = [];
+        for (const item of rawTodos) {
+          if (!isQuestionItemShape(item)) continue;
+          const q = item as unknown as UiQuestionItem;
+          if (q.status === 'pending' || q.status === 'investigating') {
+            questions.push(q);
+          } else if (q.status === 'resolved' || q.status === 'inconclusive') {
+            findings.push({
+              id: q.id,
+              question: q.question,
+              conclusion: q.conclusion ?? (q.status === 'inconclusive' ? 'Unable to determine' : ''),
+              confidence: q.confidence,
+              depth: q.depth,
+              status: q.status as 'resolved' | 'inconclusive',
+            });
+          }
+        }
+        streamingUI.setInvestigation(questions, findings);
       }
     }
     this.host.patchLivePane({ mode: 'waiting' });

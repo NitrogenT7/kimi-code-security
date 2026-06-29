@@ -704,7 +704,7 @@ export class KimiTUI {
     ui.clear();
     ui.addChild(this.state.transcriptContainer);
     ui.addChild(this.state.activityContainer);
-    ui.addChild(this.state.todoPanelContainer);
+    ui.addChild(this.state.investigationBoardContainer);
     ui.addChild(this.state.queueContainer);
     ui.addChild(this.state.btwPanelContainer);
     ui.addChild(this.state.editorContainer);
@@ -1200,7 +1200,7 @@ export class KimiTUI {
     this.tasksBrowserController.close();
     this.btwPanelController.clear();
     this.state.footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0 });
-    this.streamingUI.setTodoList([]);
+    this.streamingUI.setInvestigation([], []);
     this.streamingUI.setTurnId(undefined);
     this.setAppState({ mcpServersSummary: null });
     this.streamingUI.setStep(0);
@@ -1487,8 +1487,8 @@ export class KimiTUI {
     this.state.transcriptContainer.clear();
     this.btwPanelController.clear();
     this.clearTerminalInlineImages();
-    this.state.todoPanel.clear();
-    this.state.todoPanelContainer.clear();
+    this.state.investigationBoard.clear();
+    this.state.investigationBoardContainer.clear();
     this.imageStore.clear();
     this.renderWelcome();
   }

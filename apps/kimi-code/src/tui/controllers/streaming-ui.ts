@@ -11,7 +11,7 @@ import { hasDispose } from '../utils/component-capabilities';
 import { appendStreamingArgsPreview, parseStreamingArgs } from '../utils/event-payload';
 import { notifyTerminalOnce } from '../utils/terminal-notification';
 import { nextTranscriptId } from '../utils/transcript-id';
-import type { TodoItem } from '../components/chrome/todo-panel';
+import type { UiFindingItem, UiQuestionItem } from '../components/chrome/investigation-board';
 import type {
   AppState,
   LivePaneState,
@@ -660,12 +660,13 @@ export class StreamingUIController {
     }
   }
 
-  setTodoList(todos: readonly TodoItem[]): void {
+  setInvestigation(activeQuestions: readonly UiQuestionItem[], resolvedFindings: readonly UiFindingItem[]): void {
     const { state } = this.host;
-    state.todoPanel.setTodos(todos);
-    state.todoPanelContainer.clear();
-    if (!state.todoPanel.isEmpty()) {
-      state.todoPanelContainer.addChild(state.todoPanel);
+    state.investigationBoard.setQuestions(activeQuestions);
+    state.investigationBoard.setFindings(resolvedFindings);
+    state.investigationBoardContainer.clear();
+    if (!state.investigationBoard.isEmpty()) {
+      state.investigationBoardContainer.addChild(state.investigationBoard);
     }
     state.ui.requestRender();
   }

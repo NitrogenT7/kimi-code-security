@@ -92,6 +92,18 @@ export function isTodoItemShape(
   return rec.status === 'pending' || rec.status === 'in_progress' || rec.status === 'done';
 }
 
+export function isQuestionItemShape(
+  value: unknown,
+): value is { type: string; id: string; question: string; status: string } {
+  if (typeof value !== 'object' || value === null) return false;
+  const rec = value as Record<string, unknown>;
+  if (rec['type'] !== 'question') return false;
+  if (typeof rec['id'] !== 'string' || rec['id'].trim().length === 0) return false;
+  if (typeof rec['question'] !== 'string' || rec['question'].trim().length === 0) return false;
+  const s = rec['status'];
+  return s === 'pending' || s === 'investigating' || s === 'resolved' || s === 'inconclusive';
+}
+
 export function formatErrorMessage(error: unknown): string {
   if (isKimiError(error)) {
     return formatErrorPayload({

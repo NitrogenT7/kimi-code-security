@@ -10,14 +10,14 @@ import type {
 } from '@moonshot-ai/kimi-code-sdk';
 
 import { ToolCallComponent } from '../components/messages/tool-call';
-import type { TodoItem } from '../components/chrome/todo-panel';
+import type { UiFindingItem, UiQuestionItem } from '../components/chrome/investigation-board';
 import type {
   AppState,
   BackgroundAgentMetadata,
   ToolResultBlockData,
   TranscriptEntry,
 } from '../types';
-import { formatErrorMessage, isTodoItemShape } from '../utils/event-payload';
+import { formatErrorMessage, isQuestionItemShape, isTodoItemShape } from '../utils/event-payload';
 import { formatBackgroundAgentTranscript } from '../utils/background-agent-status';
 import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
 import { buildGoalCompletionMessage } from '../utils/goal-completion';
@@ -95,19 +95,55 @@ export class SessionReplayRenderer {
   private hydrateTodoPanel(agent: ResumedAgentState): void {
     const rawTodos = agent.toolStore?.['todo'];
     if (!Array.isArray(rawTodos)) {
-      this.host.streamingUI.setTodoList([]);
+      this.host.streamingUI.setInvestigation([], []);
       return;
     }
 
-    const todos = rawTodos
-      .filter((todo): todo is TodoItem => isTodoItemShape(todo))
-      .map((todo) => ({ title: todo.title, status: todo.status }));
-    if (todos.length > 0 && todos.every((todo) => todo.status === 'done')) {
-      this.host.streamingUI.setTodoList([]);
-      return;
+    const questions: UiQuestionItem[] = [];
+    const findings: UiFindingItem[] = [];
+    for (const item of rawTodos) {
+      // Support both old format ({title, status}) and new QuestionItem format
+      if (isQuestionItemShape(item)) {
+        const q = item as unknown as UiQuestionItem;
+        if (q.status === 'pending' || q.status === 'investigating') {
+          questions.push(q);
+        } else if (q.status === 'resolved' || q.status === 'inconclusive') {
+          findings.push({
+            id: q.id,
+            question: q.question,
+            conclusion: q.conclusion ?? (q.status === 'inconclusive' ? 'Unable to determine' : ''),
+            confidence: q.confidence,
+            depth: q.depth,
+            status: q.status as 'resolved' | 'inconclusive',
+          });
+        }
+      } else if (isTodoItemShape(item)) {
+        // Migrate old format on the fly
+        const q: UiQuestionItem = {
+          id: String(Math.random()).slice(2, 10),
+          question: item.title,
+          status: item.status === 'done' ? 'resolved' : item.status === 'in_progress' ? 'investigating' : 'pending',
+          evidence: [],
+          blockers: [],
+          confidence: 'medium',
+          depth: 'deep',
+        };
+        if (q.status === 'resolved' || q.status === 'inconclusive') {
+          findings.push({
+            id: q.id,
+            question: q.question,
+            conclusion: q.status === 'resolved' ? 'Completed (migrated)' : 'Unable to determine',
+            confidence: q.confidence,
+            depth: q.depth,
+            status: q.status as 'resolved' | 'inconclusive',
+          });
+        } else {
+          questions.push(q);
+        }
+      }
     }
 
-    this.host.streamingUI.setTodoList(todos);
+    this.host.streamingUI.setInvestigation(questions, findings);
   }
 
   /**
