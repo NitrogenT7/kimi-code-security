@@ -1,5 +1,73 @@
 Use this tool to maintain a structured question list as you investigate a problem. Unlike a traditional task-oriented TODO list, each item is a **question** that needs to be answered, tracked with hypotheses, evidence, blockers, and confidence.
 
+**Item schema** — every item MUST include:
+```
+{
+  "type": "question",
+  "id": "<uuid-or-short-unique-id>",
+  "question": "<the question to answer>",
+  "status": "pending" | "investigating" | "resolved" | "inconclusive",
+  "confidence": "low" | "medium" | "high",
+  "depth": "quick" | "deep",
+  "hypothesis": "<optional initial guess>",
+  "conclusion": "<required when status is resolved>",
+  "evidence": [
+    { "status": "confirmed" | "refuted" | "checking", "description": "<what was found>" }
+  ],
+  "blockers": ["<open issues>"],
+  "parentId": "<optional parent question id, max 2 levels>",
+  "subQuestions": ["<child question ids>"]
+}
+```
+
+**Full tool call example:**
+```
+TodoList({
+  todos: [
+    {
+      type: "question",
+      id: "q1",
+      question: "Can primitive A be reached from external input?",
+      status: "investigating",
+      confidence: "medium",
+      depth: "deep",
+      hypothesis: "Probably through Activity B",
+      evidence: [
+        { status: "checking", description: "Activity B → C.java:142" },
+        { status: "confirmed", description: "C.java:142 has no sanitizer" }
+      ],
+      blockers: ["Need to verify on Android 14+"],
+      subQuestions: ["q1a"]
+    },
+    {
+      type: "question",
+      id: "q1a",
+      question: "Is Activity B exported in AndroidManifest?",
+      parentId: "q1",
+      status: "resolved",
+      confidence: "high",
+      depth: "quick",
+      conclusion: "Yes, exported=true confirmed",
+      evidence: [
+        { status: "confirmed", description: "AndroidManifest.xml L42: exported=true" }
+      ],
+      blockers: [],
+      subQuestions: []
+    },
+    {
+      type: "question",
+      id: "q2",
+      question: "Does the APK contain any native .so libraries?",
+      status: "pending",
+      confidence: "low",
+      depth: "quick",
+      evidence: [],
+      blockers: [],
+      subQuestions: []
+    }
+  ]
+})
+
 **When to use:**
 - Multi-step investigations where each sub-problem is a question to answer
 - Security audits: tracking questions like "Can primitive A be reached from external input?"
@@ -40,3 +108,5 @@ Use this tool to maintain a structured question list as you investigate a proble
 - Keep confidence (`low`/`medium`/`high`) and depth (`quick`/`deep`) updated.
 - When investigation reveals a sub-question, create a child question with `parentId` set to the parent's `id`.
 - Never mark a question `resolved` if it has open child questions that are not `resolved` or `inconclusive`.
+- **Resolved/inconclusive items are hidden from the default query view** — they are archived. Only pending and investigating items appear. Query without args to see the active list.
+```
