@@ -123,6 +123,15 @@ function looksLikeQuestionItem(value: unknown): value is Record<string, unknown>
   if (confidence !== 'low' && confidence !== 'medium' && confidence !== 'high') return false;
   const depth = r['depth'];
   if (depth !== 'quick' && depth !== 'deep') return false;
+  // Validate evidence: must be an array if present (null / string / etc. will fail)
+  const evidence = r['evidence'];
+  if (evidence !== undefined && !Array.isArray(evidence)) return false;
+  // Validate blockers: must be an array if present
+  const blockers = r['blockers'];
+  if (blockers !== undefined && !Array.isArray(blockers)) return false;
+  // Validate subQuestions: must be an array if present
+  const subQuestions = r['subQuestions'];
+  if (subQuestions !== undefined && !Array.isArray(subQuestions)) return false;
   return true;
 }
 
@@ -146,6 +155,32 @@ function validateResolvedItem(evidence: readonly unknown[], conclusion: unknown,
   return issues.length > 0 ? issues.join('; ') : null;
 }
 
+function describeValidationIssue(value: unknown): string {
+  if (typeof value !== 'object' || value === null) {
+    return 'Item is not an object';
+  }
+  const r = value as Record<string, unknown>;
+  if (r['type'] !== 'question') return 'Missing or invalid "type" field (must be "question")';
+  if (typeof r['question'] !== 'string' || r['question'].trim().length === 0) return 'Missing or empty "question" field';
+  if (typeof r['id'] !== 'string' || r['id'].trim().length === 0) return 'Missing or empty "id" field (provide a UUID)';
+  const status = r['status'];
+  if (status !== 'pending' && status !== 'investigating' && status !== 'resolved' && status !== 'inconclusive') {
+    return `Invalid "status": "${String(status)}" (must be pending|investigating|resolved|inconclusive)`;
+  }
+  const confidence = r['confidence'];
+  if (confidence !== 'low' && confidence !== 'medium' && confidence !== 'high') {
+    return `Invalid "confidence": "${String(confidence)}" (must be low|medium|high)`;
+  }
+  const depth = r['depth'];
+  if (depth !== 'quick' && depth !== 'deep') {
+    return `Invalid "depth": "${String(depth)}" (must be quick|deep)`;
+  }
+  if (r['evidence'] !== undefined && !Array.isArray(r['evidence'])) return '"evidence" must be an array (use [] for empty)';
+  if (r['blockers'] !== undefined && !Array.isArray(r['blockers'])) return '"blockers" must be an array (use [] for empty)';
+  if (r['subQuestions'] !== undefined && !Array.isArray(r['subQuestions'])) return '"subQuestions" must be an array';
+  return 'Unknown validation error';
+}
+
 function validateTodoItem(value: unknown): string | null {
   // Old format migration check: { title, status } → migrate to question
   if (isOldFormatTodo(value)) {
@@ -153,7 +188,7 @@ function validateTodoItem(value: unknown): string | null {
     return validateResolvedItem(migrated.evidence, migrated.conclusion, migrated.status);
   }
   if (!looksLikeQuestionItem(value)) {
-    return 'Each item must be a valid question item (type: "question", question: string, id: string, status: pending|investigating|resolved|inconclusive)';
+    return describeValidationIssue(value);
   }
   const r = value as Record<string, unknown>;
   return validateResolvedItem(r['evidence'] as readonly unknown[], r['conclusion'], r['status']);
@@ -330,18 +365,37 @@ export class TodoListTool implements BuiltinTool<TodoListInput> {
           // Normalize: migrate old-format items and ensure IDs exist.
           // Use Zod schema (.parse) to fill in defaults for optional fields.
           const normalized: QuestionItem[] = args.todos.map((item) => {
+            if (isOldFormatTodo(item)) return migrateOldTodo(item);
             try {
-              if (isOldFormatTodo(item)) return migrateOldTodo(item);
               const raw = item as Record<string, unknown>;
               if (!raw['id'] || (typeof raw['id'] === 'string' && raw['id'].trim().length === 0)) {
                 raw['id'] = randomUUID();
               }
               return normalizeQuestionItem(raw);
-            } catch (err) {
-              // Should not happen — validateTodoItem already checked. Defensive fallback.
-              return typeof item === 'object' && item !== null
-                ? (item as QuestionItem)
-                : migrateOldTodo({ title: String(item), status: 'pending' });
+            } catch {
+              // Defensive: build a valid QuestionItem with sensible defaults
+              // so downstream code (rendering, archiving) never hits undefined fields.
+              const r = item as Record<string, unknown>;
+              return {
+                type: 'question',
+                id: typeof r['id'] === 'string' && r['id'].trim().length > 0 ? r['id'] : randomUUID(),
+                question: typeof r['question'] === 'string' ? r['question'] : 'Unknown question',
+                status: (['pending', 'investigating', 'resolved', 'inconclusive'] as const).includes(r['status'] as never)
+                  ? (r['status'] as QuestionStatus)
+                  : 'pending',
+                evidence: Array.isArray(r['evidence']) ? r['evidence'] as EvidenceItem[] : [],
+                blockers: Array.isArray(r['blockers']) ? r['blockers'] as string[] : [],
+                confidence: (['low', 'medium', 'high'] as const).includes(r['confidence'] as never)
+                  ? (r['confidence'] as Confidence)
+                  : 'medium',
+                depth: (['quick', 'deep'] as const).includes(r['depth'] as never)
+                  ? (r['depth'] as Depth)
+                  : 'deep',
+                subQuestions: Array.isArray(r['subQuestions']) ? r['subQuestions'] as string[] : [],
+                hypothesis: typeof r['hypothesis'] === 'string' ? r['hypothesis'] : undefined,
+                conclusion: typeof r['conclusion'] === 'string' ? r['conclusion'] : undefined,
+                parentId: typeof r['parentId'] === 'string' ? r['parentId'] : undefined,
+              };
             }
           });
 

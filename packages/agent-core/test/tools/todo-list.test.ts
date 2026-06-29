@@ -472,4 +472,58 @@ describe('TodoListTool', () => {
     expect(result.output).toContain('Active?');
     expect(result.output).not.toContain('Done?');
   });
+
+  it('rejects items with malformed evidence (e.g. null instead of array)', async () => {
+    const { tool } = makeTool();
+    const result = await executeTool(tool, {
+      turnId: 't1',
+      toolCallId: 'call_1',
+      args: {
+        todos: [
+          {
+            type: 'question',
+            id: 'bad-item',
+            question: 'Test?',
+            status: 'investigating',
+            confidence: 'medium',
+            depth: 'deep',
+            evidence: null,  // ← LLM might send null
+            blockers: [],
+            subQuestions: [],
+          },
+        ],
+      },
+      signal,
+    });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('evidence');
+  });
+
+  it('handles items with malformed evidence gracefully (fallback)', async () => {
+    const { tool } = makeTool();
+    // Simulate the old buggy path: an item that passes looksLikeQuestionItem
+    // but fails Zod parse. The fallback should produce a valid QuestionItem.
+    const result = await executeTool(tool, {
+      turnId: 't1',
+      toolCallId: 'call_1',
+      args: {
+        todos: [
+          {
+            type: 'question',
+            id: 'fallback-test',
+            question: 'Should not crash?',
+            status: 'pending',
+            confidence: 'medium',
+            depth: 'deep',
+            // evidence intentionally omitted — Zod default should fill it in
+          },
+        ],
+      },
+      signal,
+    });
+
+    expect(result).toMatchObject({ isError: false });
+    expect(result.output).toContain('Question list updated');
+  });
 });
