@@ -93,6 +93,8 @@ TodoList({
 - `confirmed` — evidence verified, supports the hypothesis
 - `refuted` — evidence contradicts the hypothesis
 
+**Note:** This tool uses **full replacement semantics** — calling with `todos: [...]` *replaces the entire list*. You MUST include every item you want to keep; items omitted from the array are removed. To update a single item, include all items with the changed one updated. This is NOT a patch/merge operation.
+
 **Avoid churn:**
 - Do not re-call this tool when nothing meaningful has changed — update only after real progress.
 - When unsure of the current state, call query mode first (omit `todos`) to check the list before deciding what to update.
@@ -100,6 +102,7 @@ TodoList({
 
 **How to use:**
 - Call with `todos: [...]` to replace the full list.
+- **To update a single item:** first call *without* args to get the current list, then modify the item you need and call with the full `todos` array containing all items.
 - Call with no arguments to retrieve the current list without changing it.
 - Call with `todos: []` to clear the list.
 - Use `id` (UUID) to reference questions for parent-child relationships (max 2 levels: parent → child).
