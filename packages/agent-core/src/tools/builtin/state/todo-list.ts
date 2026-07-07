@@ -474,7 +474,7 @@ export class TodoListTool implements BuiltinTool<TodoListInput> {
 
     if (completed.length === 0) return;
 
-    const existingFindings = this.store.get(FINDINGS_STORE_KEY) ?? [];
+    const existingFindings = (this.store.get(FINDINGS_STORE_KEY) as FindingItem[] | undefined) ?? [];
     const existingIds = new Set(existingFindings.map((f) => f.id));
 
     const newFindings: FindingItem[] = completed
