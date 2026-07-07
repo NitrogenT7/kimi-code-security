@@ -84,7 +84,8 @@ const GOAL_RUNTIME_PAUSE_PREFIX = 'Paused after runtime error';
  */
 const GOAL_CONTINUATION_PROMPT = [
   'Continue working toward the active goal.',
-  'Keep the self-audit brief. Do not explore unrelated interpretations once the goal can be',
+  'Keep the self-audit brief. Before acting, re-read the four elements: Purpose, Key Tasks,',
+  'End State, and Constraints. Do not explore unrelated interpretations once the goal can be',
   'decided. If the objective is simple, already answered, impossible, unsafe, or contradictory,',
   'do not run another goal turn. Explain briefly if useful, then call UpdateGoal with `complete`',
   'or `blocked` in the same turn. Otherwise, weigh the objective and any completion criteria',

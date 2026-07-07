@@ -286,6 +286,9 @@ export class GoalMode {
       state.wallClockResumedAt = undefined;
       state.terminalReason = status === 'active' ? undefined : record.reason;
     }
+    if (record.objective !== undefined) state.objective = record.objective;
+    if (record.purpose !== undefined) state.purpose = record.purpose;
+    if (record.completionCriterion !== undefined) state.completionCriterion = record.completionCriterion;
     if (record.turnsUsed !== undefined) state.turnsUsed = record.turnsUsed;
     if (record.tokensUsed !== undefined) state.tokensUsed = record.tokensUsed;
     if (record.wallClockMs !== undefined) {
@@ -471,6 +474,63 @@ export class GoalMode {
     this.track('goal_budget_set', {
       actor,
       ...budgetTelemetryProperties(input.budgetLimits),
+    });
+    return this.toSnapshot(state);
+  }
+
+  /**
+   * Rewrites a lightweight goal into the four-element commander's-intent format
+   * during the first turn. This is how `/goal <text>` becomes a structured goal:
+   * the model calls UpdateGoal with the objective reformatted as
+   * [Purpose] / [Key Tasks] / [End State] / [Constraints], plus extracted
+   * `purpose` and `completionCriterion`.
+   *
+   * Guardrails:
+   * - Only allowed while the goal is `active`.
+   * - Only allowed during the first turn (`turnsUsed <= 1`) so the model cannot
+   *   drift the goal after work has begun.
+   * - Empty strings are normalized to `undefined` to keep the state clean.
+   */
+  async rewriteGoalContent(
+    input: {
+      objective?: string;
+      purpose?: string;
+      completionCriterion?: string;
+    },
+    actor: GoalActor = 'model',
+  ): Promise<GoalSnapshot> {
+    const state = this.requireState();
+    if (state.status !== 'active') {
+      throw new KimiError(
+        ErrorCodes.GOAL_STATUS_INVALID,
+        `Cannot rewrite goal content in status "${state.status}"`,
+      );
+    }
+    if (state.turnsUsed > 1) {
+      throw new KimiError(
+        ErrorCodes.GOAL_NOT_REWRITABLE,
+        'Goal content can only be rewritten during the first turn',
+      );
+    }
+
+    const objective = normalizeObjective(input.objective);
+    const purpose = normalizePurpose(input.purpose);
+    const completionCriterion = normalizeCompletionCriterion(input.completionCriterion);
+
+    if (objective !== undefined) state.objective = objective;
+    if (purpose !== undefined) state.purpose = purpose;
+    if (completionCriterion !== undefined) state.completionCriterion = completionCriterion;
+
+    this.persistState(state);
+    this.appendGoalUpdate({
+      objective: state.objective,
+      purpose: state.purpose,
+      completionCriterion: state.completionCriterion,
+      actor,
+    });
+    this.track('goal_content_rewritten', {
+      actor,
+      turns_used: state.turnsUsed,
     });
     return this.toSnapshot(state);
   }
@@ -764,6 +824,11 @@ function budgetTelemetryProperties(limits: GoalBudgetLimits): TelemetryPropertie
     has_turn_budget: limits.turnBudget !== undefined,
     has_wall_clock_budget: limits.wallClockBudgetMs !== undefined,
   };
+}
+
+function normalizeObjective(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed?.length ? trimmed : undefined;
 }
 
 function normalizeCompletionCriterion(value: string | undefined): string | undefined {

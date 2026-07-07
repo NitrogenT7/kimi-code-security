@@ -93,6 +93,9 @@ export interface AgentRecordEvents {
   };
   'goal.update': {
     status?: GoalStatus;
+    objective?: string;
+    purpose?: string;
+    completionCriterion?: string;
     tokensUsed?: number;
     turnsUsed?: number;
     wallClockMs?: number;

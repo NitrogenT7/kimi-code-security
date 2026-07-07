@@ -146,6 +146,26 @@ function buildGoalReminder(goal: GoalSnapshot): string {
 
   lines.push('');
   lines.push(
+    'Structure this goal using the commanders-intent framework. Identify: (1) Purpose — why this ' +
+      'matters and the direction; (2) Key Tasks — what must be accomplished, without prescribing ' +
+      'every step; (3) End State — the observable, verifiable conditions that mean success; ' +
+      '(4) Constraints — what must not be done or sacrificed.',
+  );
+  if (
+    !goal.objective.includes('[Purpose]') &&
+    !goal.objective.includes('目的') &&
+    !goal.objective.includes('Purpose')
+  ) {
+    lines.push(
+      'The current objective is not yet in four-element format. If this is the first turn, call ' +
+        'UpdateGoal first to rewrite the objective into the four-element format and set `purpose` ' +
+        '(the Purpose) and `completionCriterion` (the End State). Do not change the user\'s intent; ' +
+        'only structure it.',
+    );
+  }
+
+  lines.push('');
+  lines.push(
     'Before doing any goal work, check the objective and latest request for a clear hard budget ' +
       'limit. If one is present and the current goal does not already record that limit, call ' +
       'SetGoalBudget first. Do not invent budgets. If a requested budget is not reasonable, do ' +
@@ -153,19 +173,19 @@ function buildGoalReminder(goal: GoalSnapshot): string {
   );
   lines.push('');
   lines.push(
-    'Goal mode is iterative. Keep the self-audit brief each turn. Do not explore unrelated ' +
-      'interpretations once the goal can be decided. If the objective is simple, already answered, ' +
-      'impossible, unsafe, or contradictory, do not run another goal turn. Explain briefly if useful, ' +
-      'then call UpdateGoal with `complete` or `blocked` in the same turn. Otherwise, self-audit ' +
-      'against the objective and any completion criteria above, then do one coherent slice of work ' +
-      'toward the objective. Use multiple turns when the task naturally has multiple phases. Call ' +
-      'UpdateGoal with `complete` only when all required work is done, any stated validation has ' +
-      'passed, and there is no useful next action. Do not mark complete after only producing a plan, ' +
-      'summary, first pass, or partial result. If an external condition or required user input ' +
-      'prevents progress, or the objective cannot be completed as stated, call UpdateGoal with ' +
-      '`blocked`. Otherwise keep working — after your turn ends you will be prompted to continue. ' +
-      "Call UpdateGoal as soon as the goal is genuinely done or cannot proceed; don't keep going " +
-      'once there is nothing left to do.',
+    'Goal mode is iterative. Keep the self-audit brief each turn. Before acting, re-read the four ' +
+      'elements above. Do not explore unrelated interpretations once the goal can be decided. If the ' +
+      'objective is simple, already answered, impossible, unsafe, or contradictory, do not run another ' +
+      'goal turn. Explain briefly if useful, then call UpdateGoal with `complete` or `blocked` in the ' +
+      'same turn. Otherwise, self-audit against Purpose / Key Tasks / End State / Constraints, then ' +
+      'do one coherent slice of work toward the objective. Use multiple turns when the task naturally ' +
+      'has multiple phases. Call UpdateGoal with `complete` only when all required work is done, any ' +
+      'stated validation has passed, and there is no useful next action. Do not mark complete after ' +
+      'only producing a plan, summary, first pass, or partial result. If an external condition or ' +
+      'required user input prevents progress, or the objective cannot be completed as stated, call ' +
+      'UpdateGoal with `blocked`. Otherwise keep working — after your turn ends you will be prompted ' +
+      "to continue. Call UpdateGoal as soon as the goal is genuinely done or cannot proceed; don't " +
+      'keep going once there is nothing left to do.',
   );
   return lines.join('\n');
 }

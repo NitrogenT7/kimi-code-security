@@ -481,6 +481,8 @@ export abstract class SDKRpcClientBase {
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
       objective: input.objective,
+      purpose: input.purpose,
+      completionCriterion: input.completionCriterion,
       replace: input.replace,
     });
   }

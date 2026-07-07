@@ -11,6 +11,10 @@ import {
   type GoalQueueManagerAction,
 } from '../components/dialogs/goal-queue-manager';
 import {
+  GoalSetDialogComponent,
+  type GoalSetDialogResult,
+} from '../components/dialogs/goal-set-dialog';
+import {
   GoalSetMessageComponent,
   GoalStatusMessageComponent,
   UpcomingGoalAddedMessageComponent,
@@ -56,10 +60,12 @@ export type ParsedGoalCommand =
   | { readonly kind: 'pause' }
   | { readonly kind: 'resume' }
   | { readonly kind: 'cancel' }
+  | { readonly kind: 'set-manual' }
   | {
       readonly kind: 'create';
       readonly objective: string;
       readonly purpose?: string;
+      readonly completionCriterion?: string;
       readonly replace: boolean;
     }
   | { readonly kind: 'next-add'; readonly objective: string }
@@ -89,6 +95,9 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
   const first = tokens[0];
   if (first === 'next') {
     return parseNextGoalCommand(tokens);
+  }
+  if (first === 'set') {
+    return { kind: 'set-manual' };
   }
   if (first !== undefined && CONTROL_SUBCOMMANDS.has(first) && tokens.length === 1) {
     return { kind: first as 'pause' | 'resume' | 'cancel' };
@@ -123,9 +132,11 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
     purpose = chinesePurposeMatch[1].trim();
   }
 
-  // Build the objective by stripping purpose-related markers
+  // Build the objective by stripping purpose-related markers.
+  // If `replace` (or `--`) was the last token, there is no objective.
   const sliceStart = index === 0 ? 0 : args.indexOf(tokens[index] ?? '');
-  let objectiveText = args.slice(sliceStart);
+  const hasObjective = index === 0 || tokens[index] !== undefined;
+  let objectiveText = hasObjective ? args.slice(sliceStart) : '';
   // Remove --purpose "..." from the objective
   objectiveText = objectiveText.replace(/--purpose\s+"[^"]+"/g, '').trim();
   // Remove 目的：... from the objective
@@ -168,6 +179,9 @@ export async function handleGoalCommand(host: SlashCommandHost, args: string): P
       return;
     case 'cancel':
       await cancelGoal(host);
+      return;
+    case 'set-manual':
+      await handleGoalSetCommand(host);
       return;
     case 'next-add':
       await queueNextGoal(host, parsed);
@@ -428,6 +442,7 @@ async function startGoal(
     await host.requireSession().createGoal({
       objective: parsed.objective,
       purpose: parsed.purpose,
+      completionCriterion: parsed.completionCriterion,
       replace: parsed.replace,
     });
   } catch (error) {
@@ -506,6 +521,73 @@ async function cancelGoal(host: SlashCommandHost): Promise<void> {
   }
   host.track('goal_cancel');
   host.showNotice('Goal cancelled.');
+}
+
+async function handleGoalSetCommand(host: SlashCommandHost): Promise<void> {
+  if (host.state.appState.model.trim().length === 0 || host.session === undefined) {
+    host.showError(LLM_NOT_SET_MESSAGE);
+    return;
+  }
+
+  const result = await new Promise<GoalSetDialogResult>((resolve) => {
+    const dialog = new GoalSetDialogComponent(host.state.ui, (res) => {
+      host.restoreEditor();
+      resolve(res);
+    });
+    host.mountEditorReplacement(dialog);
+  });
+
+  if (result.kind === 'cancel') {
+    host.showStatus('Goal creation cancelled.');
+    return;
+  }
+
+  const { purpose, keyTasks, endState, constraints } = result;
+  const parts: string[] = [];
+  if (purpose !== undefined && purpose.length > 0) {
+    parts.push(`[Purpose]\n${purpose}`);
+  }
+  if (keyTasks !== undefined && keyTasks.length > 0) {
+    parts.push(`[Key Tasks]\n${keyTasks}`);
+  }
+  if (endState !== undefined && endState.length > 0) {
+    parts.push(`[End State]\n${endState}`);
+  }
+  if (constraints !== undefined && constraints.length > 0) {
+    parts.push(`[Constraints]\n${constraints}`);
+  }
+
+  if (parts.length === 0) {
+    host.showStatus('Goal creation cancelled — no content provided.');
+    return;
+  }
+
+  const objective = parts.join('\n\n');
+  if (objective.length > MAX_GOAL_OBJECTIVE_LENGTH) {
+    host.showError(
+      `Goal is too long (max ${MAX_GOAL_OBJECTIVE_LENGTH} characters). Reference long details by file path.`,
+    );
+    return;
+  }
+
+  await createGoal(
+    host,
+    {
+      kind: 'create',
+      objective,
+      purpose,
+      completionCriterion: endState,
+      replace: false,
+    },
+    undefined,
+    {
+      sendInput: () => {
+        // Suppress the default behavior of sending the raw objective as the user
+        // prompt. The structured goal itself is enough; the model will see it via
+        // the goal injector on the next turn.
+      },
+    },
+  );
 }
 
 async function showGoalStatus(host: SlashCommandHost): Promise<void> {

@@ -10,6 +10,7 @@ const GOAL_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'resume', description: 'Resume a paused goal' },
   { value: 'cancel', description: 'Cancel and remove the current goal' },
   { value: 'replace', description: 'Replace the current goal with a new objective' },
+  { value: 'set', description: 'Create a goal with the four-element editor' },
   { value: 'next', description: 'Queue an upcoming goal' },
 ];
 

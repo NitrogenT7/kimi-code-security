@@ -190,6 +190,7 @@ export type KimiErrorCode =
   | 'goal.status_invalid'
   | 'goal.metadata_reserved'
   | 'goal.not_resumable'
+  | 'goal.not_rewritable'
   | 'model.not_configured'
   | 'model.config_invalid'
   | 'auth.login_required'

@@ -719,7 +719,7 @@ describe('goalArgumentCompletions', () => {
   }
 
   it('offers every subcommand for an empty prefix', () => {
-    expect(values('')).toEqual(['status', 'pause', 'resume', 'cancel', 'replace', 'next']);
+    expect(values('')).toEqual(['status', 'pause', 'resume', 'cancel', 'replace', 'set', 'next']);
   });
 
   it('prefix-filters subcommands case-insensitively', () => {

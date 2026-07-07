@@ -295,6 +295,8 @@ export type {
 
 export interface CreateGoalPayload {
   readonly objective: string;
+  readonly purpose?: string;
+  readonly completionCriterion?: string;
   readonly replace?: boolean;
 }
 

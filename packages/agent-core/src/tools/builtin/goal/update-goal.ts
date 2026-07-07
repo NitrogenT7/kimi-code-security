@@ -30,9 +30,34 @@ export const UpdateGoalToolInputSchema = z
   .object({
     status: z
       .enum(['active', 'complete', 'paused', 'blocked'])
+      .optional()
       .describe('The lifecycle status to set for the current goal.'),
+    objective: z
+      .string()
+      .optional()
+      .describe(
+        'Rewrite the goal objective into a structured four-element format: [Purpose] / [Key Tasks] / [End State] / [Constraints]. ' +
+          'Only allowed during the first turn (turnsUsed <= 1) of a lightweight goal; afterwards changes are rejected. ' +
+          'Do not change the user\'s original intent, only structure it.',
+      ),
+    purpose: z
+      .string()
+      .optional()
+      .describe(
+        'Extract the purpose from the objective. Only allowed during the first turn (turnsUsed <= 1).',
+      ),
+    completionCriterion: z
+      .string()
+      .optional()
+      .describe(
+        'Extract the end-state / completion criterion from the objective. Only allowed during the first turn (turnsUsed <= 1).',
+      ),
   })
-  .strict();
+  .strict()
+  .refine(
+    (data) => data.status !== undefined || data.objective !== undefined || data.purpose !== undefined || data.completionCriterion !== undefined,
+    { message: 'At least one of status, objective, purpose, or completionCriterion must be provided.' },
+  );
 
 export type UpdateGoalToolInput = z.infer<typeof UpdateGoalToolInputSchema>;
 
@@ -45,17 +70,37 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
 
   resolveExecution(args: UpdateGoalToolInput): ToolExecution {
     const goal = this.agent.goal;
+    const hasContentUpdate =
+      args.objective !== undefined || args.purpose !== undefined || args.completionCriterion !== undefined;
 
     return {
-      description: `Setting goal status: ${args.status}`,
-      stopBatchAfterThis: args.status !== 'active',
+      description: hasContentUpdate
+        ? 'Rewriting goal into four-element format'
+        : `Setting goal status: ${args.status ?? 'unchanged'}`,
+      stopBatchAfterThis: args.status !== undefined && args.status !== 'active',
       approvalRule: this.name,
       execute: async () => {
-        if (args.status === 'active') {
+        if (hasContentUpdate) {
+          const rewritten = await goal.rewriteGoalContent(
+            {
+              objective: args.objective,
+              purpose: args.purpose,
+              completionCriterion: args.completionCriterion,
+            },
+            'model',
+          );
+          return { output: JSON.stringify({ goal: rewritten }, null, 2) };
+        }
+
+        const status = args.status;
+        if (status === undefined) {
+          return { output: 'No changes requested.' };
+        }
+        if (status === 'active') {
           await goal.resumeGoal({}, 'model');
           return { output: 'Goal resumed.' };
         }
-        if (args.status === 'complete') {
+        if (status === 'complete') {
           const completed = await goal.markComplete({}, 'model');
           // `complete` is transient: markComplete announces then clears the
           // record. Store the summary request as a system reminder, so the next
@@ -70,7 +115,7 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
           }
           return { output: 'Goal marked complete.', stopTurn: true };
         }
-        if (args.status === 'blocked') {
+        if (status === 'blocked') {
           const blocked = await goal.markBlocked({}, 'model');
           if (blocked !== null) {
             this.agent.context.appendSystemReminder(buildGoalBlockedReasonPrompt(blocked), {

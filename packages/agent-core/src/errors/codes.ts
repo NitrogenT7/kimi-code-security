@@ -41,6 +41,7 @@ export const ErrorCodes = {
   GOAL_STATUS_INVALID: 'goal.status_invalid',
   GOAL_METADATA_RESERVED: 'goal.metadata_reserved',
   GOAL_NOT_RESUMABLE: 'goal.not_resumable',
+  GOAL_NOT_REWRITABLE: 'goal.not_rewritable',
 
   MODEL_NOT_CONFIGURED: 'model.not_configured',
   MODEL_CONFIG_INVALID: 'model.config_invalid',
@@ -270,6 +271,12 @@ export const KIMI_ERROR_INFO = {
     retryable: false,
     public: true,
     action: 'Only paused goals can be resumed.',
+  },
+  'goal.not_rewritable': {
+    title: 'Goal content is no longer rewritable',
+    retryable: false,
+    public: true,
+    action: 'Goal content can only be rewritten during the first turn.',
   },
 
   'model.not_configured': {
