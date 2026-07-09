@@ -582,9 +582,10 @@ async function handleGoalSetCommand(host: SlashCommandHost): Promise<void> {
     undefined,
     {
       sendInput: () => {
-        // Suppress the default behavior of sending the raw objective as the user
-        // prompt. The structured goal itself is enough; the model will see it via
-        // the goal injector on the next turn.
+        // The structured goal is already injected into the next turn via the
+        // goal injector, so we do not repeat the full objective here. Send a
+        // short trigger so the model starts working immediately.
+        host.sendNormalUserInput('Start working toward this goal.');
       },
     },
   );

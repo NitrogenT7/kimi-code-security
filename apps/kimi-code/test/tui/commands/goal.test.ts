@@ -698,6 +698,33 @@ describe('handleGoalCommand', () => {
       ),
     );
   });
+
+  it('/goal set creates a goal and immediately starts a turn', async () => {
+    const mockMount = host.mountEditorReplacement as ReturnType<typeof vi.fn>;
+    mockMount.mockImplementationOnce((dialog: { handleInput(data: string): void }) => {
+      // Simulate filling the dialog and confirming.
+      dialog.handleInput('Purpose');
+      dialog.handleInput('\t');
+      dialog.handleInput('Tasks');
+      dialog.handleInput('\t');
+      dialog.handleInput('Done');
+      dialog.handleInput('\t');
+      dialog.handleInput('None');
+      dialog.handleInput('\t');
+      dialog.handleInput('\r');
+    });
+
+    await handleGoalCommand(host, 'set');
+
+    expect(session.createGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        objective: expect.stringContaining('[Purpose]\nPurpose'),
+        purpose: 'Purpose',
+        completionCriterion: 'Done',
+      }),
+    );
+    expect(host.sendNormalUserInput).toHaveBeenCalledWith('Start working toward this goal.');
+  });
 });
 
 describe('dispatchInput /goal integration', () => {
