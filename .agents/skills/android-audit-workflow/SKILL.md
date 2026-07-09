@@ -108,14 +108,13 @@ Agent(
 
   环境说明：主代理已确保 android MCP 组可用，你直接使用 `mcp__*` 工具，不要调用 MCPManager。
 
-  1. 读取 apk-hardcode-analyzer SKILL.md 了解分析方法论
-  2. 搜索硬编码敏感信息：
+  1. 搜索硬编码敏感信息：
      - API Keys / Secret Keys / Access Tokens
      - 云服务凭证（AK/SK）
      - JWT 签名密钥 / OAuth Client Secret
      - 证书私钥 / 加密密钥
-  3. 反向追溯每个凭证的业务用途
-  4. 输出发现的硬编码凭证列表（含位置和用途）
+  2. 反向追溯每个凭证的业务用途
+  3. 输出发现的硬编码凭证列表（含位置和用途）
   """
 )
 
@@ -188,9 +187,8 @@ Agent(
   Agent(subagent_type="android-reverser", prompt="分析 APK 架构和攻击面...")
   → 必须先读取 apk-business-architecture-profiler SKILL.md
 
-阶段 2（三路并行，可用 AgentSwarm 替代）：
+阶段 2（两路并行，可用 AgentSwarm 替代）：
   Agent(subagent_type="android-reverser", prompt="IPC 审计...")    → android-ipc-auditor
-  Agent(subagent_type="android-reverser", prompt="硬编码凭证...")    → apk-hardcode-analyzer
   Agent(subagent_type="android-reverser", prompt="云端攻击面...")    → apk-cloud-surface-mapper
 
 阶段 3：

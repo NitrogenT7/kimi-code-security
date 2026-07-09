@@ -4,6 +4,8 @@
 
 [Documentation](https://moonshotai.github.io/kimi-code/zh/) · [Issues](https://github.com/MoonshotAI/kimi-code/issues) · [English](README.md)
 
+> **说明：** 这是 [MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code) 的非官方安全研究 fork，与 Moonshot AI 无任何隶属或背书关系。`.agents/skills/` 下的安全研究类 skill 仅供授权测试与教育用途——请勿对未获授权的系统使用。官方项目请见上游仓库。
+
 
 ![Kimi Code 的使用演示](./docs/media/intro.gif)
 

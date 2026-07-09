@@ -384,5 +384,4 @@ jadx --deobf -s -d ./jadx_out <target.apk>
 
 ## 与现有 Skill 的联动
 
-- 如需深入分析硬编码凭证（AK/SK、Token、签名密钥），引导用户使用 **`apk-hardcode-analyzer`** Skill
 - 如需审计 APK 的 IPC 组件安全面，引导用户使用 **`android-ipc-auditor`** Skill

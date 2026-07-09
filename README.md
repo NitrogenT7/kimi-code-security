@@ -3,11 +3,26 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![Docs](https://img.shields.io/badge/docs-online-blue)](https://moonshotai.github.io/kimi-code/en/) <br>
 [Documentation](https://moonshotai.github.io/kimi-code/en/) · [Issues](https://github.com/MoonshotAI/kimi-code/issues) · [中文](README.zh-CN.md)
 
+> **Note:** This is an unofficial security-research fork of [MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code). It is not affiliated with or endorsed by Moonshot AI. The offensive security skills under `.agents/skills/` are provided strictly for authorized testing and educational purposes only — do not use them against systems you do not own or have explicit permission to test. For the official project, see the upstream repository.
+
 ![Demo of using Kimi Code](./docs/media/intro.gif)
 
 ## What is Kimi Code CLI
 
 Kimi Code CLI is an AI coding agent that runs in your terminal — it can read and edit code, run shell commands, search files, fetch web pages, and choose the next step based on the feedback it receives. It works out of the box with Moonshot AI’s Kimi models and can also be configured to use other compatible providers.
+
+## Highlights of this fork
+
+This fork extends upstream Kimi Code with a security-research workflow and a handful of productivity features:
+
+- **Shell mode** — type `!` in the TUI to run a local shell command, stream its output live, cancel with Esc/Ctrl-C, or detach it to a background task with Ctrl-B.
+- **Session search** — the session picker now fuzzy-filters by title and last prompt.
+- **Investigation board** — a question-driven TODO panel (evidence chains, confidence/depth badges, parent/child tree) plus a four-element "commander’s intent" Goal mode, replacing the flat todo list.
+- **Lazy MCP groups** — load tool groups on demand via `/mcp:<group>`, with a per-group skill-prefix sandbox and the `MCPManager` tool.
+- **Security-research skills** — bundled skills for Android APK auditing, IPC analysis, business threat modeling, entry-driven and sink-backtracking code audits, exploit validation, and web pentesting. Scripts that made outbound calls to third-party cloud APIs have been removed; see [Responsible Use](SECURITY.md#responsible-use).
+- **Release tooling** — changeset workflow, `/changelog`, and a merge gate.
+
+For the official feature set and documentation, see the upstream project.
 
 ## Install
 
