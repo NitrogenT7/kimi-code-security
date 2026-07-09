@@ -110,6 +110,8 @@ export interface ExecutableToolContext {
   readonly metadata?: unknown;
   readonly signal: AbortSignal;
   readonly onUpdate?: ((update: ToolUpdate) => void) | undefined;
+  /** Called once when the foreground task is promoted to a background task. */
+  readonly onForegroundTaskStart?: ((taskId: string) => void) | undefined;
 }
 
 export interface RunnableToolExecution {

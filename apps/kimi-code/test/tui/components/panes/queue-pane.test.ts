@@ -82,4 +82,37 @@ describe('QueuePaneComponent', () => {
     expect(messageLine).toContain('line one line two line three');
     expect(messageLine).not.toContain('\n');
   });
+
+  it('renders bash commands with a $ prompt and hides the steer hint when only bash is queued', () => {
+    const component = new QueuePaneComponent({
+      isCompacting: false,
+      isStreaming: true,
+      canSteerImmediately: true,
+      messages: [{ text: 'echo hi', mode: 'bash' }],
+    });
+
+    const output = stripAnsi(component.render(120).join('\n'));
+
+    expect(output).toContain('❯ $ echo hi');
+    expect(output).toContain('will send after current task');
+    expect(output).not.toContain('ctrl-s to steer immediately');
+  });
+
+  it('keeps the steer hint when at least one queued message is steerable', () => {
+    const component = new QueuePaneComponent({
+      isCompacting: false,
+      isStreaming: true,
+      canSteerImmediately: true,
+      messages: [
+        { text: 'echo hi', mode: 'bash' },
+        { text: 'plain message' },
+      ],
+    });
+
+    const output = stripAnsi(component.render(120).join('\n'));
+
+    expect(output).toContain('❯ $ echo hi');
+    expect(output).toContain('❯ plain message');
+    expect(output).toContain('ctrl-s to steer immediately');
+  });
 });

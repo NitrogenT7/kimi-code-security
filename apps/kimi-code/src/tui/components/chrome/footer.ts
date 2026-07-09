@@ -61,6 +61,7 @@ const TOOLBAR_TIPS: readonly ToolbarTip[] = [
   { text: 'shift+enter: newline' },
   { text: '/init: generate AGENTS.md', priority: 2 },
   { text: '@: mention files' },
+  { text: '! to run a shell command', priority: 2 },
   { text: 'ctrl+c: cancel' },
   { text: '/theme: switch theme' },
   { text: '/auto: auto permission mode' },

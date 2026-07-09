@@ -84,6 +84,11 @@ import type {
   RemovePluginPayload,
   RenameSessionPayload,
   ResumeSessionPayload,
+  RunShellCommandPayload,
+  RunShellCommandResult,
+  CancelShellCommandPayload,
+  DetachShellCommandPayload,
+  DetachShellCommandResult,
   SessionSummary,
   SetActiveToolsPayload,
   SetKimiConfigPayload,
@@ -639,6 +644,24 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
 
   getBackground({ sessionId, ...payload }: SessionAgentPayload<GetBackgroundPayload>) {
     return this.sessionApi(sessionId).getBackground(payload);
+  }
+
+  runShellCommand({
+    sessionId,
+    ...payload
+  }: SessionAgentPayload<RunShellCommandPayload>): Promise<RunShellCommandResult> {
+    return this.sessionApi(sessionId).runShellCommand(payload);
+  }
+
+  cancelShellCommand({ sessionId, ...payload }: SessionAgentPayload<CancelShellCommandPayload>) {
+    return this.sessionApi(sessionId).cancelShellCommand(payload);
+  }
+
+  detachShellCommand({
+    sessionId,
+    ...payload
+  }: SessionAgentPayload<DetachShellCommandPayload>): Promise<DetachShellCommandResult> {
+    return this.sessionApi(sessionId).detachShellCommand(payload);
   }
 
   updateSessionMetadata({ sessionId, ...payload }: UpdateSessionMetadataRequest): Promise<void> {

@@ -13,7 +13,7 @@ import {
 } from '../constant/kimi-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
-import type { PendingExit } from '../types';
+import type { PendingExit, QueuedMessage } from '../types';
 import type { TUIState } from '../tui-state';
 import type { BtwPanelController } from './btw-panel';
 
@@ -25,15 +25,18 @@ export interface EditorKeyboardHost {
   handleUserInput(text: string): void;
   readonly btwPanelController: BtwPanelController;
   steerMessage(session: Session, input: string[]): void;
-  recallLastQueued(): string | undefined;
+  recallLastQueued(): QueuedMessage | undefined;
   showError(msg: string): void;
   track(event: string, props?: Record<string, unknown>): void;
   updateEditorBorderHighlight(text?: string): void;
   updateQueueDisplay(): void;
   toggleToolOutputExpansion(): void;
+  detachCurrentForegroundTask(): Promise<void>;
+  cancelRunningShellCommand(): void;
   hideSessionPicker(): void;
   stop(exitCode?: number): Promise<void>;
   handlePlanToggle(next: boolean): void;
+  handleInputModeChange(mode: 'prompt' | 'bash'): void;
   clearQueuedMessages(): void;
   setExternalEditorRunning(running: boolean): void;
 }
@@ -139,6 +142,20 @@ export class EditorKeyboardController {
       host.handlePlanToggle(next);
     };
 
+    editor.onInputModeChange = (mode) => {
+      host.handleInputModeChange(mode);
+    };
+
+    editor.onCtrlB = () => {
+      // Shell command execution is treated as a streaming phase ('shell'), so
+      // this gate already covers it; only idle + not-compacting falls through.
+      if (host.state.appState.streamingPhase === 'idle' || host.state.appState.isCompacting) {
+        return false;
+      }
+      void host.detachCurrentForegroundTask();
+      return true;
+    };
+
     editor.onOpenExternalEditor = () => {
       host.track('shortcut_editor');
       void this.openExternalEditor();
@@ -150,20 +167,30 @@ export class EditorKeyboardController {
     };
 
     editor.onCtrlS = () => {
-      if (host.state.appState.streamingPhase === 'idle' || host.state.appState.isCompacting) return;
+      if (
+        host.state.appState.streamingPhase === 'idle' ||
+        host.state.appState.streamingPhase === 'shell' ||
+        host.state.appState.isCompacting
+      )
+        return;
       const text = editor.getText().trim();
-      const queuedTexts = host.state.queuedMessages.map((m) => m.text);
-      host.clearQueuedMessages();
+      const editorIsBash = editor.inputMode === 'bash';
+
+      // Bash commands (`! …`) are not steerable: keep them queued so they run
+      // after the current task instead of being injected into the turn as text.
+      const queued = host.state.queuedMessages;
+      const steerable = queued.filter((m) => m.mode !== 'bash');
+      host.state.queuedMessages = queued.filter((m) => m.mode === 'bash');
 
       const parts: string[] = [];
-      for (const q of queuedTexts) {
-        const trimmed = q.trim();
+      for (const m of steerable) {
+        const trimmed = m.text.trim();
         if (trimmed.length > 0) parts.push(trimmed);
       }
-      if (text.length > 0) parts.push(text);
+      if (!editorIsBash && text.length > 0) parts.push(text);
 
       if (parts.length > 0) {
-        editor.setText('');
+        if (!editorIsBash) editor.setText('');
         const session = host.session;
         if (host.state.appState.model.trim().length === 0 || session === undefined) {
           host.showError(LLM_NOT_SET_MESSAGE);
@@ -192,7 +219,14 @@ export class EditorKeyboardController {
       if (host.state.appState.streamingPhase === 'idle' && !host.state.appState.isCompacting) return false;
       const recalled = host.recallLastQueued();
       if (recalled !== undefined) {
-        editor.setText(recalled);
+        editor.setText(recalled.text);
+        // Restore the queued item's mode so a recalled `!` command runs as a
+        // shell command again instead of being submitted as a normal prompt.
+        const mode = recalled.mode ?? 'prompt';
+        if (editor.inputMode !== mode) {
+          editor.inputMode = mode;
+          editor.onInputModeChange?.(mode);
+        }
         host.updateQueueDisplay();
         host.state.ui.requestRender();
         return true;
@@ -228,6 +262,9 @@ export class EditorKeyboardController {
   }
 
   private cancelCurrentStream(): void {
+    // Cancel any running `!` shell command (treated as a streaming phase) in
+    // addition to the agent turn, so Esc / Ctrl+C interrupts it too.
+    this.host.cancelRunningShellCommand();
     void this.host.session?.cancel();
   }
 

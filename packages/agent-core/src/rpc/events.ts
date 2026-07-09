@@ -20,6 +20,8 @@ export type {
   McpServerStatusEvent,
   McpServerStatusPayload,
   SessionMetaUpdatedEvent,
+  ShellOutputEvent,
+  ShellStartedEvent,
   SkillActivatedEvent,
   SubagentCompletedEvent,
   SubagentFailedEvent,

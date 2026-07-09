@@ -5,6 +5,9 @@ import type {
   BeginCompactionPayload,
   CancelPayload,
   CancelPlanPayload,
+  CancelShellCommandPayload,
+  DetachShellCommandPayload,
+  DetachShellCommandResult,
   CreateGoalPayload,
   EmptyPayload,
   EnterSwarmPayload,
@@ -18,6 +21,8 @@ import type {
   ReconnectMcpServerPayload,
   RenameSessionPayload,
   RegisterToolPayload,
+  RunShellCommandPayload,
+  RunShellCommandResult,
   SessionAPI,
   SetActiveToolsPayload,
   SetModelPayload,
@@ -269,6 +274,24 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   async getBackground({ agentId, ...payload }: AgentScopedPayload<GetBackgroundPayload>) {
     return (await this.getAgent(agentId)).getBackground(payload);
+  }
+
+  async runShellCommand({
+    agentId,
+    ...payload
+  }: AgentScopedPayload<RunShellCommandPayload>): Promise<RunShellCommandResult> {
+    return (await this.getAgent(agentId)).runShellCommand(payload);
+  }
+
+  async cancelShellCommand({ agentId, ...payload }: AgentScopedPayload<CancelShellCommandPayload>) {
+    return (await this.getAgent(agentId)).cancelShellCommand(payload);
+  }
+
+  async detachShellCommand({
+    agentId,
+    ...payload
+  }: AgentScopedPayload<DetachShellCommandPayload>): Promise<DetachShellCommandResult> {
+    return (await this.getAgent(agentId)).detachShellCommand(payload);
   }
 
   private async getAgent(agentId: string): Promise<PromisableMethods<AgentAPI>> {

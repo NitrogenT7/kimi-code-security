@@ -4,7 +4,7 @@ import picomatch from 'picomatch';
 
 import type { Agent } from '..';
 import { makeErrorPayload } from '../../errors';
-import type { ExecutableTool } from '../../loop';
+import type { ExecutableTool, ToolUpdate } from '../../loop';
 import { createMcpAuthTool } from '../../mcp/auth-tool';
 import type { McpConnectionManager, McpServerEntry } from '../../mcp';
 import { mcpResultToExecutableOutput } from '../../mcp/output';
@@ -14,6 +14,7 @@ import { DEFAULT_AGENT_PROFILES } from '../../profile';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import * as b from '../../tools/builtin';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
+import type { BackgroundTaskInfo } from '../../agent/background';
 import type {
   BuiltinTool,
   McpServerRegistrationResult,
@@ -23,6 +24,9 @@ import type {
 } from './types';
 
 export * from './types';
+
+/** Foreground timeout (seconds) for a user-initiated `!` shell command. */
+const SHELL_FOREGROUND_TIMEOUT_S = 2 * 60;
 
 interface McpToolEntry {
   readonly tool: ExecutableTool;
@@ -41,6 +45,13 @@ export class ToolManager {
   private mcpAccessPatterns: string[] = [];
   protected readonly store: Partial<ToolStoreData> = {};
   private mcpToolStatusUnsubscribe: (() => void) | undefined;
+
+  /** Abort controllers for in-flight `!` shell commands, keyed by commandId so
+   *  the TUI can cancel (Esc / Ctrl+C) a running command. */
+  private readonly shellCommandControllers = new Map<string, AbortController>();
+  /** Original command text for in-flight `!` shell commands, keyed by commandId
+   *  so a detach can restart the command as a background task. */
+  private readonly shellCommandRequests = new Map<string, string>();
 
   constructor(protected readonly agent: Agent) {
     this.attachMcpTools();
@@ -81,6 +92,140 @@ export class ToolManager {
       value,
     });
     this.store[key] = value;
+  }
+
+  /**
+   * Execute a user-initiated `!` shell command. Reuses the builtin Bash tool
+   * (same kaos / cwd / BackgroundManager as the agent), recording the command
+   * and its output as `shell_command`-origin messages. It does NOT start a turn
+   * — the model is not prompted.
+   */
+  async runShellCommand(
+    command: string,
+    commandId?: string,
+  ): Promise<{ stdout: string; stderr: string; isError?: boolean; backgrounded?: boolean }> {
+    this.agent.context.appendBashInput(command);
+    const bash = this.builtinTools.get('Bash');
+    if (bash === undefined) {
+      const error = 'Bash tool is not available.';
+      this.agent.context.appendBashOutput('', error);
+      return { stdout: '', stderr: error, isError: true };
+    }
+    let stdout = '';
+    let stderr = '';
+    let isError: boolean | undefined;
+    const controller = new AbortController();
+    if (commandId !== undefined) {
+      this.shellCommandControllers.set(commandId, controller);
+      this.shellCommandRequests.set(commandId, command);
+    }
+    try {
+      const execution = await bash.resolveExecution({ command, timeout: SHELL_FOREGROUND_TIMEOUT_S });
+      if (!('execute' in execution)) {
+        const output =
+          typeof execution.output === 'string' ? execution.output : 'Command failed.';
+        this.agent.context.appendBashOutput('', output);
+        return { stdout: '', stderr: output, isError: true };
+      }
+      const result = await execution.execute({
+        turnId: '',
+        toolCallId: 'shell-command',
+        signal: controller.signal,
+        onUpdate: (update: ToolUpdate) => {
+          if (update.kind !== 'stdout' && update.kind !== 'stderr') return;
+          if (update.kind === 'stdout') stdout += update.text ?? '';
+          else stderr += update.text ?? '';
+          if (commandId !== undefined) {
+            this.agent.emitEvent({
+              type: 'shell.output',
+              commandId,
+              update: { kind: update.kind, text: update.text },
+            });
+          }
+        },
+        onForegroundTaskStart: (taskId: string) => {
+          if (commandId !== undefined) {
+            this.agent.emitEvent({ type: 'shell.started', commandId, taskId });
+          }
+        },
+      });
+      isError = result.isError === true;
+
+      if (typeof result.output === 'string' && result.output.startsWith('task_id: ')) {
+        this.agent.context.injectAndNotify(result.output, {
+          kind: 'injection',
+          variant: 'shell_command_backgrounded',
+        });
+        return { stdout: result.output, stderr: '', isError: false, backgrounded: true };
+      }
+
+      if (
+        isError &&
+        stdout.length === 0 &&
+        stderr.length === 0 &&
+        typeof result.output === 'string' &&
+        result.output.length > 0
+      ) {
+        stderr = result.output;
+      }
+    } catch (error) {
+      stderr += error instanceof Error ? error.message : String(error);
+      isError = true;
+    } finally {
+      if (commandId !== undefined) {
+        this.shellCommandControllers.delete(commandId);
+        this.shellCommandRequests.delete(commandId);
+      }
+    }
+    this.agent.context.appendBashOutput(stdout, stderr, isError);
+    return { stdout, stderr, isError };
+  }
+
+  cancelShellCommand(commandId: string): void {
+    this.shellCommandControllers.get(commandId)?.abort();
+  }
+
+  /**
+   * Detach a running `!` shell command to the background. This cancels the
+   * foreground execution and restarts the same command as a background task so
+   * the user can keep working while it runs. The restarted command is recorded
+   * in context via the background task notification path.
+   *
+   * Returns the background task info if the command was successfully moved to
+   * the background; undefined if the command already finished or could not be
+   * restarted.
+   */
+  async detachShellCommand(commandId: string): Promise<{ info?: BackgroundTaskInfo }> {
+    const command = this.shellCommandRequests.get(commandId);
+    if (command === undefined) return {};
+
+    // Cancel the foreground run so it stops streaming and does not record output.
+    this.cancelShellCommand(commandId);
+
+    const bash = this.builtinTools.get('Bash');
+    if (bash === undefined) return {};
+    const execution = await bash.resolveExecution({
+      command,
+      run_in_background: true,
+      description: `Shell command: ${command.slice(0, 80)}`,
+    });
+    if (!('execute' in execution)) {
+      return {};
+    }
+    const result = await execution.execute({
+      turnId: '',
+      toolCallId: 'shell-command',
+      signal: new AbortController().signal,
+      onForegroundTaskStart: (taskId: string) => {
+        this.agent.emitEvent({ type: 'shell.started', commandId, taskId });
+      },
+    });
+    if (typeof result.output === 'string' && result.output.startsWith('task_id: ')) {
+      const taskId = result.output.slice('task_id: '.length).trim();
+      const info = this.agent.background.getTask(taskId);
+      return { info };
+    }
+    return {};
   }
 
   registerUserTool(input: UserToolRegistration): void {

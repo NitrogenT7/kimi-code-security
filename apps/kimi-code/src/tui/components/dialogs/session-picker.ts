@@ -13,6 +13,7 @@ import {
 import { formatSessionLabel } from '#/migration/index';
 import { CURRENT_MARK, SELECT_POINTER } from '#/tui/constant/symbols';
 import { currentTheme } from '#/tui/theme';
+import { SearchableList } from '#/tui/utils/searchable-list';
 
 export interface SessionRow {
   readonly id: string;
@@ -73,6 +74,10 @@ function singleLine(text: string): string {
   return text.replaceAll(/\s+/g, ' ').trim();
 }
 
+function sessionSearchText(session: SessionRow): string {
+  return [session.title, session.last_prompt].filter((s) => s !== undefined && s !== null && s.length > 0).join(' ');
+}
+
 export class SessionPickerComponent extends Container implements Focusable {
   private sessions: SessionRow[];
   private currentSessionId: string;
@@ -80,9 +85,9 @@ export class SessionPickerComponent extends Container implements Focusable {
   private onCancel: () => void;
   private maxVisibleSessions: number;
   private loading: boolean;
+  private searchableList: SearchableList<SessionRow>;
 
   focused = false;
-  private selectedIndex = 0;
 
   constructor(opts: {
     sessions: SessionRow[];
@@ -103,6 +108,13 @@ export class SessionPickerComponent extends Container implements Focusable {
     this.maxVisibleSessions = opts.maxVisibleSessions ?? 4;
     this.onCtrlC = opts.onCtrlC;
     this.onCtrlD = opts.onCtrlD;
+    this.searchableList = new SearchableList({
+      items: opts.sessions,
+      toSearchText: sessionSearchText,
+      searchable: true,
+      pageSize: this.maxVisibleSessions,
+      initialIndex: 0,
+    });
   }
 
   private readonly onCtrlC?: () => void;
@@ -118,20 +130,19 @@ export class SessionPickerComponent extends Container implements Focusable {
       return;
     }
     if (matchesKey(data, Key.escape)) {
+      // If a search query is active, clear it first; otherwise cancel the picker.
+      if (this.searchableList.clearQuery()) return;
       this.onCancel();
       return;
     }
-    if (matchesKey(data, Key.enter) && this.sessions.length > 0) {
-      const session = this.sessions[this.selectedIndex];
-      if (session) this.onSelect(session.id);
+    // Let the shared searchable list handle navigation, paging, and search editing.
+    if (this.searchableList.handleKey(data)) return;
+    if (matchesKey(data, Key.enter)) {
+      const selected = this.searchableList.selected();
+      if (selected !== undefined) {
+        this.onSelect(selected.id);
+      }
       return;
-    }
-    if (matchesKey(data, Key.up)) {
-      this.selectedIndex = Math.max(0, this.selectedIndex - 1);
-      return;
-    }
-    if (matchesKey(data, Key.down)) {
-      this.selectedIndex = Math.min(this.sessions.length - 1, this.selectedIndex + 1);
     }
   }
 
@@ -169,40 +180,52 @@ export class SessionPickerComponent extends Container implements Focusable {
       return lines;
     }
 
+    const view = this.searchableList.view();
+    const filteredSessions = view.items;
+
     const headerLabel = 'Sessions ';
-    const headerHint = '↑↓ navigate · Enter select · Esc cancel';
+    const headerHint = '↑↓ navigate · Enter select · Esc cancel · type to search';
     const labelWidth = visibleWidth(headerLabel);
     const hintBudget = Math.max(0, width - labelWidth);
     const shownHint = truncateToWidth(headerHint, hintBudget, ELLIPSIS);
     lines.push(
       currentTheme.boldFg('primary', headerLabel) + currentTheme.fg('textMuted', shownHint),
     );
+
+    // Show the active search query (if any) and the filtered count.
+    const query = view.query;
+    if (query.length > 0) {
+      const searchLine = `search: ${query}`;
+      lines.push(currentTheme.fg('textDim', truncateToWidth(searchLine, width, ELLIPSIS)));
+    }
     lines.push('');
 
-    const visibleStart = Math.max(
-      0,
-      Math.min(
-        this.selectedIndex - Math.floor(this.maxVisibleSessions / 2),
-        Math.max(0, this.sessions.length - this.maxVisibleSessions),
-      ),
-    );
-    const visibleSessions = this.sessions.slice(
-      visibleStart,
-      visibleStart + this.maxVisibleSessions,
-    );
+    if (filteredSessions.length === 0) {
+      lines.push(
+        currentTheme.fg(
+          'textMuted',
+          truncateToWidth('No matching sessions.', width, ELLIPSIS),
+        ),
+      );
+      lines.push(currentTheme.fg('primary', '─'.repeat(width)));
+      return lines;
+    }
+
+    const { page, selectedIndex } = view;
+    const visibleSessions = filteredSessions.slice(page.start, page.end);
 
     for (const [vi, session] of visibleSessions.entries()) {
-      const index = visibleStart + vi;
-      const isSelected = index === this.selectedIndex;
+      const index = page.start + vi;
+      const isSelected = index === selectedIndex;
       const isCurrent = session.id === this.currentSessionId;
       const card = this.renderSessionCard(width, session, isSelected, isCurrent);
       lines.push(...card);
       if (vi < visibleSessions.length - 1) lines.push('');
     }
 
-    if (this.sessions.length > visibleSessions.length) {
+    if (filteredSessions.length > visibleSessions.length) {
       lines.push('');
-      const footer = `Showing ${String(visibleStart + 1)}-${String(visibleStart + visibleSessions.length)} of ${String(this.sessions.length)} sessions`;
+      const footer = `Showing ${String(page.start + 1)}-${String(page.end)} of ${String(filteredSessions.length)} sessions`;
       lines.push(currentTheme.fg('textMuted', truncateToWidth(footer, width, ELLIPSIS)));
     }
 

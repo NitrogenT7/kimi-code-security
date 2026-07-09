@@ -106,6 +106,9 @@ export type {
 
 export type { CronFiredEvent } from '@moonshot-ai/agent-core';
 
+// Shell-mode events for `!` command streaming.
+export type { ShellOutputEvent, ShellStartedEvent } from '@moonshot-ai/agent-core';
+
 export type MaybePromise<T> = T | Promise<T>;
 
 export type ApprovalHandler = (request: ApprovalRequest) => MaybePromise<ApprovalResponse>;

@@ -244,6 +244,119 @@ describe('SessionPickerComponent', () => {
     expect(nativeLine).not.toContain('[imported]');
   });
 
+  it('filters sessions by title when typing a search query', () => {
+    const now = new Date('2026-05-11T12:00:00.000Z').getTime();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+
+    const component = new SessionPickerComponent({
+      sessions: [
+        {
+          id: 'ses_alpha',
+          title: 'Alpha refactor',
+          work_dir: '/tmp/project',
+          updated_at: now - 60 * 1000,
+        },
+        {
+          id: 'ses_beta',
+          title: 'Beta redesign',
+          work_dir: '/tmp/project',
+          updated_at: now - 2 * 60 * 1000,
+        },
+      ],
+      loading: false,
+      currentSessionId: 'ses_other',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    component.handleInput('A');
+    component.handleInput('l');
+    component.handleInput('p');
+
+    const output = renderPlain(component);
+    expect(output).toContain('Alpha refactor');
+    expect(output).not.toContain('Beta redesign');
+    expect(output).toContain('search: Alp');
+  });
+
+  it('filters sessions by last_prompt when typing a search query', () => {
+    const now = new Date('2026-05-11T12:00:00.000Z').getTime();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+
+    const component = new SessionPickerComponent({
+      sessions: [
+        {
+          id: 'ses_alpha',
+          title: 'Alpha',
+          last_prompt: 'fix the parser',
+          work_dir: '/tmp/project',
+          updated_at: now - 60 * 1000,
+        },
+        {
+          id: 'ses_beta',
+          title: 'Beta',
+          last_prompt: 'update the ui',
+          work_dir: '/tmp/project',
+          updated_at: now - 2 * 60 * 1000,
+        },
+      ],
+      loading: false,
+      currentSessionId: 'ses_other',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    component.handleInput('p');
+    component.handleInput('a');
+    component.handleInput('r');
+    component.handleInput('s');
+
+    const output = renderPlain(component);
+    expect(output).toContain('Alpha');
+    expect(output).not.toContain('Beta');
+  });
+
+  it('clears the search query on Escape and shows all sessions again', () => {
+    const now = new Date('2026-05-11T12:00:00.000Z').getTime();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    const onCancel = vi.fn();
+
+    const component = new SessionPickerComponent({
+      sessions: [
+        { id: 'ses_alpha', title: 'Alpha', work_dir: '/tmp/project', updated_at: now },
+        { id: 'ses_beta', title: 'Beta', work_dir: '/tmp/project', updated_at: now - 60 * 1000 },
+      ],
+      loading: false,
+      currentSessionId: 'ses_other',
+      onSelect: vi.fn(),
+      onCancel,
+    });
+
+    component.handleInput('A');
+    component.handleInput('l');
+    expect(renderPlain(component)).not.toContain('Beta');
+
+    component.handleInput('\u001B');
+    const output = renderPlain(component);
+    expect(output).toContain('Alpha');
+    expect(output).toContain('Beta');
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('cancels the picker on Escape when no search query is active', () => {
+    const onCancel = vi.fn();
+    const component = new SessionPickerComponent({
+      sessions: [{ id: 'ses_alpha', title: 'Alpha', work_dir: '/tmp/project', updated_at: Date.now() }],
+      loading: false,
+      currentSessionId: 'ses_other',
+      onSelect: vi.fn(),
+      onCancel,
+    });
+
+    component.handleInput('\u001B');
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
   it('keeps every rendered line within the terminal width even for CJK content', () => {
     const now = new Date('2026-05-11T12:00:00.000Z').getTime();
     vi.spyOn(Date, 'now').mockReturnValue(now);

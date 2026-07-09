@@ -191,7 +191,7 @@ describe('CustomEditor paste marker expansion', () => {
     expect(editor.getText()).toContain(text2);
   });
 
-  it('handles Ctrl+V expansion when cursor is on marker', () => {
+  it('handles the paste-key expansion when cursor is on marker', () => {
     const editor = makeEditor();
     editor.onPasteImage = vi.fn(async () => false);
     const longText = 'line\n'.repeat(15).trimEnd();
@@ -199,7 +199,9 @@ describe('CustomEditor paste marker expansion', () => {
 
     expect(editor.getText()).toMatch(/\[paste #1/);
 
-    editor.handleInput('\x16');
+    // The editor binding is platform-aware: Ctrl+V on POSIX, Alt+V on Windows.
+    const expandPasteKey = process.platform === 'win32' ? '\u001bv' : '\u0016';
+    editor.handleInput(expandPasteKey);
 
     expect(editor.getText()).not.toContain('[paste #');
     expect(editor.getText()).toContain(longText);
@@ -278,5 +280,71 @@ describe('CustomEditor shortcut telemetry hooks', () => {
     editor.handleInput('\u001F');
 
     expect(onUndo).toHaveBeenCalledOnce();
+  });
+});
+
+describe('CustomEditor shell mode', () => {
+  it('enters bash mode when `!` is typed in an empty prompt', () => {
+    const editor = makeEditor();
+    const onInputModeChange = vi.fn();
+    editor.onInputModeChange = onInputModeChange;
+
+    editor.handleInput('!');
+
+    expect(editor.inputMode).toBe('bash');
+    expect(editor.getText()).toBe('');
+    expect(onInputModeChange).toHaveBeenCalledWith('bash');
+  });
+
+  it('does not enter bash mode when text is already present', () => {
+    const editor = makeEditor();
+    editor.handleInput('h');
+    editor.handleInput('!');
+
+    expect(editor.inputMode).toBe('prompt');
+    expect(editor.getText()).toBe('h!');
+  });
+
+  it('exits bash mode on Escape when the buffer is empty', () => {
+    const editor = makeEditor();
+    editor.handleInput('!');
+    const onInputModeChange = vi.fn();
+    editor.onInputModeChange = onInputModeChange;
+
+    editor.handleInput('\u001B');
+
+    expect(editor.inputMode).toBe('prompt');
+    expect(onInputModeChange).toHaveBeenCalledWith('prompt');
+  });
+
+  it('exits bash mode on Backspace when the buffer is empty', () => {
+    const editor = makeEditor();
+    editor.handleInput('!');
+
+    editor.handleInput('\u007F');
+
+    expect(editor.inputMode).toBe('prompt');
+  });
+
+  it('keeps bash mode while typing the command', () => {
+    const editor = makeEditor();
+    editor.handleInput('!');
+    editor.handleInput('l');
+    editor.handleInput('s');
+
+    expect(editor.inputMode).toBe('bash');
+    expect(editor.getText()).toBe('ls');
+  });
+
+  it('enters bash mode when a !-prefixed command is pasted into an empty prompt', () => {
+    const editor = makeEditor();
+    const onInputModeChange = vi.fn();
+    editor.onInputModeChange = onInputModeChange;
+
+    editor.handleInput('!echo hi');
+
+    expect(editor.inputMode).toBe('bash');
+    expect(editor.getText()).toBe('echo hi');
+    expect(onInputModeChange).toHaveBeenCalledWith('bash');
   });
 });

@@ -94,6 +94,12 @@ export interface RetryOrigin {
   readonly trigger?: string;
 }
 
+export interface ShellCommandOrigin {
+  readonly kind: 'shell_command';
+  readonly phase: 'input' | 'output';
+  readonly isError?: boolean;
+}
+
 export type PromptOrigin =
   | UserPromptOrigin
   | SkillActivationOrigin
@@ -104,7 +110,8 @@ export type PromptOrigin =
   | CronJobOrigin
   | CronMissedOrigin
   | HookResultOrigin
-  | RetryOrigin;
+  | RetryOrigin
+  | ShellCommandOrigin;
 
 export type GoalStatus = 'active' | 'paused' | 'blocked' | 'complete';
 export type GoalActor = 'user' | 'model' | 'runtime' | 'system';
@@ -514,6 +521,18 @@ export interface CronFiredEvent {
   readonly prompt: string;
 }
 
+export interface ShellOutputEvent {
+  readonly type: 'shell.output';
+  readonly commandId: string;
+  readonly update: { kind: 'stdout' | 'stderr'; text?: string };
+}
+
+export interface ShellStartedEvent {
+  readonly type: 'shell.started';
+  readonly commandId: string;
+  readonly taskId: string;
+}
+
 export type ToolListUpdatedReason = 'mcp.connected' | 'mcp.disconnected' | 'mcp.failed';
 
 export interface ToolListUpdatedEvent {
@@ -568,6 +587,8 @@ export type AgentEvent =
   | CompactionCompletedEvent
   | BackgroundTaskStartedEvent
   | BackgroundTaskTerminatedEvent
-  | CronFiredEvent;
+  | CronFiredEvent
+  | ShellOutputEvent
+  | ShellStartedEvent;
 
 export type Event = AgentEvent & { agentId: string; sessionId: string };

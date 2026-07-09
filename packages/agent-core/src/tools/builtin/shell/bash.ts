@@ -181,7 +181,8 @@ export class BashTool implements BuiltinTool<BashInput> {
       },
       approvalRule: literalRulePattern(this.name, args.command),
       matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, args.command),
-      execute: ({ signal, onUpdate }) => this.execution(args, signal, onUpdate),
+      execute: ({ signal, onUpdate, onForegroundTaskStart }) =>
+        this.execution(args, signal, onUpdate, onForegroundTaskStart),
     };
   }
 
@@ -216,6 +217,7 @@ export class BashTool implements BuiltinTool<BashInput> {
     args: BashInput,
     signal: AbortSignal,
     onUpdate?: ((update: ToolUpdate) => void) | undefined,
+    onForegroundTaskStart?: ((taskId: string) => void) | undefined,
   ): Promise<ExecutableToolResult> {
     if (signal.aborted) {
       return { isError: true, output: 'Aborted before command started' };
@@ -232,7 +234,7 @@ export class BashTool implements BuiltinTool<BashInput> {
             'Background execution is not available for this agent because TaskOutput and TaskStop are not enabled.',
         };
       }
-      return this.executeInBackground(args);
+      return this.executeInBackground(args, onForegroundTaskStart);
     }
 
     const timeoutMs = normalizeTimeoutMs(args.timeout, false);
@@ -263,8 +265,13 @@ export class BashTool implements BuiltinTool<BashInput> {
     const killProc = async (): Promise<void> => {
       if (killed) return;
       killed = true;
+      // When the user explicitly cancels a command, skip the graceful SIGTERM
+      // phase and force-kill immediately. On Windows the graceful taskkill /T
+      // often leaves Git Bash grandchildren alive, so a user-initiated abort
+      // would otherwise hang for the full grace period.
+      const signalToSend = aborted ? 'SIGKILL' : 'SIGTERM';
       try {
-        await proc.kill('SIGTERM');
+        await proc.kill(signalToSend);
       } catch {
         /* process already gone */
       }
@@ -355,7 +362,10 @@ export class BashTool implements BuiltinTool<BashInput> {
     }
   }
 
-  private async executeInBackground(args: BashInput): Promise<ExecutableToolResult> {
+  private async executeInBackground(
+    args: BashInput,
+    onForegroundTaskStart?: ((taskId: string) => void) | undefined,
+  ): Promise<ExecutableToolResult> {
     if (!this.backgroundManager) {
       return {
         isError: true,
@@ -396,6 +406,7 @@ export class BashTool implements BuiltinTool<BashInput> {
       taskId = backgroundManager.registerTask(
         new ProcessBackgroundTask(proc, command, args.description.trim()),
       );
+      onForegroundTaskStart?.(taskId);
     } catch (error) {
       try {
         await proc.kill('SIGTERM');

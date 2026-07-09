@@ -302,6 +302,43 @@ export class Session {
     });
   }
 
+  async runShellCommand(
+    command: string,
+    options: { commandId?: string } = {},
+  ): Promise<{ stdout: string; stderr: string; isError?: boolean; backgrounded?: boolean }> {
+    this.ensureOpen();
+    const trimmedCommand = normalizeRequiredString(
+      command,
+      'Command cannot be empty',
+      ErrorCodes.REQUEST_INVALID,
+    );
+    return this.rpc.runShellCommand({
+      sessionId: this.id,
+      command: trimmedCommand,
+      commandId: options.commandId,
+    });
+  }
+
+  async cancelShellCommand(commandId: string): Promise<void> {
+    this.ensureOpen();
+    const trimmedCommandId = normalizeRequiredString(
+      commandId,
+      'Command id cannot be empty',
+      ErrorCodes.REQUEST_INVALID,
+    );
+    await this.rpc.cancelShellCommand({ sessionId: this.id, commandId: trimmedCommandId });
+  }
+
+  async detachShellCommand(commandId: string): Promise<{ info?: BackgroundTaskInfo }> {
+    this.ensureOpen();
+    const trimmedCommandId = normalizeRequiredString(
+      commandId,
+      'Command id cannot be empty',
+      ErrorCodes.REQUEST_INVALID,
+    );
+    return this.rpc.detachShellCommand({ sessionId: this.id, commandId: trimmedCommandId });
+  }
+
   // --- Goal lifecycle ---------------------------------------------------
   // Deterministic user/host control surface. There is intentionally no
   // `updateGoal`: the goal's terminal status is decided by the model via the

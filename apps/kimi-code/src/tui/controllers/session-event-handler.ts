@@ -110,6 +110,8 @@ export interface SessionEventHost {
   restoreEditor(): void;
   restoreInputText(text: string): void;
   appendTranscriptEntry(entry: TranscriptEntry): void;
+  handleShellOutput(event: { commandId: string; update: { kind: string; text?: string } }): void;
+  handleShellStarted(event: { commandId: string; taskId: string }): void;
   sendNormalUserInput(text: string): void;
   updateTerminalTitle(): void;
   sendQueuedMessage(session: Session, item: QueuedMessage): void;
@@ -246,6 +248,8 @@ export class SessionEventHandler {
       case 'turn.step.completed': this.handleStepCompleted(event); break;
       case 'turn.step.retrying': break;
       case 'tool.progress': this.handleToolProgress(event); break;
+      case 'shell.output': this.host.handleShellOutput(event); break;
+      case 'shell.started': this.host.handleShellStarted(event); break;
       case 'assistant.delta': this.handleAssistantDelta(event); break;
       case 'hook.result': this.handleHookResult(event); break;
       case 'thinking.delta': this.handleThinkingDelta(event); break;
@@ -560,7 +564,7 @@ export class SessionEventHandler {
               conclusion: q.conclusion ?? (q.status === 'inconclusive' ? 'Unable to determine' : ''),
               confidence: q.confidence,
               depth: q.depth,
-              status: q.status as 'resolved' | 'inconclusive',
+              status: q.status,
             });
           }
         }
@@ -813,9 +817,27 @@ export class SessionEventHandler {
 
   private handleSessionMetaChanged(event: SessionMetaUpdatedEvent): void {
     const title = event.title ?? stringValue(event.patch?.['title']);
+    const lastPrompt = stringValue(event.patch?.['lastPrompt']);
+    const patch: Partial<AppState> = {};
     if (title !== undefined) {
-      this.host.setAppState({ sessionTitle: title });
-      this.host.updateTerminalTitle();
+      patch.sessionTitle = title;
+    }
+    if (lastPrompt !== undefined) {
+      patch.sessionLastPrompt = lastPrompt;
+    }
+    if (Object.keys(patch).length > 0) {
+      this.host.setAppState(patch);
+      if (title !== undefined) {
+        this.host.updateTerminalTitle();
+      }
+    }
+    // Keep the cached sessions list in sync so the picker search sees the latest prompt.
+    if (lastPrompt !== undefined) {
+      const currentSessionId = this.host.state.appState.sessionId;
+      const session = this.host.state.sessions.find((s) => s.id === currentSessionId);
+      if (session !== undefined) {
+        (session as { last_prompt?: string | null }).last_prompt = lastPrompt;
+      }
     }
   }
 
@@ -871,6 +893,7 @@ export class SessionEventHandler {
         );
         return;
       case 'pending':
+      case 'registered':
         this.showMcpServerStatusSpinner(server.name);
         return;
     }

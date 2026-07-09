@@ -425,6 +425,11 @@ export class Agent {
       getUsage: () => this.usage.data(),
       getTools: () => this.tools.data(),
       getBackground: (payload) => this.background.list(payload.activeOnly ?? false, payload.limit),
+      runShellCommand: (payload) => this.tools.runShellCommand(payload.command, payload.commandId),
+      cancelShellCommand: (payload) => {
+        this.tools.cancelShellCommand(payload.commandId);
+      },
+      detachShellCommand: (payload) => this.tools.detachShellCommand(payload.commandId),
     };
   }
 

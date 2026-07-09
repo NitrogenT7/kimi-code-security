@@ -475,6 +475,38 @@ export abstract class SDKRpcClientBase {
     });
   }
 
+  async runShellCommand(
+    input: SessionIdRpcInput & { command: string; commandId?: string },
+  ): Promise<{ stdout: string; stderr: string; isError?: boolean; backgrounded?: boolean }> {
+    const rpc = await this.getRpc();
+    return rpc.runShellCommand({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      command: input.command,
+      commandId: input.commandId,
+    });
+  }
+
+  async cancelShellCommand(input: SessionIdRpcInput & { commandId: string }): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.cancelShellCommand({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      commandId: input.commandId,
+    });
+  }
+
+  async detachShellCommand(
+    input: SessionIdRpcInput & { commandId: string },
+  ): Promise<{ info?: BackgroundTaskInfo }> {
+    const rpc = await this.getRpc();
+    return rpc.detachShellCommand({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      commandId: input.commandId,
+    });
+  }
+
   async createGoal(input: SessionIdRpcInput & CreateGoalInput): Promise<GoalSnapshot> {
     const rpc = await this.getRpc();
     return rpc.createGoal({

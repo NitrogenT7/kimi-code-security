@@ -206,6 +206,30 @@ export interface GetBackgroundPayload {
   /** Caps the number of tasks returned. When omitted, returns all matching tasks. */
   readonly limit?: number;
 }
+
+export interface RunShellCommandPayload {
+  readonly command: string;
+  readonly commandId?: string;
+}
+
+export interface RunShellCommandResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly isError?: boolean;
+  readonly backgrounded?: boolean;
+}
+
+export interface CancelShellCommandPayload {
+  readonly commandId: string;
+}
+
+export interface DetachShellCommandPayload {
+  readonly commandId: string;
+}
+
+export interface DetachShellCommandResult {
+  readonly info?: BackgroundTaskInfo;
+}
 export interface SkillSummary {
   readonly name: string;
   readonly description: string;
@@ -352,6 +376,9 @@ export interface AgentAPI {
   getUsage: (payload: EmptyPayload) => UsageStatus;
   getTools: (payload: EmptyPayload) => readonly ToolInfo[];
   getBackground: (payload: GetBackgroundPayload) => readonly BackgroundTaskInfo[];
+  runShellCommand: (payload: RunShellCommandPayload) => RunShellCommandResult;
+  cancelShellCommand: (payload: CancelShellCommandPayload) => void;
+  detachShellCommand: (payload: DetachShellCommandPayload) => DetachShellCommandResult;
 }
 
 type AgentAPIWithId = WithAgentId<AgentAPI>;

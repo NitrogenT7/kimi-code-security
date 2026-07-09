@@ -69,6 +69,12 @@ export interface RetryOrigin {
   readonly trigger?: string;
 }
 
+export interface ShellCommandOrigin {
+  readonly kind: 'shell_command';
+  readonly phase: 'input' | 'output';
+  readonly isError?: boolean;
+}
+
 export type PromptOrigin =
   | UserPromptOrigin
   | SkillActivationOrigin
@@ -79,7 +85,8 @@ export type PromptOrigin =
   | CronJobOrigin
   | CronMissedOrigin
   | HookResultOrigin
-  | RetryOrigin;
+  | RetryOrigin
+  | ShellCommandOrigin;
 
 export type ContextMessage = Message & {
   readonly origin?: PromptOrigin | undefined;

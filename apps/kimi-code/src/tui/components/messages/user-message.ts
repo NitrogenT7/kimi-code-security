@@ -12,11 +12,13 @@ import type { ImageAttachment } from '#/tui/utils/image-attachment-store';
 
 export class UserMessageComponent implements Component {
   private text: string;
+  private readonly bullet?: string;
   private spacerComponent: Spacer;
   private imageThumbnails: ImageThumbnail[];
 
-  constructor(text: string, images?: ImageAttachment[]) {
+  constructor(text: string, images?: ImageAttachment[], bullet?: string) {
     this.text = text;
+    this.bullet = bullet;
     this.spacerComponent = new Spacer(1);
     this.imageThumbnails = images?.map((img) => new ImageThumbnail(img)) ?? [];
   }
@@ -28,7 +30,8 @@ export class UserMessageComponent implements Component {
   }
 
   render(width: number): string[] {
-    const bullet = currentTheme.boldFg('roleUser', USER_MESSAGE_BULLET);
+    const marker = this.bullet ?? USER_MESSAGE_BULLET;
+    const bullet = marker.length > 0 ? currentTheme.boldFg('roleUser', marker) : '';
     const bulletWidth = visibleWidth(bullet);
     const contentWidth = Math.max(1, width - bulletWidth);
 
