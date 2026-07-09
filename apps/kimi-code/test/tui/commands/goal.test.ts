@@ -685,6 +685,19 @@ describe('handleGoalCommand', () => {
     expect(noSessionHost.showError).toHaveBeenCalled();
     expect(s.createGoal).not.toHaveBeenCalled();
   });
+
+  it('/goal set opens the structured goal dialog', async () => {
+    void handleGoalCommand(host, 'set');
+    await vi.waitFor(() => {
+      expect(host.mountEditorReplacement).toHaveBeenCalledOnce();
+    });
+    const dialog = mountedPicker(host);
+    expect(dialog).toBeInstanceOf(
+      await import('#/tui/components/dialogs/goal-set-dialog').then(
+        (m) => m.GoalSetDialogComponent,
+      ),
+    );
+  });
 });
 
 describe('dispatchInput /goal integration', () => {

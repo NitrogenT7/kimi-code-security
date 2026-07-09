@@ -13,9 +13,8 @@ function makeTUI(): TUI {
   return new TUI({} as unknown as import('@earendil-works/pi-tui').ProcessTerminal);
 }
 
-function submitEditor(editor: Editor): void {
-  editor.onSubmit?.(editor.getText());
-}
+const TAB = '\t';
+const SHIFT_TAB = '\u001B[Z';
 
 describe('GoalSetDialogComponent', () => {
   it('renders four editor tabs and a submit tab', () => {
@@ -34,8 +33,9 @@ describe('GoalSetDialogComponent', () => {
     const component = new GoalSetDialogComponent(makeTUI(), (res) => {
       result = res;
     });
+    component.focused = true;
 
-    // Type into each editor and advance to the next tab.
+    // Type into each editor and advance to the next tab with Tab.
     const editors: Editor[] = [];
     for (let i = 0; i < 4; i += 1) {
       const editor = (component as unknown as { tabs: Array<{ editor: Editor }> }).tabs[i]?.editor;
@@ -44,16 +44,16 @@ describe('GoalSetDialogComponent', () => {
     }
 
     editors[0]!.setText('Improve onboarding');
-    submitEditor(editors[0]!);
+    component.handleInput(TAB);
 
     editors[1]!.setText('Analyze drop-off; rewrite copy; add checklist');
-    submitEditor(editors[1]!);
+    component.handleInput(TAB);
 
     editors[2]!.setText('First-task completion rate > 50%');
-    submitEditor(editors[2]!);
+    component.handleInput(TAB);
 
     editors[3]!.setText('No dark patterns; no breaking API changes');
-    submitEditor(editors[3]!);
+    component.handleInput(TAB);
 
     // Now on the Submit tab, choose "Create goal".
     component.handleInput('1');
@@ -65,6 +65,69 @@ describe('GoalSetDialogComponent', () => {
       keyTasks: 'Analyze drop-off; rewrite copy; add checklist',
       endState: 'First-task completion rate > 50%',
       constraints: 'No dark patterns; no breaking API changes',
+    });
+  });
+
+  it('accepts typed characters via handleInput into the active editor', () => {
+    let result: GoalSetDialogResult | undefined;
+    const component = new GoalSetDialogComponent(makeTUI(), (res) => {
+      result = res;
+    });
+    component.focused = true;
+
+    component.handleInput('H');
+    component.handleInput('i');
+    component.handleInput(TAB); // next tab
+    component.handleInput('T');
+    component.handleInput('a');
+    component.handleInput('s');
+    component.handleInput('k');
+    component.handleInput(TAB); // next tab
+    component.handleInput('D');
+    component.handleInput('o');
+    component.handleInput('n');
+    component.handleInput('e');
+    component.handleInput(TAB); // next tab
+    component.handleInput('N');
+    component.handleInput('o');
+    component.handleInput('n');
+    component.handleInput('e');
+    component.handleInput(TAB); // submit tab
+    component.handleInput('1');
+    component.handleInput('\r');
+
+    expect(result).toEqual({
+      kind: 'ok',
+      purpose: 'Hi',
+      keyTasks: 'Task',
+      endState: 'Done',
+      constraints: 'None',
+    });
+  });
+
+  it('preserves text when switching tabs and Enter inserts newlines', () => {
+    let result: GoalSetDialogResult | undefined;
+    const component = new GoalSetDialogComponent(makeTUI(), (res) => {
+      result = res;
+    });
+    component.focused = true;
+
+    component.handleInput('Line 1');
+    component.handleInput('\r'); // Enter should insert a newline, not submit
+    component.handleInput('Line 2');
+    component.handleInput(TAB); // next tab
+    component.handleInput('Other');
+    component.handleInput(TAB); // next tab
+    component.handleInput(TAB); // next tab
+    component.handleInput(TAB); // submit tab
+    component.handleInput('\r'); // confirm
+
+    expect(result).toEqual({
+      kind: 'ok',
+      purpose: 'Line 1\nLine 2',
+      keyTasks: 'Other',
+      endState: '',
+      constraints: '',
     });
   });
 

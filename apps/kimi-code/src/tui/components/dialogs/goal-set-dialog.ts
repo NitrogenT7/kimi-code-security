@@ -45,6 +45,8 @@ export interface GoalSetDialogResult {
 interface EditorTab {
   readonly editor: Editor;
   readonly header: (typeof TAB_HEADERS)[number];
+  /** Cached value for this tab so text survives Editor.submitValue(). */
+  value: string;
 }
 
 export class GoalSetDialogComponent extends Container implements Focusable {
@@ -62,10 +64,10 @@ export class GoalSetDialogComponent extends Container implements Focusable {
     const theme = createEditorTheme();
     this.tabs = TAB_HEADERS.map((header) => {
       const editor = new Editor(tui, theme, { paddingX: 2 });
-      editor.onSubmit = () => {
-        this.nextTab();
-      };
-      return { header, editor };
+      // Enter should insert a newline in these multi-line editors, not submit
+      // and clear the buffer.
+      editor.disableSubmit = true;
+      return { header, editor, value: '' };
     });
   }
 
@@ -97,7 +99,12 @@ export class GoalSetDialogComponent extends Container implements Focusable {
 
     const tab = this.currentTabInfo();
     if (tab !== undefined) {
-      tab.editor.handleInput(data);
+      // Treat Enter/Return as a newline inside the multi-line editors.
+      if (matchesKey(data, Key.enter) || matchesKey(data, Key.return)) {
+        tab.editor.handleInput('\n');
+      } else {
+        tab.editor.handleInput(data);
+      }
     }
   }
 
@@ -162,7 +169,7 @@ export class GoalSetDialogComponent extends Container implements Focusable {
     // Hint line
     const hint = this.isSubmitTab()
       ? '↑↓ select  ·  1/2 choose  ·  ↵ confirm  ·  esc cancel'
-      : 'tab next  ·  shift+tab prev  ·  ctrl+enter next  ·  esc cancel';
+      : 'tab next  ·  shift+tab prev  ·  ↵ newline  ·  esc cancel';
     const hintLine = truncateToWidth(dim(` ${hint}`), innerWidth, '…');
     lines.push(accent('│') + '  ' + hintLine + ' '.repeat(Math.max(0, innerWidth - visibleWidth(hintLine))) + accent('│'));
 
@@ -219,7 +226,7 @@ export class GoalSetDialogComponent extends Container implements Focusable {
 
     for (let i = 0; i < TAB_HEADERS.length; i++) {
       const header = TAB_HEADERS[i];
-      const value = this.tabs[i]?.editor.getText().trim() ?? '';
+      const value = this.tabs[i]?.value.trim() ?? '';
       const headerLine = truncateToWidth(accent(` ${header}:`), innerWidth, '…');
       lines.push(currentTheme.fg('primary', '│') + '  ' + headerLine + ' '.repeat(Math.max(0, innerWidth - visibleWidth(headerLine))) + currentTheme.fg('primary', '│'));
       const displayValue = value.length > 0 ? value : dim('(empty)');
@@ -249,17 +256,35 @@ export class GoalSetDialogComponent extends Container implements Focusable {
   }
 
   private nextTab(): void {
+    this.captureCurrentTab();
     this.currentTab = (this.currentTab + 1) % (TAB_HEADERS.length + 1);
+    this.restoreCurrentTab();
     if (this.isSubmitTab()) {
       this.submitActionIdx = 0;
     }
   }
 
   private prevTab(): void {
+    this.captureCurrentTab();
     const total = TAB_HEADERS.length + 1;
     this.currentTab = (this.currentTab - 1 + total) % total;
+    this.restoreCurrentTab();
     if (this.isSubmitTab()) {
       this.submitActionIdx = 0;
+    }
+  }
+
+  private captureCurrentTab(): void {
+    const tab = this.currentTabInfo();
+    if (tab !== undefined) {
+      tab.value = tab.editor.getText();
+    }
+  }
+
+  private restoreCurrentTab(): void {
+    const tab = this.currentTabInfo();
+    if (tab !== undefined) {
+      tab.editor.setText(tab.value);
     }
   }
 
@@ -279,12 +304,15 @@ export class GoalSetDialogComponent extends Container implements Focusable {
       this.onDone({ kind: 'cancel' });
       return;
     }
+    // Ensure the currently visible editor's text is captured before reading
+    // the cached tab values.
+    this.captureCurrentTab();
     this.onDone({
       kind: 'ok',
-      purpose: this.tabs[0]?.editor.getText().trim(),
-      keyTasks: this.tabs[1]?.editor.getText().trim(),
-      endState: this.tabs[2]?.editor.getText().trim(),
-      constraints: this.tabs[3]?.editor.getText().trim(),
+      purpose: this.tabs[0]?.value.trim(),
+      keyTasks: this.tabs[1]?.value.trim(),
+      endState: this.tabs[2]?.value.trim(),
+      constraints: this.tabs[3]?.value.trim(),
     });
   }
 
