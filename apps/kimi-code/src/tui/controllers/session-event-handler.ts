@@ -50,7 +50,7 @@ import {
   argsRecord,
   formatErrorPayload,
   formatErrorMessage,
-  isQuestionItemShape,
+  normalizeQuestionItem,
   serializeToolResultOutput,
   stringValue,
 } from '../utils/event-payload';
@@ -553,8 +553,8 @@ export class SessionEventHandler {
         const questions: UiQuestionItem[] = [];
         const findings: UiFindingItem[] = [];
         for (const item of rawTodos) {
-          if (!isQuestionItemShape(item)) continue;
-          const q = item as unknown as UiQuestionItem;
+          const q = normalizeQuestionItem(item);
+          if (q === null) continue;
           if (q.status === 'pending' || q.status === 'investigating') {
             questions.push(q);
           } else if (q.status === 'resolved' || q.status === 'inconclusive') {

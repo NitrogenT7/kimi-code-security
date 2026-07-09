@@ -181,22 +181,25 @@ function renderQuestion(q: UiQuestionItem, colors: ColorPalette, width: number):
   const firstLine = `  ${marker} ${truncateToWidth(title, width - 20)} ${badge}`;
   lines.push(firstLine);
 
-  // Evidence lines (tree-style)
-  if (q.evidence.length > 0) {
-    const showEvidence = q.evidence.slice(0, MAX_EVIDENCE_PER_QUESTION);
+  // Evidence lines (tree-style). Defensive `?? []` in case a question slips
+  // through without the field (older sessions / malformed LLM output).
+  const evidence = q.evidence ?? [];
+  if (evidence.length > 0) {
+    const showEvidence = evidence.slice(0, MAX_EVIDENCE_PER_QUESTION);
     for (const ev of showEvidence) {
       const em = evidenceMarker(ev.status, colors);
       lines.push(`    ${em} ${chalk.hex(colors.textDim)(truncateToWidth(ev.description, width - 10))}`);
     }
-    if (q.evidence.length > MAX_EVIDENCE_PER_QUESTION) {
+    if (evidence.length > MAX_EVIDENCE_PER_QUESTION) {
       lines.push(`    ${chalk.hex(colors.textDim)('…')}`);
     }
   }
 
   // Blockers
-  if (q.blockers.length > 0) {
-    const blockerText = q.blockers.slice(0, 2).join('; ');
-    const more = q.blockers.length > 2 ? ` …+${q.blockers.length - 2}` : '';
+  const blockers = q.blockers ?? [];
+  if (blockers.length > 0) {
+    const blockerText = blockers.slice(0, 2).join('; ');
+    const more = blockers.length > 2 ? ` …+${blockers.length - 2}` : '';
     lines.push(`    ${chalk.hex(colors.warning)(`⚡ ${truncateToWidth(blockerText + more, width - 10)}`)}`);
   }
 

@@ -3,6 +3,10 @@ import {
   type KimiErrorPayload,
 } from '@moonshot-ai/kimi-code-sdk';
 
+import type {
+  UiEvidenceItem,
+  UiQuestionItem,
+} from '#/tui/components/chrome/investigation-board';
 import {
   STREAMING_ARGS_FIELD_RE,
   STREAMING_ARGS_PREVIEW_MAX_CHARS,
@@ -102,6 +106,45 @@ export function isQuestionItemShape(
   if (typeof rec['question'] !== 'string' || rec['question'].trim().length === 0) return false;
   const s = rec['status'];
   return s === 'pending' || s === 'investigating' || s === 'resolved' || s === 'inconclusive';
+}
+
+/**
+ * Normalize an untrusted TodoList item into a fully-populated
+ * {@link UiQuestionItem}. Older sessions persisted question items before the
+ * `blockers`/`evidence` fields existed, and the LLM may also omit optional
+ * fields; without defaulting, the InvestigationBoard renderer crashes on
+ * `q.blockers.length` / `q.evidence.length`. Returns null if the value is not
+ * a question-shaped item.
+ */
+export function normalizeQuestionItem(value: unknown): UiQuestionItem | null {
+  if (!isQuestionItemShape(value)) return null;
+  const rec = value as Record<string, unknown>;
+
+  const evidence: UiEvidenceItem[] = Array.isArray(rec['evidence'])
+    ? rec['evidence']
+        .filter((e): e is Record<string, unknown> => typeof e === 'object' && e !== null)
+        .map((e) => ({
+          status:
+            e['status'] === 'confirmed' || e['status'] === 'refuted' ? e['status'] : 'checking',
+          description: typeof e['description'] === 'string' ? e['description'] : '',
+        }))
+    : [];
+
+  const blockers: string[] = Array.isArray(rec['blockers'])
+    ? rec['blockers'].filter((b): b is string => typeof b === 'string')
+    : [];
+
+  return {
+    id: rec['id'] as string,
+    question: rec['question'] as string,
+    status: rec['status'] as UiQuestionItem['status'],
+    evidence,
+    blockers,
+    confidence: typeof rec['confidence'] === 'string' ? rec['confidence'] : 'medium',
+    depth: typeof rec['depth'] === 'string' ? rec['depth'] : 'deep',
+    conclusion: typeof rec['conclusion'] === 'string' ? rec['conclusion'] : undefined,
+    parentId: typeof rec['parentId'] === 'string' ? rec['parentId'] : undefined,
+  };
 }
 
 export function formatErrorMessage(error: unknown): string {
