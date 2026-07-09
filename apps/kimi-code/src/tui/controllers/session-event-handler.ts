@@ -893,8 +893,12 @@ export class SessionEventHandler {
         );
         return;
       case 'pending':
-      case 'registered':
         this.showMcpServerStatusSpinner(server.name);
+        return;
+      case 'registered':
+        // Lazy-registered but not connected yet: do not render a "connecting"
+        // spinner, because nothing finalizes it until the user loads the group
+        // (it would stay stuck forever). The summary above still reflects it.
         return;
     }
   }

@@ -1,8 +1,9 @@
+
+
 import type {
   BackgroundTaskInfo,
   Event,
 } from '@moonshot-ai/kimi-code-sdk';
-import type { Component } from '@earendil-works/pi-tui';
 
 import {
   AgentSwarmProgressComponent,
@@ -37,18 +38,6 @@ export interface SubAgentEventHandlerDependencies {
   readonly backgroundTasks: ReadonlyMap<string, BackgroundTaskInfo>;
   readonly backgroundTaskTranscriptedTerminal: Set<string>;
   readonly syncBackgroundAgentBadge: () => void;
-}
-
-function renderedRowsAfterChild(
-  children: readonly Component[],
-  child: Component,
-  width: number,
-): number {
-  const childIndex = children.indexOf(child);
-  if (childIndex < 0) return 0;
-  return children
-    .slice(childIndex + 1)
-    .reduce((sum, component) => sum + component.render(width).length, 0);
 }
 
 export class SubAgentEventHandler {
@@ -559,20 +548,16 @@ export class SubAgentEventHandler {
   }
 
   private agentSwarmGridHeight(): number | undefined {
-    const { state } = this.host;
-    const terminalRows = state.ui.terminal.rows;
-    const terminalColumns = state.ui.terminal.columns;
-    if (!Number.isFinite(terminalColumns) || terminalColumns <= 0) {
-      return agentSwarmGridHeightForTerminalRows(terminalRows);
-    }
-
-    const width = Math.floor(terminalColumns);
-    const rowsAfterSwarm = renderedRowsAfterChild(
-      state.ui.children,
-      state.transcriptContainer,
-      width,
-    );
-    return agentSwarmGridHeightForTerminalRows(terminalRows, rowsAfterSwarm);
+    // Keep the swarm grid height stable: don't depend on the rows rendered by
+    // siblings below the transcript (editor, queue, board, footer, etc.). Those
+    // components rebuild frequently during a swarm run, so a dynamic
+    // rowsAfterSwarm makes the grid height oscillate every frame. That pushes
+    // pi-tui's firstChanged line above the viewport and forces a full render
+    // that clears the screen and re-homes the cursor, which the user sees as
+    // "jumping to the top". Using a fixed followingRows keeps the height steady
+    // so the diff stays within the viewport.
+    const terminalRows = this.host.state.ui.terminal.rows;
+    return agentSwarmGridHeightForTerminalRows(terminalRows, 0);
   }
 
   private markAgentSwarmFailedOrCancelled(
