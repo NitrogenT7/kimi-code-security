@@ -246,6 +246,32 @@ describe('useWorkspaceState — abortCurrentPrompt', () => {
     expect(apiMock.abortPrompt).toHaveBeenCalledWith('sess_1', 'prompt_stale');
     expect(apiMock.abortSession).not.toHaveBeenCalled();
   });
+
+  it('uses a server-v2 msg prompt id recovered from session state', async () => {
+    apiMock.abortPrompt.mockResolvedValue({ aborted: true });
+    const state = createState();
+    state.promptIdBySession = {};
+    state.sessions = [{ ...state.sessions[0]!, currentPromptId: 'msg_live' }];
+    const workspace = useWorkspaceState(state, createDeps());
+
+    await workspace.abortCurrentPrompt();
+
+    expect(apiMock.abortPrompt).toHaveBeenCalledWith('sess_1', 'msg_live');
+    expect(apiMock.abortSession).not.toHaveBeenCalled();
+  });
+
+  it('does not send synthetic projector prompt ids to per-prompt abort', async () => {
+    apiMock.abortSession.mockResolvedValue({ aborted: true });
+    const state = createState();
+    state.promptIdBySession = {};
+    state.sessions = [{ ...state.sessions[0]!, currentPromptId: 'pr_synthetic' }];
+    const workspace = useWorkspaceState(state, createDeps());
+
+    await workspace.abortCurrentPrompt();
+
+    expect(apiMock.abortPrompt).not.toHaveBeenCalled();
+    expect(apiMock.abortSession).toHaveBeenCalledWith('sess_1');
+  });
 });
 
 describe('mergeWorkspaces', () => {

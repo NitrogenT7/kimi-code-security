@@ -26,6 +26,7 @@ import type {
   KimiEventConnection,
   KimiEventHandlers,
   KimiWebApi,
+  OAuthLoginStartResult,
   Page,
   PageRequest,
   PromptSubmission,
@@ -55,7 +56,7 @@ import {
 } from './mappers';
 import type {
   WireAuthResult,
-  WireBackgroundTask,
+  WireTask,
   WireConfig,
   WireEvent,
   WireFileMeta,
@@ -661,7 +662,7 @@ export class DaemonKimiWebApi implements KimiWebApi {
     const query: Record<string, string | undefined> = {
       status: status,
     };
-    const data = await this.http.get<{ items: WireBackgroundTask[] }>(
+    const data = await this.http.get<{ items: WireTask[] }>(
       `/sessions/${encodeURIComponent(sessionId)}/tasks`,
       query,
     );
@@ -677,7 +678,7 @@ export class DaemonKimiWebApi implements KimiWebApi {
       with_output: input?.withOutput,
       output_bytes: input?.outputBytes,
     };
-    const data = await this.http.get<WireBackgroundTask>(
+    const data = await this.http.get<WireTask>(
       `/sessions/${encodeURIComponent(sessionId)}/tasks/${encodeURIComponent(taskId)}`,
       query,
     );
@@ -1184,27 +1185,24 @@ export class DaemonKimiWebApi implements KimiWebApi {
     };
   }
 
-  async startOAuthLogin(): Promise<{
-    flowId: string;
-    provider: string;
-    verificationUri: string;
-    verificationUriComplete: string;
-    userCode: string;
-    expiresIn: number;
-    interval: number;
-    status: 'pending';
-    expiresAt: string;
-  }> {
+  async startOAuthLogin(): Promise<OAuthLoginStartResult> {
     const data = await this.http.post<WireOAuthLoginStartResult>('/oauth/login', {});
+    if (data.status === 'authenticated') {
+      return {
+        flowId: data.flow_id,
+        provider: data.provider,
+        status: 'authenticated',
+      };
+    }
     return {
       flowId: data.flow_id,
       provider: data.provider,
+      status: 'pending',
       verificationUri: data.verification_uri,
       verificationUriComplete: data.verification_uri_complete,
       userCode: data.user_code,
       expiresIn: data.expires_in,
       interval: data.interval,
-      status: data.status,
       expiresAt: data.expires_at,
     };
   }

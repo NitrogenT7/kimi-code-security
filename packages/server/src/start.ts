@@ -264,8 +264,8 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
     if (opts.insecureNoTls !== true) {
       await refusePublicBind(
         'Refusing to bind a non-loopback host without TLS. ' +
-          'Put the server behind a TLS-terminating reverse proxy (Caddy/nginx), ' +
-          'or pass --insecure-no-tls to acknowledge the risk.',
+        'Put the server behind a TLS-terminating reverse proxy (Caddy/nginx), ' +
+        'or pass --insecure-no-tls to acknowledge the risk.',
       );
     }
     if (passwordHash === undefined) {

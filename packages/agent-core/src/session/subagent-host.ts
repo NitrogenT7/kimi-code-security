@@ -6,7 +6,7 @@ import {
 
 import type { Agent } from '../agent';
 import type { PromptOrigin } from '../agent/context';
-import { ErrorCodes, type KimiErrorPayload } from '../errors';
+import { ErrorCodes } from '../errors';
 import { DenyAllPermissionPolicy } from '../agent/permission/policies/deny-all';
 import { InMemoryAgentRecordPersistence } from '../agent/records';
 import { isAbortError } from '../loop/errors';
@@ -507,7 +507,7 @@ async function runChildTurnToCompletion(child: Agent, signal: AbortSignal): Prom
   const completion = await child.turn.waitForCurrentTurn(signal);
   const turnEnded = completion.event;
   if (turnEnded.reason !== 'completed') {
-    if (turnEnded.reason === 'filtered') {
+    if (turnEnded.error?.code === ErrorCodes.PROVIDER_FILTERED) {
       throw new Error('Subagent turn blocked by provider safety policy');
     }
     if (turnEnded.error?.code === ErrorCodes.PROVIDER_RATE_LIMIT) {
@@ -524,7 +524,10 @@ async function runChildTurnToCompletion(child: Agent, signal: AbortSignal): Prom
   }
 }
 
-function providerRateLimitErrorFromPayload(error: KimiErrorPayload): APIProviderRateLimitError {
+function providerRateLimitErrorFromPayload(error: {
+  readonly message: string;
+  readonly details?: Record<string, unknown>;
+}): APIProviderRateLimitError {
   const requestId =
     typeof error.details?.['requestId'] === 'string' ? error.details['requestId'] : null;
   return new APIProviderRateLimitError(error.message, requestId);

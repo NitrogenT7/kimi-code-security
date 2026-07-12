@@ -1630,11 +1630,12 @@ export function useWorkspaceState(rawState: ExtendedState, deps: UseWorkspaceSta
     // 1. Authoritative id captured at submit time.
     let promptId = rawState.promptIdBySession[sid];
 
-    // 2. Fallback to projector-derived id only when it is a real daemon prompt_id
-    //    (synthetic `pr_...` ids are rejected by the daemon).
+    // 2. Fallback to projector-derived id only when it is a real daemon prompt_id.
+    //    The v1 daemon uses `prompt_...`, server-v2 legacy uses `msg_...`;
+    //    only local synthetic `pr_...` ids are rejected by the daemon.
     if (promptId === undefined) {
       const candidate = session?.currentPromptId;
-      if (candidate?.startsWith('prompt_')) {
+      if (candidate !== undefined && candidate.length > 0 && !candidate.startsWith('pr_')) {
         promptId = candidate;
       }
     }

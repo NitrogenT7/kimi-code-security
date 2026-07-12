@@ -747,17 +747,7 @@ export interface KimiWebApi {
     defaultModel: string | null;
     managedProvider: { status: string } | null;
   }>;
-  startOAuthLogin(): Promise<{
-    flowId: string;
-    provider: string;
-    verificationUri: string;
-    verificationUriComplete: string;
-    userCode: string;
-    expiresIn: number;
-    interval: number;
-    status: 'pending';
-    expiresAt: string;
-  }>;
+  startOAuthLogin(): Promise<OAuthLoginStartResult>;
   pollOAuthLogin(): Promise<{
     flowId: string;
     status: 'pending' | 'authenticated' | 'expired' | 'cancelled';
@@ -766,3 +756,22 @@ export interface KimiWebApi {
   cancelOAuthLogin(): Promise<{ cancelled: boolean; status: string }>;
   logout(): Promise<{ loggedOut: boolean }>;
 }
+
+/** Result of `startOAuthLogin()`, mirroring the wire discriminated union. */
+export type OAuthLoginStartResult =
+  | {
+      flowId: string;
+      provider: string;
+      status: 'pending';
+      verificationUri: string;
+      verificationUriComplete: string;
+      userCode: string;
+      expiresIn: number;
+      interval: number;
+      expiresAt: string;
+    }
+  | {
+      flowId: string;
+      provider: string;
+      status: 'authenticated';
+    };

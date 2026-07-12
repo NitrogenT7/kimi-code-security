@@ -41,6 +41,9 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@moonshot-ai/agent-core-v2": "workspace:^",
+    "@moonshot-ai/kap-server": "workspace:^",
+    "@moonshot-ai/klient": "workspace:^",
     "@types/ws": "^8.18.0"
   }
 }

@@ -32,7 +32,7 @@ import type {
 import type {
   WireApprovalRequest,
   WireApprovalResponse,
-  WireBackgroundTask,
+  WireTask,
   WireFsEntry,
   WireImageSource,
   WireMessage,
@@ -364,7 +364,7 @@ export function toWireQuestionResponse(input: QuestionResponse): WireQuestionRes
 // Task mapper
 // ---------------------------------------------------------------------------
 
-export function toAppTask(wire: WireBackgroundTask): AppTask {
+export function toAppTask(wire: WireTask): AppTask {
   return {
     id: wire.id,
     sessionId: wire.session_id,
@@ -647,7 +647,7 @@ export function toAppEvent(wire: WireEvent): AppEvent {
         dismissedAt: w.payload.dismissed_at,
       };
 
-    // ----- Background tasks -----
+    // ----- Tasks -----
     case 'event.task.created':
       return {
         type: 'taskCreated',

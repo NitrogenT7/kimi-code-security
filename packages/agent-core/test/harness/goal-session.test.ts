@@ -581,7 +581,11 @@ describe('goal session end-to-end', () => {
     expect(goal?.status).toBe('paused');
     expect(goal?.terminalReason).toBe('Paused after provider safety policy block');
     expect(events).toContainEqual(
-      expect.objectContaining({ type: 'turn.ended', reason: 'filtered' }),
+      expect.objectContaining({
+        type: 'turn.ended',
+        reason: 'failed',
+        error: expect.objectContaining({ code: 'provider.filtered' }),
+      }),
     );
   });
 

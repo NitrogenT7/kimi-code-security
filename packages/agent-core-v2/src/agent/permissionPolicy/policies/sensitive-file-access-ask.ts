@@ -1,0 +1,16 @@
+import type { ResolvedToolExecutionHookContext } from '#/agent/tool/toolHooks';
+import { isSensitiveFile } from '#/_base/tools/policies/sensitive';
+import type {
+  PermissionPolicy,
+  PermissionPolicyResult,
+} from '#/agent/permissionPolicy/types';
+import { fileAccesses } from './path-utils';
+
+export class SensitiveFileAccessAskPermissionPolicyService implements PermissionPolicy {
+  readonly name = 'sensitive-file-access-ask';
+
+  evaluate(context: ResolvedToolExecutionHookContext): PermissionPolicyResult | undefined {
+    const access = fileAccesses(context).find((fileAccess) => isSensitiveFile(fileAccess.path));
+    return access === undefined ? undefined : { kind: 'ask' };
+  }
+}

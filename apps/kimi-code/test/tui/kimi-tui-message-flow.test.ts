@@ -2931,6 +2931,45 @@ command = "vim"
     expect(transcript).not.toContain('/export-debug-zip');
   });
 
+  it('shows a programmatic abort reason instead of reporting a user interruption', async () => {
+    const { driver } = await makeDriver();
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'turn.step.interrupted',
+        agentId: 'main',
+        sessionId: 'ses-1',
+        turnId: 1,
+        step: 1,
+        reason: 'aborted',
+        message: 'Tool execution timed out',
+      } as Event,
+      vi.fn(),
+    );
+
+    const transcript = stripSgr(renderTranscript(driver));
+    expect(transcript).toContain('Error: Tool execution timed out');
+    expect(transcript).not.toContain('Interrupted by user');
+  });
+
+  it('keeps unmessaged aborted events compatible with user interruptions', async () => {
+    const { driver } = await makeDriver();
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'turn.step.interrupted',
+        agentId: 'main',
+        sessionId: 'ses-1',
+        turnId: 1,
+        step: 1,
+        reason: 'aborted',
+      } as Event,
+      vi.fn(),
+    );
+
+    expect(stripSgr(renderTranscript(driver))).toContain('Interrupted by user');
+  });
+
   it('appends the /export-debug-zip hint beneath session error messages', async () => {
     const { driver } = await makeDriver();
 

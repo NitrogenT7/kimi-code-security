@@ -384,7 +384,7 @@ export class TurnFlow {
         goalBecameActive &&
         end.event.reason !== 'cancelled' &&
         end.event.reason !== 'failed' &&
-        end.event.reason !== 'filtered'
+        end.event.reason !== 'blocked'
       ) {
         // The ordinary turn created or resumed the goal, so it counts as the
         // first active goal turn before the continuation driver takes over.
@@ -450,11 +450,7 @@ export class TurnFlow {
         await this.agent.goal.pauseActiveGoal({ reason: goalFailurePauseReason(end.event.error) });
         return end;
       }
-      if (end.event.reason === 'filtered') {
-        await this.agent.goal.pauseActiveGoal({ reason: GOAL_PROVIDER_FILTERED_PAUSE_REASON });
-        return end;
-      }
-      if (end.blockedByUserPromptHook === true) {
+      if (end.event.reason === 'blocked' || end.blockedByUserPromptHook === true) {
         await this.agent.goal.markBlocked({ reason: 'Blocked by UserPromptSubmit hook' });
         return end;
       }
@@ -540,14 +536,25 @@ export class TurnFlow {
       } else {
         const stopReason = await this.runStepLoop(turnId, signal);
         completedStopReason = stopReason;
-        const reason: TurnEndReason =
-          stopReason === 'aborted' ? 'cancelled' : stopReason === 'filtered' ? 'filtered' : 'completed';
-        ended = {
-          type: 'turn.ended',
-          turnId,
-          reason,
-          durationMs: Date.now() - startedAt,
-        };
+        if (stopReason === 'filtered') {
+          const summary = providerFilteredPayload(turnId);
+          ended = {
+            type: 'turn.ended',
+            turnId,
+            reason: 'failed',
+            error: summary,
+            durationMs: Date.now() - startedAt,
+          };
+          errorEvent = { type: 'error', ...summary };
+        } else {
+          const reason: TurnEndReason = stopReason === 'aborted' ? 'cancelled' : 'completed';
+          ended = {
+            type: 'turn.ended',
+            turnId,
+            reason,
+            durationMs: Date.now() - startedAt,
+          };
+        }
       }
     } catch (error) {
       if (isAbortError(error)) {
@@ -685,7 +692,7 @@ export class TurnFlow {
       // The terminal turn.ended is emitted by runOneTurn (synchronously with the
       // activeTurn clear), not here, so the session is idle the moment it fires.
       return {
-        event: { type: 'turn.ended', turnId, reason: 'completed', durationMs: Date.now() - startedAt },
+        event: { type: 'turn.ended', turnId, reason: 'blocked', durationMs: Date.now() - startedAt },
         blocked: true,
       };
     }
@@ -1265,13 +1272,26 @@ function summarizeTurnError(error: unknown, turnId: number): KimiErrorPayload {
   return { ...payload, details };
 }
 
-function goalFailurePauseReason(error: KimiErrorPayload | undefined): string {
+function providerFilteredPayload(turnId: number): KimiErrorPayload {
+  return {
+    code: ErrorCodes.PROVIDER_FILTERED,
+    message: 'Provider safety policy blocked the response.',
+    name: 'ProviderFilteredError',
+    details: { finishReason: 'filtered', turnId },
+    retryable: false,
+  };
+}
+
+function goalFailurePauseReason(error: TurnEndedEvent['error']): string {
   if (error?.code === ErrorCodes.PROVIDER_RATE_LIMIT) return GOAL_RATE_LIMIT_PAUSE_REASON;
   if (error?.code === ErrorCodes.PROVIDER_CONNECTION_ERROR) {
     return pauseReasonWithMessage(GOAL_PROVIDER_CONNECTION_PAUSE_PREFIX, error.message);
   }
   if (error?.code === ErrorCodes.PROVIDER_AUTH_ERROR) {
     return pauseReasonWithMessage(GOAL_PROVIDER_AUTH_PAUSE_PREFIX, error.message);
+  }
+  if (error?.code === ErrorCodes.PROVIDER_FILTERED) {
+    return GOAL_PROVIDER_FILTERED_PAUSE_REASON;
   }
   if (error?.code === ErrorCodes.PROVIDER_API_ERROR) {
     return pauseReasonWithMessage(GOAL_PROVIDER_API_PAUSE_PREFIX, error.message);
@@ -1319,7 +1339,8 @@ type TelemetryInterruptReason =
   | 'aborted'
   | 'max_steps'
   | 'error'
-  | 'filtered';
+  | 'filtered'
+  | 'blocked';
 
 function telemetryInterruptReason(
   reason: LoopTurnInterruptedEvent['reason'] | Exclude<TurnEndedEvent['reason'], 'completed'>,
@@ -1330,6 +1351,7 @@ function telemetryInterruptReason(
   }
   if (reason === 'aborted' || reason === 'cancelled') return 'aborted';
   if (reason === 'failed') return 'error';
+  if (reason === 'blocked') return 'blocked';
   // Remaining values are `max_steps` | `error` | `filtered`, which match the
   // telemetry enum.
   return reason;

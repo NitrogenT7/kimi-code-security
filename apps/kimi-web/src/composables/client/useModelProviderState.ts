@@ -7,7 +7,15 @@
 
 import { ref, type ComputedRef } from 'vue';
 import { getKimiWebApi } from '../../api';
-import type { AppMessage, AppModel, AppProvider, AppSession, AppSkill, ThinkingLevel } from '../../api/types';
+import type {
+  AppMessage,
+  AppModel,
+  AppProvider,
+  AppSession,
+  AppSkill,
+  OAuthLoginStartResult,
+  ThinkingLevel,
+} from '../../api/types';
 import { safeGetString, safeSetString, STORAGE_KEYS } from '../../lib/storage';
 import { coerceThinkingForModel, thinkingLevelForModelSwitch } from '../../lib/modelThinking';
 import { beginLocalTurn, settleLocalTurn } from './useWorkspaceState';
@@ -373,17 +381,7 @@ export function useModelProviderState(
   }
 
   /** Start managed Kimi OAuth device flow. Returns flow data or null on error. */
-  async function startOAuthLogin(): Promise<{
-    flowId: string;
-    provider: string;
-    verificationUri: string;
-    verificationUriComplete: string;
-    userCode: string;
-    expiresIn: number;
-    interval: number;
-    status: 'pending';
-    expiresAt: string;
-  } | null> {
+  async function startOAuthLogin(): Promise<OAuthLoginStartResult | null> {
     try {
       const api = getKimiWebApi();
       return await api.startOAuthLogin();
