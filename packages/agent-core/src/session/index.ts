@@ -9,6 +9,7 @@ import type { KimiConfig, SDKSessionRPC } from '#/rpc';
 import { proxyWithExtraPayload } from '#/rpc/types';
 
 import { Agent, type AgentOptions, type AgentType } from '../agent';
+import { GoalTemplateRegistry } from '../goal-template';
 import { HookEngine, type HookDef } from './hooks';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
 import { parseBooleanEnv, resolveConfigValue, type BackgroundConfig } from '../config';
@@ -58,6 +59,7 @@ export interface SessionOptions {
   readonly hooks?: readonly HookDef[];
   readonly permissionRules?: readonly PermissionRule[];
   readonly skills?: SessionSkillConfig;
+  readonly goalTemplates?: SessionGoalTemplateConfig;
   readonly mcpConfig?: SessionMcpConfig;
   readonly telemetry?: TelemetryClient | undefined;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
@@ -74,6 +76,11 @@ export interface SessionSkillConfig {
   readonly pluginSkillRoots?: readonly SkillRoot[];
   readonly mergeAllAvailableSkills?: boolean;
   readonly builtinDir?: string;
+}
+
+export interface SessionGoalTemplateConfig {
+  readonly userHomeDir?: string;
+  readonly extraDirs?: readonly string[];
 }
 
 export interface AgentMeta {
@@ -140,6 +147,7 @@ export class Session {
   readonly rpc: SDKSessionRPC;
   readonly telemetry: TelemetryClient;
   readonly skills: SkillRegistry;
+  readonly goalTemplates: GoalTemplateRegistry;
   readonly agents: Map<string, AgentEntry> = new Map();
   readonly mcp: McpConnectionManager;
   readonly mcpGroupRegistry: McpGroupRegistry | undefined;
@@ -187,6 +195,7 @@ export class Session {
     this.skills = new SkillRegistry({
       sessionId: options.id,
     });
+    this.goalTemplates = new GoalTemplateRegistry();
     this.mcp = new McpConnectionManager({
       oauthService: new McpOAuthService({ kimiHomeDir: options.kimiHomeDir }),
       log: this.log,
@@ -195,7 +204,7 @@ export class Session {
     this.mcp.onStatusChange((entry) => {
       this.onMcpServerStatusChange(entry);
     });
-    this.skillsReady = this.loadSkills()
+    this.skillsReady = Promise.all([this.loadSkills(), this.loadGoalTemplates()])
       .catch((error: unknown) => {
         this.log.error('skills load failed', error);
       })
@@ -475,6 +484,11 @@ export class Session {
     return this.skills.listSkills().map(summarizeSkill);
   }
 
+  async listGoalTemplates() {
+    await this.skillsReady;
+    return this.goalTemplates.listSummaries();
+  }
+
   private async loadSkills(): Promise<void> {
     const roots = await resolveSkillRoots({
       paths: {
@@ -490,6 +504,16 @@ export class Session {
     });
     await this.skills.loadRoots(roots);
     registerBuiltinSkills(this.skills);
+  }
+
+  private async loadGoalTemplates(): Promise<void> {
+    await this.goalTemplates.loadRoots(
+      {
+        userHomeDir: this.options.goalTemplates?.userHomeDir ?? homedir(),
+        workDir: this.options.kaos.getcwd(),
+      },
+      this.options.goalTemplates?.extraDirs,
+    );
   }
 
   private async loadMcpServers(): Promise<void> {
@@ -585,6 +609,7 @@ export class Session {
       config: this.options.config,
       homedir,
       skills: this.skills,
+      goalTemplates: this.goalTemplates,
       rpc: proxyWithExtraPayload(this.rpc, { agentId: id }),
       modelProvider: this.options.providerManager,
       hookEngine: config.hookEngine ?? this.hookEngine,

@@ -59,6 +59,8 @@ export type {
   ServicesConfig,
   ShellEnvironment,
   SkillSummary,
+  GoalTemplateDetail,
+  GoalTemplateSummary,
   ThinkingConfig,
   ToolInfo,
 } from '@moonshot-ai/agent-core';

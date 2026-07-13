@@ -18,6 +18,7 @@ import type { KimiConfig, KimiConfigPatch, McpServerConfig } from '#/config';
 import type { ExperimentalFeatureState } from '#/flags';
 import type { ResumeSessionResult } from '#/rpc/resumed';
 import type { SessionMeta } from '#/session';
+import type { GoalTemplateDetail, GoalTemplateSummary } from '#/goal-template';
 import type { ContentPart } from '@moonshot-ai/kosong';
 
 import type { PluginInfo, PluginSummary, ReloadSummary } from '#/plugin';
@@ -240,6 +241,10 @@ export interface SkillSummary {
   readonly isSubSkill?: boolean | undefined;
 }
 
+export interface GetGoalTemplatePayload {
+  readonly name: string;
+}
+
 export interface ActivateSkillPayload {
   readonly name: string;
   readonly args?: string | undefined;
@@ -388,6 +393,8 @@ export interface SessionAPI extends AgentAPIWithId {
   updateSessionMetadata: (payload: UpdateSessionMetadataPayload) => void;
   getSessionMetadata: (payload: EmptyPayload) => SessionMeta;
   listSkills: (payload: EmptyPayload) => readonly SkillSummary[];
+  listGoalTemplates: (payload: EmptyPayload) => readonly GoalTemplateSummary[];
+  getGoalTemplate: (payload: GetGoalTemplatePayload) => GoalTemplateDetail;
   listMcpServers: (payload: EmptyPayload) => readonly McpServerInfo[];
   getMcpStartupMetrics: (payload: EmptyPayload) => McpStartupMetrics;
   reconnectMcpServer: (payload: ReconnectMcpServerPayload) => void;

@@ -13,6 +13,8 @@ import type {
   CompactOptions,
   CreateGoalInput,
   GoalSnapshot,
+  GoalTemplateDetail,
+  GoalTemplateSummary,
   GoalToolResult,
   McpServerInfo,
   McpStartupMetrics,
@@ -368,6 +370,16 @@ export class Session {
   async cancelGoal(): Promise<GoalSnapshot> {
     this.ensureOpen();
     return this.rpc.cancelGoal({ sessionId: this.id });
+  }
+
+  async listGoalTemplates(): Promise<readonly GoalTemplateSummary[]> {
+    this.ensureOpen();
+    return this.rpc.listGoalTemplates({ sessionId: this.id });
+  }
+
+  async getGoalTemplate(name: string): Promise<GoalTemplateDetail> {
+    this.ensureOpen();
+    return this.rpc.getGoalTemplate({ sessionId: this.id, name });
   }
 
   async listMcpServers(): Promise<readonly McpServerInfo[]> {

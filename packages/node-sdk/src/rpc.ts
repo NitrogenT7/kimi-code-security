@@ -50,6 +50,8 @@ import type {
   ResumedSessionSummary,
   SessionSummary,
   SkillSummary,
+  GoalTemplateDetail,
+  GoalTemplateSummary,
   Unsubscribe,
 } from '#/types';
 
@@ -437,6 +439,16 @@ export abstract class SDKRpcClientBase {
   async listSkills(input: SessionIdRpcInput): Promise<readonly SkillSummary[]> {
     const rpc = await this.getRpc();
     return rpc.listSkills({ sessionId: input.sessionId });
+  }
+
+  async listGoalTemplates(input: SessionIdRpcInput): Promise<readonly GoalTemplateSummary[]> {
+    const rpc = await this.getRpc();
+    return rpc.listGoalTemplates({ sessionId: input.sessionId });
+  }
+
+  async getGoalTemplate(input: SessionIdRpcInput & { readonly name: string }): Promise<GoalTemplateDetail> {
+    const rpc = await this.getRpc();
+    return rpc.getGoalTemplate({ sessionId: input.sessionId, name: input.name });
   }
 
   async listBackgroundTasks(

@@ -95,6 +95,29 @@ function makeHost(
     resumeGoal: vi.fn(async () => fakeSnapshot()),
     cancelGoal: vi.fn(async () => fakeSnapshot()),
     cancel: vi.fn(async () => {}),
+    getGoalTemplate: vi.fn(async (name: string) => {
+      if (name === 'refactor') {
+        return {
+          name: 'refactor',
+          description: 'Refactor without changing behavior',
+          path: '/tmp/refactor.md',
+          source: 'project' as const,
+          purpose: 'Improve maintainability',
+          keyTasks: 'Refactor in small steps',
+          endState: 'Tests pass',
+          constraints: 'No new features',
+        };
+      }
+      throw new KimiError(ErrorCodes.GOAL_TEMPLATE_NOT_FOUND, `Goal template "${name}" not found`);
+    }),
+    listGoalTemplates: vi.fn(async () => [
+      {
+        name: 'refactor',
+        description: 'Refactor without changing behavior',
+        path: '/tmp/refactor.md',
+        source: 'project' as const,
+      },
+    ]),
   };
   const hasSession = overrides.hasSession ?? true;
   const transcriptContainer = { addChild: vi.fn() };
@@ -157,6 +180,22 @@ describe('parseGoalCommand', () => {
 
   it('treats `clear` as an objective, not a subcommand (cancel is the remove action)', () => {
     expect(parseGoalCommand('clear')).toMatchObject({ kind: 'create', objective: 'clear' });
+  });
+
+  it('parses /goal set with an optional template name', () => {
+    expect(parseGoalCommand('set')).toEqual({ kind: 'set-manual' });
+    expect(parseGoalCommand('set refactor')).toEqual({
+      kind: 'set-manual',
+      templateName: 'refactor',
+    });
+    expect(parseGoalCommand('set my template')).toEqual({
+      kind: 'set-manual',
+      templateName: 'my template',
+    });
+  });
+
+  it('parses /goal templates', () => {
+    expect(parseGoalCommand('templates')).toEqual({ kind: 'templates' });
   });
 
   it('parses a plain objective', () => {
@@ -724,6 +763,58 @@ describe('handleGoalCommand', () => {
       }),
     );
     expect(host.sendNormalUserInput).toHaveBeenCalledWith('Start working toward this goal.');
+  });
+
+  it('/goal set <template> pre-fills the dialog from the template', async () => {
+    const mockMount = host.mountEditorReplacement as ReturnType<typeof vi.fn>;
+    mockMount.mockImplementationOnce((dialog: { handleInput(data: string): void }) => {
+      // The template should already be pre-filled; just tab to submit and confirm.
+      dialog.handleInput('\t'); // Key Tasks
+      dialog.handleInput('\t'); // End State
+      dialog.handleInput('\t'); // Constraints
+      dialog.handleInput('\t'); // Submit
+      dialog.handleInput('\r'); // Create goal
+    });
+
+    await handleGoalCommand(host, 'set refactor');
+
+    expect(session.createGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        objective: expect.stringContaining('[Purpose]\nImprove maintainability'),
+        purpose: 'Improve maintainability',
+        completionCriterion: 'Tests pass',
+      }),
+    );
+  });
+
+  it('/goal set <missing-template> shows an error and opens a blank dialog', async () => {
+    const mockMount = host.mountEditorReplacement as ReturnType<typeof vi.fn>;
+    mockMount.mockImplementationOnce((dialog: { handleInput(data: string): void }) => {
+      dialog.handleInput('Fallback');
+      dialog.handleInput('\t');
+      dialog.handleInput('\t');
+      dialog.handleInput('\t');
+      dialog.handleInput('\t');
+      dialog.handleInput('\r');
+    });
+
+    await handleGoalCommand(host, 'set does-not-exist');
+
+    expect(host.showError).toHaveBeenCalledWith(
+      expect.stringContaining('Goal template "does-not-exist" not found'),
+    );
+    expect(session.createGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        objective: expect.stringContaining('[Purpose]\nFallback'),
+      }),
+    );
+  });
+
+  it('/goal templates lists available templates', async () => {
+    await handleGoalCommand(host, 'templates');
+    expect(host.showStatus).toHaveBeenCalledWith(
+      expect.stringContaining('refactor (project): Refactor without changing behavior'),
+    );
   });
 });
 

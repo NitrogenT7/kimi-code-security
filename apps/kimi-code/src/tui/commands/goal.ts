@@ -60,7 +60,7 @@ export type ParsedGoalCommand =
   | { readonly kind: 'pause' }
   | { readonly kind: 'resume' }
   | { readonly kind: 'cancel' }
-  | { readonly kind: 'set-manual' }
+  | { readonly kind: 'set-manual'; readonly templateName?: string }
   | {
       readonly kind: 'create';
       readonly objective: string;
@@ -68,6 +68,7 @@ export type ParsedGoalCommand =
       readonly completionCriterion?: string;
       readonly replace: boolean;
     }
+  | { readonly kind: 'templates' }
   | { readonly kind: 'next-add'; readonly objective: string }
   | { readonly kind: 'next-manage' }
   | { readonly kind: 'error'; readonly message: string; readonly severity?: 'error' | 'hint' };
@@ -97,7 +98,11 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
     return parseNextGoalCommand(tokens);
   }
   if (first === 'set') {
-    return { kind: 'set-manual' };
+    const templateName = tokens.length > 1 ? tokens.slice(1).join(' ').trim() : undefined;
+    return { kind: 'set-manual', templateName: templateName ?? undefined };
+  }
+  if (first === 'templates') {
+    return { kind: 'templates' };
   }
   if (first !== undefined && CONTROL_SUBCOMMANDS.has(first) && tokens.length === 1) {
     return { kind: first as 'pause' | 'resume' | 'cancel' };
@@ -181,7 +186,10 @@ export async function handleGoalCommand(host: SlashCommandHost, args: string): P
       await cancelGoal(host);
       return;
     case 'set-manual':
-      await handleGoalSetCommand(host);
+      await handleGoalSetCommand(host, parsed.templateName);
+      return;
+    case 'templates':
+      await showGoalTemplates(host);
       return;
     case 'next-add':
       await queueNextGoal(host, parsed);
@@ -523,17 +531,42 @@ async function cancelGoal(host: SlashCommandHost): Promise<void> {
   host.showNotice('Goal cancelled.');
 }
 
-async function handleGoalSetCommand(host: SlashCommandHost): Promise<void> {
+async function handleGoalSetCommand(
+  host: SlashCommandHost,
+  templateName?: string,
+): Promise<void> {
   if (host.state.appState.model.trim().length === 0 || host.session === undefined) {
     host.showError(LLM_NOT_SET_MESSAGE);
     return;
+  }
+
+  let initialValues:
+    | Pick<GoalSetDialogResult, 'purpose' | 'keyTasks' | 'endState' | 'constraints'>
+    | undefined;
+
+  if (templateName !== undefined && templateName.length > 0) {
+    const session = host.requireSession();
+    try {
+      const template = await session.getGoalTemplate(templateName);
+      initialValues = {
+        purpose: template.purpose,
+        keyTasks: template.keyTasks,
+        endState: template.endState,
+        constraints: template.constraints,
+      };
+    } catch {
+      host.showError(
+        `Goal template "${templateName}" not found. Use /goal templates to list available templates.`,
+      );
+      // Fall back to a blank dialog so the user can still create manually.
+    }
   }
 
   const result = await new Promise<GoalSetDialogResult>((resolve) => {
     const dialog = new GoalSetDialogComponent(host.state.ui, (res) => {
       host.restoreEditor();
       resolve(res);
-    });
+    }, initialValues);
     host.mountEditorReplacement(dialog);
   });
 
@@ -602,6 +635,19 @@ async function showGoalStatus(host: SlashCommandHost): Promise<void> {
     new GoalStatusMessageComponent(goal),
   );
   host.state.ui.requestRender();
+}
+
+async function showGoalTemplates(host: SlashCommandHost): Promise<void> {
+  const session = host.requireSession();
+  const templates = await session.listGoalTemplates();
+  if (templates.length === 0) {
+    host.showStatus('No goal templates found. Add markdown files to .goal/ or ~/.goal/.');
+    return;
+  }
+  const lines = templates.map(
+    (t) => `- ${t.name} (${t.source}): ${t.description}`,
+  );
+  host.showStatus(`Goal templates:\n${lines.join('\n')}`);
 }
 
 function isStreaming(host: SlashCommandHost): boolean {

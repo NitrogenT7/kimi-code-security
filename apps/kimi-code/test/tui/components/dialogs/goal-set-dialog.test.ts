@@ -131,6 +131,38 @@ describe('GoalSetDialogComponent', () => {
     });
   });
 
+  it('pre-fills tabs from initialValues', () => {
+    let result: GoalSetDialogResult | undefined;
+    const component = new GoalSetDialogComponent(
+      makeTUI(),
+      (res) => {
+        result = res;
+      },
+      {
+        purpose: 'Template purpose',
+        keyTasks: 'Template tasks',
+        endState: 'Template done',
+        constraints: 'Template limits',
+      },
+    );
+    component.focused = true;
+
+    // Navigate to submit without typing anything.
+    component.handleInput(TAB);
+    component.handleInput(TAB);
+    component.handleInput(TAB);
+    component.handleInput(TAB);
+    component.handleInput('\r');
+
+    expect(result).toEqual({
+      kind: 'ok',
+      purpose: 'Template purpose',
+      keyTasks: 'Template tasks',
+      endState: 'Template done',
+      constraints: 'Template limits',
+    });
+  });
+
   it('cancels with Escape', () => {
     let result: GoalSetDialogResult | undefined;
     const component = new GoalSetDialogComponent(makeTUI(), (res) => {

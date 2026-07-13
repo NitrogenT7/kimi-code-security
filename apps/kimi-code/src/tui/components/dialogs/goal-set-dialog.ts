@@ -34,6 +34,21 @@ const EDITOR_PROMPTS: Record<(typeof TAB_HEADERS)[number], string> = {
   Constraints: 'What must not be done or sacrificed? Red lines and hard limits.',
 };
 
+function fieldForHeader(
+  header: (typeof TAB_HEADERS)[number],
+): keyof Pick<GoalSetDialogResult, 'purpose' | 'keyTasks' | 'endState' | 'constraints'> {
+  switch (header) {
+    case 'Purpose':
+      return 'purpose';
+    case 'Key Tasks':
+      return 'keyTasks';
+    case 'End State':
+      return 'endState';
+    case 'Constraints':
+      return 'constraints';
+  }
+}
+
 export interface GoalSetDialogResult {
   readonly kind: 'ok' | 'cancel';
   readonly purpose?: string;
@@ -58,7 +73,14 @@ export class GoalSetDialogComponent extends Container implements Focusable {
   private submitActionIdx = 0;
   private done = false;
 
-  constructor(tui: TUI, onDone: (result: GoalSetDialogResult) => void) {
+  constructor(
+    tui: TUI,
+    onDone: (result: GoalSetDialogResult) => void,
+    initialValues?: Pick<
+      GoalSetDialogResult,
+      'purpose' | 'keyTasks' | 'endState' | 'constraints'
+    >,
+  ) {
     super();
     this.onDone = onDone;
     const theme = createEditorTheme();
@@ -67,7 +89,9 @@ export class GoalSetDialogComponent extends Container implements Focusable {
       // Enter should insert a newline in these multi-line editors, not submit
       // and clear the buffer.
       editor.disableSubmit = true;
-      return { header, editor, value: '' };
+      const value = initialValues?.[fieldForHeader(header)] ?? '';
+      editor.setText(value);
+      return { header, editor, value };
     });
   }
 

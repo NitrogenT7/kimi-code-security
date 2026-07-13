@@ -42,6 +42,7 @@ export const ErrorCodes = {
   GOAL_METADATA_RESERVED: 'goal.metadata_reserved',
   GOAL_NOT_RESUMABLE: 'goal.not_resumable',
   GOAL_NOT_REWRITABLE: 'goal.not_rewritable',
+  GOAL_TEMPLATE_NOT_FOUND: 'goal.template_not_found',
 
   MODEL_NOT_CONFIGURED: 'model.not_configured',
   MODEL_CONFIG_INVALID: 'model.config_invalid',
@@ -277,6 +278,12 @@ export const KIMI_ERROR_INFO = {
     retryable: false,
     public: true,
     action: 'Goal content can only be rewritten during the first turn.',
+  },
+  'goal.template_not_found': {
+    title: 'Goal template not found',
+    retryable: false,
+    public: true,
+    action: 'Check the template name and ensure the .goal/ or ~/.goal/ directory contains it.',
   },
 
   'model.not_configured': {

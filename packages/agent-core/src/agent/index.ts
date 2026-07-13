@@ -16,6 +16,7 @@ import type { EnabledPluginSessionStart } from '#/plugin';
 
 import type { McpConnectionManager, McpGroupRegistry } from '../mcp';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
+import type { GoalTemplateRegistry } from '../goal-template';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionSubagentHost } from '../session/subagent-host';
@@ -80,6 +81,7 @@ export interface AgentOptions {
   readonly modelProvider?: ModelProvider | undefined;
   readonly subagentHost?: SessionSubagentHost | undefined;
   readonly skills?: SkillRegistry;
+  readonly goalTemplates?: GoalTemplateRegistry;
   readonly mcp?: McpConnectionManager;
   readonly mcpGroupRegistry?: McpGroupRegistry;
   readonly hookEngine?: HookEngine;
@@ -128,6 +130,7 @@ export class Agent {
   readonly swarmMode: SwarmMode;
   readonly usage: UsageRecorder;
   readonly skills: SkillManager | null;
+  readonly goalTemplates: GoalTemplateRegistry | null;
   allowedSkillPrefixes: string[] | null = null;
   mcpGroupMode: string | null = null;
   readonly tools: ToolManager;
@@ -183,6 +186,7 @@ export class Agent {
     this.swarmMode = new SwarmMode(this);
     this.usage = new UsageRecorder(this);
     this.skills = options.skills ? new SkillManager(this, options.skills) : null;
+    this.goalTemplates = options.goalTemplates ?? null;
     this.tools = new ToolManager(this);
     this.background = new BackgroundManager(
       this,

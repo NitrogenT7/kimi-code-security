@@ -1,4 +1,5 @@
 import { ErrorCodes, KimiError } from '#/errors';
+import type { GoalTemplateDetail, GoalTemplateSummary } from '#/goal-template';
 import type {
   ActivateSkillPayload,
   AgentAPI,
@@ -13,6 +14,7 @@ import type {
   EnterSwarmPayload,
   GetBackgroundOutputPayload,
   GetBackgroundPayload,
+  GetGoalTemplatePayload,
   LoadMcpGroupPayload,
   McpServerInfo,
   SetMcpGroupModePayload,
@@ -78,6 +80,31 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   listSkills(_payload: EmptyPayload): Promise<readonly SkillSummary[]> {
     return this.session.listSkills();
+  }
+
+  listGoalTemplates(_payload: EmptyPayload): Promise<readonly GoalTemplateSummary[]> {
+    return this.session.listGoalTemplates();
+  }
+
+  getGoalTemplate(payload: GetGoalTemplatePayload): GoalTemplateDetail {
+    const template = this.session.goalTemplates.getTemplate(payload.name);
+    if (template === undefined) {
+      throw new KimiError(
+        ErrorCodes.GOAL_TEMPLATE_NOT_FOUND,
+        `Goal template "${payload.name}" was not found`,
+      );
+    }
+    return {
+      name: template.name,
+      description: template.description,
+      path: template.path,
+      source: template.source,
+      purpose: template.purpose,
+      keyTasks: template.keyTasks,
+      endState: template.endState,
+      constraints: template.constraints,
+      body: template.body,
+    };
   }
 
   listMcpServers(_payload: EmptyPayload): readonly McpServerInfo[] {

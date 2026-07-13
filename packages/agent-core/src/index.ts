@@ -1,5 +1,6 @@
 export * from './agent';
 export * from './session';
+export * from './goal-template';
 export * from './rpc';
 export * from './config';
 export * from './flags';

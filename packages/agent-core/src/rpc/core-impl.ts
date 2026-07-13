@@ -37,6 +37,7 @@ import {
 } from '../mcp';
 import { Session, type SessionMeta, type SessionSkillConfig } from '../session';
 import { exportSessionDirectory } from '../session/export';
+import type { GoalTemplateDetail, GoalTemplateSummary } from '#/goal-template';
 import {
   ProviderManager, type BearerTokenProvider,
   type OAuthTokenProviderResolver
@@ -95,6 +96,7 @@ import type {
   SetModelPayload,
   SetModelResult,
   SetPermissionPayload,
+  GetGoalTemplatePayload,
   SetPluginEnabledPayload,
   SetPluginMcpServerEnabledPayload,
   SetThinkingPayload,
@@ -677,6 +679,20 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     ...payload
   }: SessionScopedPayload<EmptyPayload>): Promise<readonly SkillSummary[]> {
     return this.sessionApi(sessionId).listSkills(payload);
+  }
+
+  listGoalTemplates({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<EmptyPayload>): Promise<readonly GoalTemplateSummary[]> {
+    return this.sessionApi(sessionId).listGoalTemplates(payload);
+  }
+
+  getGoalTemplate({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<GetGoalTemplatePayload>): GoalTemplateDetail {
+    return this.sessionApi(sessionId).getGoalTemplate(payload);
   }
 
   listMcpServers({

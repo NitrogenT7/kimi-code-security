@@ -198,6 +198,7 @@ export type KimiErrorCode =
   | 'goal.metadata_reserved'
   | 'goal.not_resumable'
   | 'goal.not_rewritable'
+  | 'goal.template_not_found'
   | 'model.not_configured'
   | 'model.config_invalid'
   | 'auth.login_required'
