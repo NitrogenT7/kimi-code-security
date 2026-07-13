@@ -7,6 +7,7 @@ import type { GoalTemplate, GoalTemplateSource } from './types';
 
 const PROJECT_DIR = '.goal' as const;
 const USER_DIR = '.goal' as const;
+const USER_GENERIC_DIR = path.join('.agents', 'goals') as string;
 
 export interface GoalTemplatePathContext {
   readonly workDir: string;
@@ -37,6 +38,7 @@ export async function discoverGoalTemplates(
   const roots: Array<{ dir: string; source: GoalTemplateSource }> = [
     { dir: path.join(options.paths.workDir, PROJECT_DIR), source: 'project' },
     { dir: path.join(options.paths.userHomeDir, USER_DIR), source: 'user' },
+    { dir: path.join(options.paths.userHomeDir, USER_GENERIC_DIR), source: 'user' },
   ];
 
   for (const extra of options.extraDirs ?? []) {

@@ -57,13 +57,17 @@ description: Empty template
 });
 
 describe('goal-template scanner', () => {
-  it('discovers templates from .goal/ directories', async () => {
+  it('discovers templates from .goal/ and .agents/goals/ directories', async () => {
     const root = await mkdtemp(join(tmpdir(), 'goal-template-'));
     try {
       const projectGoalDir = join(root, '.goal');
+      const userGoalDir = join(root, 'home', '.goal');
+      const userGenericDir = join(root, 'home', '.agents', 'goals');
       await writeFile(join(root, 'x.txt'), 'noop');
       const { mkdir } = await import('node:fs/promises');
       await mkdir(projectGoalDir, { recursive: true });
+      await mkdir(userGoalDir, { recursive: true });
+      await mkdir(userGenericDir, { recursive: true });
       await writeFile(
         join(projectGoalDir, 'sample.md'),
         `---
@@ -73,14 +77,35 @@ endState: Sample done
 ---
 `,
       );
+      await writeFile(
+        join(userGoalDir, 'user-sample.md'),
+        `---
+name: user-sample
+purpose: Do a user sample thing
+endState: User sample done
+---
+`,
+      );
+      await writeFile(
+        join(userGenericDir, 'generic-sample.md'),
+        `---
+name: generic-sample
+purpose: Do a generic sample thing
+endState: Generic sample done
+---
+`,
+      );
 
       const templates = await discoverGoalTemplates({
         paths: { workDir: root, userHomeDir: join(root, 'home') },
       });
 
-      expect(templates).toHaveLength(1);
-      expect(templates[0]?.name).toBe('sample');
-      expect(templates[0]?.source).toBe('project');
+      expect(templates).toHaveLength(3);
+      expect(templates.map((t) => t.name).toSorted()).toEqual([
+        'generic-sample',
+        'sample',
+        'user-sample',
+      ]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
