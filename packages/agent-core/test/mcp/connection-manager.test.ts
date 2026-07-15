@@ -859,6 +859,60 @@ describe('Session MCP startup', () => {
       await rm(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
     }
   }, 10_000);
+
+  it('connects a single server after the manager is created', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      await cm.connect('alpha', stdioConfig());
+      const alpha = cm.get('alpha');
+      expect(alpha?.status).toBe('connected');
+      expect(alpha?.toolCount).toBe(3);
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20_000);
+
+  it('replace an existing server config when connect is called again', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      await cm.connect('flaky', { transport: 'stdio', command: '/no/such/binary' });
+      expect(cm.get('flaky')?.status).toBe('failed');
+
+      await cm.connect('flaky', stdioConfig());
+      expect(cm.get('flaky')?.status).toBe('connected');
+      expect(cm.get('flaky')?.toolCount).toBe(3);
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20_000);
+
+  it('remove disconnects and deletes the server entry', async () => {
+    const cm = new McpConnectionManager();
+    const seen: Array<{ name: string; status: McpServerEntry['status'] }> = [];
+    cm.onStatusChange((e) => seen.push({ name: e.name, status: e.status }));
+    try {
+      await cm.connect('alpha', stdioConfig());
+      expect(cm.get('alpha')).toBeDefined();
+
+      const removed = await cm.remove('alpha');
+      expect(removed).toBe(true);
+      expect(cm.get('alpha')).toBeUndefined();
+
+      const disabledStatuses = seen.filter((s) => s.name === 'alpha' && s.status === 'disabled');
+      expect(disabledStatuses.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20_000);
+
+  it('remove returns false for unknown servers', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      expect(await cm.remove('not-there')).toBe(false);
+    } finally {
+      await cm.shutdown();
+    }
+  });
 });
 
 function testProviderManager(): ProviderManager {
