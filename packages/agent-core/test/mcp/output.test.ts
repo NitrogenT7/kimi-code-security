@@ -9,6 +9,17 @@ const MCP_OUTPUT_TRUNCATED_TEXT =
   '\n\n[Output truncated: exceeded 100000 character limit. ' +
   'Use pagination or more specific queries to get remaining content.]';
 
+// Image payloads must carry real magic bytes: convertMCPContentBlock sniffs
+// the bytes and downgrades impostors (e.g. a tool that base64-encodes an
+// error message and labels it image/png) to a text notice.
+const PNG_B64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
+const JPEG_B64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString('base64');
+const WEBP_B64 = Buffer.from([
+  0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+]).toString('base64');
+/** Unpadded PNG signature — safe prefix for concatenated oversized payloads. */
+const PNG_PREFIX = 'iVBORw0KGgo';
+
 /**
  * Assert a test fixture matches the MCP SDK's ContentBlock schema. This
  * guards against fixtures that drift from the real protocol shape — exactly
@@ -29,19 +40,43 @@ describe('convertMCPContentBlock', () => {
   });
 
   test('converts image block with mimeType to image data URI', () => {
-    const block: MCPContentBlock = { type: 'image', data: 'AAA', mimeType: 'image/jpeg' };
+    const block: MCPContentBlock = { type: 'image', data: JPEG_B64, mimeType: 'image/jpeg' };
     expect(convertMCPContentBlock(block)).toEqual({
       type: 'image_url',
-      imageUrl: { url: 'data:image/jpeg;base64,AAA' },
+      imageUrl: { url: `data:image/jpeg;base64,${JPEG_B64}` },
     });
   });
 
   test('image block without mimeType defaults to image/png', () => {
-    const block: MCPContentBlock = { type: 'image', data: 'AAA' };
+    const block: MCPContentBlock = { type: 'image', data: PNG_B64 };
     expect(convertMCPContentBlock(block)).toEqual({
       type: 'image_url',
-      imageUrl: { url: 'data:image/png;base64,AAA' },
+      imageUrl: { url: `data:image/png;base64,${PNG_B64}` },
     });
+  });
+
+  test('rewrites the declared mimeType when the magic bytes disagree', () => {
+    const block: MCPContentBlock = { type: 'image', data: JPEG_B64, mimeType: 'image/png' };
+    expect(convertMCPContentBlock(block)).toEqual({
+      type: 'image_url',
+      imageUrl: { url: `data:image/jpeg;base64,${JPEG_B64}` },
+    });
+  });
+
+  test('downgrades an image block whose payload is text to a text part', () => {
+    // A failing screenshot tool that base64-encodes its error message must
+    // not poison the session: providers sniff the bytes and 400 every request.
+    const text = 'Failed to take take screenshot. Capturing failed.\n';
+    const block: MCPContentBlock = {
+      type: 'image',
+      data: Buffer.from(text, 'utf8').toString('base64'),
+      mimeType: 'image/png',
+    };
+    const part = convertMCPContentBlock(block);
+    expect(part?.type).toBe('text');
+    const notice = (part as { text: string }).text;
+    expect(notice).toContain('image_url dropped');
+    expect(notice).toContain('Failed to take take screenshot. Capturing failed.');
   });
 
   test('converts audio block to AudioURLPart with audio/mpeg default', () => {
@@ -83,12 +118,26 @@ describe('convertMCPContentBlock', () => {
   test('converts blob EmbeddedResource with image/* mimeType to ImageURLPart', () => {
     const block = assertValidMcpBlock({
       type: 'resource',
-      resource: { uri: 'file:///pic.webp', mimeType: 'image/webp', blob: 'III' },
+      resource: { uri: 'file:///pic.webp', mimeType: 'image/webp', blob: WEBP_B64 },
     });
     expect(convertMCPContentBlock(block)).toEqual({
       type: 'image_url',
-      imageUrl: { url: 'data:image/webp;base64,III' },
+      imageUrl: { url: `data:image/webp;base64,${WEBP_B64}` },
     });
+  });
+
+  test('downgrades a blob EmbeddedResource whose payload is not an image', () => {
+    const block = assertValidMcpBlock({
+      type: 'resource',
+      resource: {
+        uri: 'file:///pic.webp',
+        mimeType: 'image/webp',
+        blob: Buffer.from('not an image', 'utf8').toString('base64'),
+      },
+    });
+    const part = convertMCPContentBlock(block);
+    expect(part?.type).toBe('text');
+    expect((part as { text: string }).text).toContain('image_url dropped');
   });
 
   test('converts blob EmbeddedResource with audio/* mimeType to AudioURLPart', () => {
@@ -239,13 +288,13 @@ describe('mcpResultToExecutableOutput', () => {
 
   test('wraps media-only output in mcp_tool_result tags using the qualified name', () => {
     const out = mcpResultToExecutableOutput(
-      result([{ type: 'image', data: 'AAA', mimeType: 'image/png' }]),
+      result([{ type: 'image', data: PNG_B64, mimeType: 'image/png' }]),
       'mcp__github__create_pr',
     );
     expect(out.isError).toBe(false);
     expect(out.output).toEqual([
       { type: 'text', text: '<mcp_tool_result name="mcp__github__create_pr">' },
-      { type: 'image_url', imageUrl: { url: 'data:image/png;base64,AAA' } },
+      { type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}` } },
       { type: 'text', text: '</mcp_tool_result>' },
     ]);
   });
@@ -254,13 +303,13 @@ describe('mcpResultToExecutableOutput', () => {
     const out = mcpResultToExecutableOutput(
       result([
         { type: 'text', text: 'caption' },
-        { type: 'image', data: 'AAA', mimeType: 'image/png' },
+        { type: 'image', data: PNG_B64, mimeType: 'image/png' },
       ]),
       'mcp__s__t',
     );
     expect(out.output).toEqual([
       { type: 'text', text: 'caption' },
-      { type: 'image_url', imageUrl: { url: 'data:image/png;base64,AAA' } },
+      { type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}` } },
     ]);
   });
 
@@ -268,7 +317,7 @@ describe('mcpResultToExecutableOutput', () => {
     const out = mcpResultToExecutableOutput(
       result([
         { type: 'text', text: '' },
-        { type: 'image', data: 'AAA', mimeType: 'image/png' },
+        { type: 'image', data: PNG_B64, mimeType: 'image/png' },
       ]),
       'mcp__s__t',
     );
@@ -289,7 +338,7 @@ describe('mcpResultToExecutableOutput', () => {
 
   test('drops oversized binary parts in favor of a per-part notice without touching the text budget', () => {
     // 14 MiB base64 ≈ 10.5 MiB raw — just above the 10 MiB per-part cap.
-    const huge = 'x'.repeat(14 * 1024 * 1024);
+    const huge = PNG_PREFIX + 'x'.repeat(14 * 1024 * 1024);
     const out = mcpResultToExecutableOutput(
       result([{ type: 'image', data: huge, mimeType: 'image/png' }]),
       'mcp__s__big',
@@ -307,10 +356,11 @@ describe('mcpResultToExecutableOutput', () => {
   });
 
   test('binary part within the per-part cap survives intact alongside oversized text', () => {
+    const imageB64 = PNG_PREFIX + 'B'.repeat(500_000);
     const out = mcpResultToExecutableOutput(
       result([
         { type: 'text', text: 'A'.repeat(100_000) },
-        { type: 'image', data: 'B'.repeat(500_000), mimeType: 'image/png' },
+        { type: 'image', data: imageB64, mimeType: 'image/png' },
       ]),
       'mcp__s__t',
     );
@@ -318,7 +368,7 @@ describe('mcpResultToExecutableOutput', () => {
     // marker (text was exactly 100K, not over).
     expect(out.output).toEqual([
       { type: 'text', text: 'A'.repeat(100_000) },
-      { type: 'image_url', imageUrl: { url: 'data:image/png;base64,' + 'B'.repeat(500_000) } },
+      { type: 'image_url', imageUrl: { url: `data:image/png;base64,${imageB64}` } },
     ]);
   });
 });

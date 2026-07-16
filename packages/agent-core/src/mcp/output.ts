@@ -4,7 +4,9 @@
  * Owns the full path from "MCP protocol content blocks" to "what the agent
  * loop feeds back to the model":
  *  1. Convert each {@link MCPContentBlock} to a kosong `ContentPart`
- *     (dropping unsupported shapes).
+ *     (dropping unsupported shapes, and downgrading image blocks whose
+ *     payload is not a real image — providers reject those with a 400 that
+ *     would otherwise poison every subsequent request).
  *  2. Wrap media-only outputs in `<mcp_tool_result name="…">` tags so the
  *     model can attribute binary output when several tools return media.
  *     Mirrors the in-tree `ReadMediaFile` convention.
@@ -21,6 +23,7 @@
 
 import type { ContentPart } from '@moonshot-ai/kosong';
 
+import { sanitizeImageUrlPart } from '../utils/image-payload';
 import type { MCPContentBlock, MCPToolResult } from './types';
 
 // MCP servers can produce arbitrarily large outputs; cap what we feed back to
@@ -58,10 +61,10 @@ export function convertMCPContentBlock(block: MCPContentBlock): ContentPart | nu
 
   if (block.type === 'image' && typeof block.data === 'string') {
     const mimeType = block.mimeType ?? 'image/png';
-    return {
+    return sanitizeImageUrlPart({
       type: 'image_url',
       imageUrl: { url: `data:${mimeType};base64,${block.data}` },
-    };
+    });
   }
 
   if (block.type === 'audio' && typeof block.data === 'string') {
@@ -82,10 +85,10 @@ export function convertMCPContentBlock(block: MCPContentBlock): ContentPart | nu
     if (typeof res.blob === 'string') {
       const mimeType = res.mimeType ?? 'application/octet-stream';
       if (mimeType.startsWith('image/')) {
-        return {
+        return sanitizeImageUrlPart({
           type: 'image_url',
           imageUrl: { url: `data:${mimeType};base64,${res.blob}` },
-        };
+        });
       }
       if (mimeType.startsWith('audio/')) {
         return {

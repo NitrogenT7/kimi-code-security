@@ -1,5 +1,6 @@
 import type { ContentPart, Message, TextPart } from '@moonshot-ai/kosong';
 
+import { sanitizeImageUrlPart } from '../../utils/image-payload';
 import type { ContextMessage } from './types';
 
 export function project(history: readonly ContextMessage[]): Message[] {
@@ -64,7 +65,11 @@ function stripContextMetadata(message: ContextMessage): Message {
   return {
     role: message.role,
     name: message.name,
-    content: message.content.map((p) => ({ ...p })) as ContentPart[],
+    // Last line of defense against image parts whose payload is not a real
+    // image (e.g. recorded by an older version, or injected via the SDK):
+    // one such part makes every provider request fail with a 400, so it is
+    // downgraded to a text notice at projection time.
+    content: message.content.map((p) => sanitizeImageUrlPart({ ...p })) as ContentPart[],
     toolCalls: message.toolCalls.map((tc) => ({ ...tc })),
     toolCallId: message.toolCallId,
     partial: message.partial,

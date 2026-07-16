@@ -11,6 +11,11 @@ const MCP_OUTPUT_TRUNCATED_TEXT =
   '\n\n[Output truncated: exceeded 100000 character limit. ' +
   'Use pagination or more specific queries to get remaining content.]';
 
+// Image payloads must start with real magic bytes: MCP image results are
+// sniffed and impostors are downgraded to a text notice. Unpadded PNG
+// signature, safe to prepend to repeated filler characters.
+const PNG_PREFIX = 'iVBORw0KGgo';
+
 function fakeAgent(calls: unknown[] = []): Agent {
   return {
     records: {
@@ -328,7 +333,9 @@ describe('ToolManager MCP integration', () => {
       },
       async callTool() {
         return {
-          content: [{ type: 'image', data: 'x'.repeat(100_000), mimeType: 'image/png' }],
+          content: [
+            { type: 'image', data: PNG_PREFIX + 'x'.repeat(100_000), mimeType: 'image/png' },
+          ],
           isError: false,
         };
       },
@@ -353,7 +360,7 @@ describe('ToolManager MCP integration', () => {
       { type: 'text', text: '<mcp_tool_result name="mcp__s__snap">' },
       {
         type: 'image_url',
-        imageUrl: { url: 'data:image/png;base64,' + 'x'.repeat(100_000) },
+        imageUrl: { url: 'data:image/png;base64,' + PNG_PREFIX + 'x'.repeat(100_000) },
       },
       { type: 'text', text: '</mcp_tool_result>' },
     ]);
@@ -363,7 +370,7 @@ describe('ToolManager MCP integration', () => {
     const tm = new ToolManager(fakeAgent());
     tm.setActiveTools(['mcp__*']);
     // 14 MiB base64 ≈ 10.5 MiB raw — just above the 10 MiB per-part cap.
-    const huge = 'x'.repeat(14 * 1024 * 1024);
+    const huge = PNG_PREFIX + 'x'.repeat(14 * 1024 * 1024);
     const client: MCPClient = {
       async listTools() {
         return [
@@ -430,7 +437,7 @@ describe('ToolManager MCP integration', () => {
         return {
           content: [
             { type: 'text', text: 'A'.repeat(100_000) },
-            { type: 'image', data: 'B'.repeat(500_000), mimeType: 'image/png' },
+            { type: 'image', data: PNG_PREFIX + 'B'.repeat(500_000), mimeType: 'image/png' },
           ],
           isError: false,
         };
@@ -455,7 +462,7 @@ describe('ToolManager MCP integration', () => {
       { type: 'text', text: 'A'.repeat(100_000) },
       {
         type: 'image_url',
-        imageUrl: { url: 'data:image/png;base64,' + 'B'.repeat(500_000) },
+        imageUrl: { url: 'data:image/png;base64,' + PNG_PREFIX + 'B'.repeat(500_000) },
       },
     ]);
   });
@@ -463,7 +470,7 @@ describe('ToolManager MCP integration', () => {
   it('oversized binary part does not affect neighboring small binary parts', async () => {
     const tm = new ToolManager(fakeAgent());
     tm.setActiveTools(['mcp__*']);
-    const huge = 'x'.repeat(14 * 1024 * 1024);
+    const huge = PNG_PREFIX + 'x'.repeat(14 * 1024 * 1024);
     const client: MCPClient = {
       async listTools() {
         return [

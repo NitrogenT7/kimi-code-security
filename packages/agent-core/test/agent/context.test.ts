@@ -778,6 +778,52 @@ describe('Agent context notification projection', () => {
   });
 });
 
+describe('project image_url sanitization', () => {
+  // A failing screenshot tool once base64-encoded its error message and
+  // labelled it image/png; the provider then 400'd every subsequent request,
+  // bricking the session. Projection is the last line of defense.
+  const ERROR_TEXT_B64 = Buffer.from(
+    'Failed to take take screenshot. Capturing failed.\n',
+    'utf8',
+  ).toString('base64');
+  const PNG_B64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
+
+  function toolMessage(parts: ContextMessage['content']): ContextMessage {
+    return { role: 'tool', toolCallId: 'call-1', content: parts, toolCalls: [] };
+  }
+
+  it('downgrades an image part whose payload is text to a text notice', () => {
+    const messages = project([
+      toolMessage([
+        { type: 'text', text: 'screenshot result:' },
+        { type: 'image_url', imageUrl: { url: `data:image/png;base64,${ERROR_TEXT_B64}` } },
+      ]),
+    ]);
+    const content = messages[0]!.content;
+    expect(content.every((p) => p.type === 'text')).toBe(true);
+    expect(textOf(messages[0]!)).toContain('image_url dropped');
+    expect(textOf(messages[0]!)).toContain('Failed to take take screenshot. Capturing failed.');
+  });
+
+  it('keeps an image part whose payload sniffs as a real image', () => {
+    const messages = project([
+      toolMessage([{ type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}` } }]),
+    ]);
+    expect(messages[0]!.content).toEqual([
+      { type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}` } },
+    ]);
+  });
+
+  it('leaves remote image URLs untouched', () => {
+    const messages = project([
+      toolMessage([{ type: 'image_url', imageUrl: { url: 'https://example.com/img.png' } }]),
+    ]);
+    expect(messages[0]!.content).toEqual([
+      { type: 'image_url', imageUrl: { url: 'https://example.com/img.png' } },
+    ]);
+  });
+});
+
 function userMessage(text: string, origin?: ContextMessage['origin']): ContextMessage {
   return {
     role: 'user',
