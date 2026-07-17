@@ -68,15 +68,53 @@ describe('TodoListTool', () => {
     expect(tool.name).toBe(TODO_LIST_TOOL_NAME);
     expect(tool.description.length).toBeGreaterThan(0);
     expect(TodoListInputSchema.safeParse({}).success).toBe(true);
-    expect(
-      TodoListInputSchema.safeParse({ todos: [{ title: 'x', status: 'wip' }] }).success,
-    ).toBe(true); // old format is accepted but validated
+    expect(TodoListInputSchema.safeParse({ todos: [makeQuestion({ question: 'q?' })] }).success).toBe(
+      true,
+    );
     expect(tool.parameters).toMatchObject({
       type: 'object',
       properties: {
         todos: { type: 'array' },
       },
     });
+  });
+
+  it('advertises the question-item shape in the parameters JSON schema', () => {
+    // Regression: `z.unknown()` items used to advertise `items: {}` ("anything"),
+    // which providers could mangle into `items: {type: 'string'}` — the model
+    // then submitted plain strings and the runtime rejected them ("Item is not
+    // an object"). The advertised schema must match the documented contract.
+    const { tool } = makeTool();
+
+    const todos = (tool.parameters as { properties: { todos: Record<string, unknown> } })
+      .properties.todos;
+    const items = todos['items'] as {
+      type: string;
+      required: string[];
+      properties: Record<string, unknown>;
+      additionalProperties: boolean;
+    };
+    expect(items.type).toBe('object');
+    expect(items.required).toEqual(
+      expect.arrayContaining(['type', 'id', 'question', 'status', 'confidence', 'depth']),
+    );
+    expect(items.additionalProperties).toBe(false);
+    expect(Object.keys(items.properties)).toEqual(
+      expect.arrayContaining([
+        'type',
+        'id',
+        'question',
+        'status',
+        'confidence',
+        'depth',
+        'hypothesis',
+        'conclusion',
+        'evidence',
+        'blockers',
+        'parentId',
+        'subQuestions',
+      ]),
+    );
   });
 
   it('description includes an Avoid churn section with the anti-spin guardrails', () => {

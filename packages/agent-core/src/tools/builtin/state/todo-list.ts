@@ -93,9 +93,17 @@ export interface TodoListInput {
   todos?: Array<unknown>;
 }
 
+// The array items MUST advertise the real question-item shape. With
+// `z.unknown()` items the advertised JSON schema degenerates to `items: {}`
+// ("anything"), which providers may further mangle (e.g. into
+// `items: {type: 'string'}`) — the model then submits plain strings and the
+// runtime validation rejects them ("Item is not an object"). The schema is
+// the model-facing contract and must match todo-list.md and validateTodoItem.
+// In the input view the `.default([])` fields become optional, so the
+// advertised required set is exactly what looksLikeQuestionItem enforces.
 export const TodoListInputSchema: z.ZodType<TodoListInput> = z.object({
   todos: z
-    .array(z.unknown())
+    .array(QuestionItemSchema)
     .optional()
     .describe(
       'The updated todo list. Omit to read the current list. Pass an empty array to clear.',
