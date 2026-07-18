@@ -74,6 +74,26 @@ export type { ContentPart, Role, ThinkingEffort, ToolCall } from '@moonshot-ai/k
 
 export type PermissionMode = 'yolo' | 'manual' | 'auto';
 
+/**
+ * Wire view of one MCP group (agent-core-v2 `mcpGroups` in mcp.json). Only
+ * served by engines that implement MCP groups; the v1 in-process engine does
+ * not, in which case the group RPC methods reject.
+ */
+export interface McpGroupInfo {
+  readonly name: string;
+  readonly description?: string | undefined;
+  readonly servers: readonly string[];
+  readonly skillPrefixes: readonly string[];
+  readonly loaded: boolean;
+}
+
+/** RPC surface for engines that support MCP groups (agent-core-v2). */
+export interface McpGroupRpcSurface {
+  listMcpGroups(payload: { sessionId: string }): Promise<readonly McpGroupInfo[]>;
+  loadMcpGroup(payload: { sessionId: string; name: string }): Promise<void>;
+  setMcpGroupMode(payload: { sessionId: string; groupName: string | null }): Promise<void>;
+}
+
 export interface CreateGoalInput {
   readonly objective: string;
   readonly replace?: boolean;

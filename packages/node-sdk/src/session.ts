@@ -18,6 +18,7 @@ import type {
   GoalSnapshot,
   GoalToolResult,
   JsonObject,
+  McpGroupInfo,
   McpServerInfo,
   McpStartupMetrics,
   PermissionMode,
@@ -495,6 +496,33 @@ export class Session {
   async reconnectMcpServer(name: string): Promise<void> {
     this.ensureOpen();
     await this.rpc.reconnectMcpServer({ sessionId: this.id, name });
+  }
+
+  /**
+   * List the MCP groups declared in mcp.json (`mcpGroups`). Rejects when the
+   * backing engine does not support MCP groups (the v1 in-process engine).
+   */
+  async listMcpGroups(): Promise<readonly McpGroupInfo[]> {
+    this.ensureOpen();
+    return this.rpc.listMcpGroups({ sessionId: this.id });
+  }
+
+  /**
+   * Connect every server in the named MCP group and mark it as the active
+   * group. Rejects when the engine does not support MCP groups.
+   */
+  async loadMcpGroup(name: string): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.loadMcpGroup({ sessionId: this.id, name });
+  }
+
+  /**
+   * Set or clear the active MCP group without connecting servers. Pass `null`
+   * to clear. Rejects when the engine does not support MCP groups.
+   */
+  async setMcpGroupMode(groupName: string | null): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.setMcpGroupMode({ sessionId: this.id, groupName });
   }
 
   async listPlugins(): Promise<readonly PluginSummary[]> {

@@ -291,6 +291,14 @@ function sessionMcpServiceStub(
     connectionManager: () => {
       throw new Error('not implemented');
     },
+    groupRegistry: () => undefined,
+    listGroups: () => [],
+    loadGroup: () => Promise.resolve(),
+    loadServer: () => Promise.resolve(),
+    addOrUpdateServer: () => Promise.resolve(),
+    removeServer: () => Promise.resolve(false),
+    activeGroup: () => null,
+    setGroupMode: () => {},
   };
 }
 

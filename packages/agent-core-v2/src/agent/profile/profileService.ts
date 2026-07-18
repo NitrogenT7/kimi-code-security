@@ -159,7 +159,7 @@ export class AgentProfileService implements IAgentProfileService {
     }
     const model = this.modelFactory.resolve(input.model);
 
-    const context = await this.buildSystemPromptContext(input.cwd);
+    const context = await this.buildSystemPromptContext(input.cwd, undefined, profile);
     const systemPrompt = profile.systemPrompt(context);
     this.activeProfile = profile;
     this.cacheAgentsMdWarning(context);
@@ -234,7 +234,7 @@ export class AgentProfileService implements IAgentProfileService {
   }
 
   async applyProfile(profile: ResolvedAgentProfile, options?: ApplyProfileOptions): Promise<void> {
-    const context = await this.buildSystemPromptContext(undefined, options);
+    const context = await this.buildSystemPromptContext(undefined, options, profile);
     this.useProfile(profile, context);
     this.cacheAgentsMdWarning(context);
     this.publishAgentsMdWarning();
@@ -244,7 +244,7 @@ export class AgentProfileService implements IAgentProfileService {
     const profile = this.resolveActiveProfile();
     if (profile === undefined) return;
 
-    const context = await this.buildSystemPromptContext(this.cwd);
+    const context = await this.buildSystemPromptContext(this.cwd, undefined, profile);
     this.activeProfile = profile;
     this.update({
       profileName: profile.name,
@@ -580,6 +580,7 @@ export class AgentProfileService implements IAgentProfileService {
   private async buildSystemPromptContext(
     cwd?: string,
     options?: ApplyProfileOptions,
+    profile?: ResolvedAgentProfile,
   ): Promise<SystemPromptContext> {
     const effectiveCwd = cwd ?? this.sessionContext.cwd;
     const base = await prepareSystemPromptContext(
@@ -588,7 +589,7 @@ export class AgentProfileService implements IAgentProfileService {
       this.bootstrap.homeDir,
       { additionalDirs: options?.additionalDirs ?? this.workspace.additionalDirs },
     );
-    const skills = await this.resolveSkillListing();
+    const skills = await this.resolveSkillListing(profile);
     return {
       ...base,
       cwd: effectiveCwd,
@@ -600,10 +601,11 @@ export class AgentProfileService implements IAgentProfileService {
     };
   }
 
-  private async resolveSkillListing(): Promise<string> {
+  private async resolveSkillListing(profile?: ResolvedAgentProfile): Promise<string> {
     try {
       await this.skillCatalog.ready;
-      return this.skillCatalog.catalog.getModelSkillListing();
+      const target = profile ?? this.resolveActiveProfile();
+      return this.skillCatalog.catalog.getModelSkillListing(target?.skillPrefixes);
     } catch {
       return '';
     }

@@ -234,6 +234,7 @@ export * from '#/session/cron/sessionCronService';
 export * from '#/session/cron/sessionCronServiceImpl';
 
 import '#/session/agentLifecycle/profile/profiles';
+import '#/session/agentLifecycle/profile/security-profiles';
 export * from '#/session/agentLifecycle/agentLifecycle';
 export * from '#/session/agentLifecycle/agentLifecycleService';
 export * from '#/session/agentLifecycle/mainAgent';
@@ -410,6 +411,9 @@ export * from '#/agent/mcp/mcp';
 export * from '#/agent/mcp/mcpService';
 export * from '#/agent/mcp/mcpDiscoveryOps';
 export * from '#/agent/mcp/config-schema';
+export * from '#/agent/mcp/group-config';
+export * from '#/agent/mcp/group-registry';
+import '#/agent/mcp/tools/manager';
 export * from '#/agent/media/mediaTools';
 export * from '#/agent/media/mediaToolsRegistrar';
 export * from '#/agent/media/registerMediaTools';

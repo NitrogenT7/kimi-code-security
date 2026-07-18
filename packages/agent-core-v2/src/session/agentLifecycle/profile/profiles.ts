@@ -42,6 +42,7 @@ const AGENT_TOOLS = [
   'Agent',
   'AgentSwarm',
   'FetchURL',
+  'MCPManager',
   'AskUserQuestion',
   'EnterPlanMode',
   'ExitPlanMode',
@@ -87,6 +88,15 @@ const EXPLORE_TOOLS = [
   'FetchURL',
 ] as const;
 
+const AGENT_ROLE =
+  'You are the main Kimi Code agent. You have exclusive access to the `MCPManager` tool, ' +
+  'which lets you load MCP server groups on demand.\n\n' +
+  'When the user asks you to load an MCP group, or before you use tools from an MCP group ' +
+  'that has not been loaded yet, call `MCPManager(action="list_groups")` to see available ' +
+  'groups, then call `MCPManager(action="load_group", group_name="<group>")` to load it. ' +
+  'Only after the group reports success should you use the corresponding `mcp__*` tools.\n\n' +
+  'Do not delegate MCP group loading to a subagent; subagents do not have `MCPManager`.';
+
 const CODER_ROLE =
   `${TASK_AGENT_ROLE_PREFIX}\n\n` +
   'Your final message is the entire handoff — the parent sees nothing else from your run. ' +
@@ -105,7 +115,7 @@ registerAgentProfile({
   name: 'agent',
   description: 'Default Kimi Code agent',
   tools: AGENT_TOOLS,
-  systemPrompt: (context) => renderSystemPrompt('', context, AGENT_TOOLS),
+  systemPrompt: (context) => renderSystemPrompt(AGENT_ROLE, context, AGENT_TOOLS),
 });
 
 registerAgentProfile({

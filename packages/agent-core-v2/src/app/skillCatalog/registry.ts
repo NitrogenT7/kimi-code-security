@@ -114,10 +114,12 @@ export class InMemorySkillCatalog implements SkillCatalog {
     return rendered.length === 0 ? 'No skills' : rendered;
   }
 
-  getModelSkillListing(): string {
+  getModelSkillListing(skillPrefixes?: readonly string[]): string {
     const lines = ['DISREGARD any earlier skill listings. Current available skills:'];
     const listing = renderGroupedSkills(
-      this.listInvocableSkills().filter((skill) => skill.metadata.isSubSkill !== true),
+      this.listInvocableSkills().filter(
+        (skill) => skill.metadata.isSubSkill !== true && matchesSkillPrefixes(skill, skillPrefixes),
+      ),
       formatModelSkill,
     );
     if (listing.length > 0) {
@@ -231,6 +233,19 @@ function formatModelSkill(skill: SkillDefinition): readonly string[] {
   }
   lines.push(`  Path: ${skill.path}`);
   return lines;
+}
+
+/**
+ * Skill-prefix sandbox predicate: when `prefixes` is undefined, empty, or
+ * contains `'*'`, every skill matches; otherwise only skills whose name starts
+ * with one of the prefixes are listed.
+ */
+function matchesSkillPrefixes(
+  skill: SkillDefinition,
+  prefixes: readonly string[] | undefined,
+): boolean {
+  if (prefixes === undefined || prefixes.length === 0 || prefixes.includes('*')) return true;
+  return prefixes.some((prefix) => skill.name.startsWith(prefix));
 }
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });

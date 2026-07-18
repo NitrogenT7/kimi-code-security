@@ -32,6 +32,20 @@ const ADD_DIR_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'list', description: 'Show configured additional workspace directories' },
 ];
 
+const MCP_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'web', description: 'Load web penetration MCP group' },
+  { value: 'android', description: 'Load Android reverse-engineering MCP group' },
+  { value: 'audit', description: 'Load code audit MCP group' },
+  { value: 'binary', description: 'Load binary reverse-engineering MCP group' },
+  { value: 'full', description: 'Load all MCP servers' },
+  { value: 'off', description: 'Clear MCP group mode and skill restrictions' },
+];
+
+/** Argument autocompletion for the `/mcp` command (group names). */
+export function mcpArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  return completeLeadingArg(MCP_ARG_COMPLETIONS, argumentPrefix);
+}
+
 /** Argument autocompletion for the `/goal` command (subcommands). */
 export function goalArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
   const nextMatch = argumentPrefix.match(/^next\s+(\S*)$/i);
@@ -252,9 +266,10 @@ export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'mcp',
     aliases: [],
-    description: 'Show MCP server status',
+    description: 'Show MCP server status or load a group (/mcp <group> or /mcp:<group>)',
     priority: 60,
     availability: 'always',
+    completeArgs: mcpArgumentCompletions,
   },
   {
     name: 'plugins',

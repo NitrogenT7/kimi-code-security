@@ -584,6 +584,7 @@ export function cronServices(): TestAgentServiceOverride {
 
 export function mcpServices(options: {
   readonly manager?: McpConnectionManager;
+  readonly sessionMcp?: Partial<ISessionMcpService>;
 }): TestAgentServiceOverride {
   // `AgentMcpService` now resolves the session's shared manager through
   // `ISessionMcpService`; tests inject a fake manager by stubbing that service.
@@ -591,6 +592,15 @@ export function mcpServices(options: {
     _serviceBrand: undefined,
     ensureMcpReady: () => Promise.resolve(),
     connectionManager: () => options.manager!,
+    groupRegistry: () => undefined,
+    listGroups: () => [],
+    loadGroup: () => Promise.resolve(),
+    loadServer: () => Promise.resolve(),
+    addOrUpdateServer: () => Promise.resolve(),
+    removeServer: () => Promise.resolve(false),
+    activeGroup: () => null,
+    setGroupMode: () => {},
+    ...options.sessionMcp,
   } satisfies ISessionMcpService);
 }
 

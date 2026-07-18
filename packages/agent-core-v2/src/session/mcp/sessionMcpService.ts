@@ -14,9 +14,15 @@ import { Disposable } from '#/_base/di/lifecycle';
 import { LifecycleScope, registerScopedService } from '#/_base/di/scope';
 import { McpConnectionManager } from '#/agent/mcp/connection-manager';
 import type { McpServerConfig } from '#/agent/mcp/config-schema';
+import type { McpGroupRegistry } from '#/agent/mcp/group-registry';
 import { McpOAuthService } from '#/agent/mcp/oauth/service';
 import { createMcpOAuthStore } from '#/agent/mcp/oauth/store';
-import { mergeCallerMcpServers, resolveSessionMcpConfig } from '#/agent/mcp/session-config';
+import {
+  mergeCallerMcpServers,
+  partitionServersByGroup,
+  resolveSessionMcpConfig,
+} from '#/agent/mcp/session-config';
+import { ErrorCodes, Error2 } from '#/errors';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { IPluginService } from '#/app/plugin/plugin';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
@@ -24,13 +30,15 @@ import { ILogService } from '#/_base/log/log';
 import { IAtomicDocumentStore } from '#/persistence/interface/atomicDocumentStore';
 import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
 
-import { ISessionMcpService } from './sessionMcp';
+import { ISessionMcpService, type McpGroupInfo } from './sessionMcp';
 
 export class SessionMcpService extends Disposable implements ISessionMcpService {
   declare readonly _serviceBrand: undefined;
 
   private mcpManager: McpConnectionManager | undefined;
   private mcpInitialLoad: Promise<void> | undefined;
+  private mcpGroupRegistry: McpGroupRegistry | undefined;
+  private activeGroupName: string | null = null;
 
   constructor(
     @IBootstrapService private readonly bootstrap: IBootstrapService,
@@ -68,6 +76,76 @@ export class SessionMcpService extends Disposable implements ISessionMcpService 
     return manager;
   }
 
+  groupRegistry(): McpGroupRegistry | undefined {
+    return this.mcpGroupRegistry;
+  }
+
+  listGroups(): readonly McpGroupInfo[] {
+    const registry = this.mcpGroupRegistry;
+    if (registry === undefined) return [];
+    const manager = this.connectionManager();
+    return registry.list().map((group) => {
+      const resolved = registry.resolveServers(group.name) ?? {};
+      const serverNames = Object.keys(resolved);
+      const loaded =
+        serverNames.length > 0 &&
+        serverNames.every((name) => {
+          const status = manager.get(name)?.status;
+          return status === 'connected' || status === 'failed' || status === 'needs-auth';
+        });
+      return {
+        name: group.name,
+        description: group.description,
+        servers: group.servers,
+        skillPrefixes: group.skillPrefixes,
+        loaded,
+      };
+    });
+  }
+
+  async loadGroup(name: string): Promise<void> {
+    const registry = this.mcpGroupRegistry;
+    if (registry === undefined || !registry.has(name)) {
+      throw new Error2(ErrorCodes.MCP_SERVER_NOT_FOUND, `Unknown MCP group: ${name}`);
+    }
+    await this.ensureMcpReady();
+    await this.connectionManager().loadGroup(name, registry);
+    this.activeGroupName = name;
+  }
+
+  async loadServer(name: string): Promise<void> {
+    await this.ensureMcpReady();
+    const manager = this.connectionManager();
+    if (manager.get(name) === undefined) {
+      throw new Error2(ErrorCodes.MCP_SERVER_NOT_FOUND, `Unknown MCP server: ${name}`);
+    }
+    await manager.reconnect(name);
+  }
+
+  async addOrUpdateServer(name: string, config: McpServerConfig): Promise<void> {
+    await this.ensureMcpReady();
+    await this.connectionManager().connect(name, config);
+  }
+
+  async removeServer(name: string): Promise<boolean> {
+    await this.ensureMcpReady();
+    return this.connectionManager().remove(name);
+  }
+
+  activeGroup(): string | null {
+    return this.activeGroupName;
+  }
+
+  setGroupMode(name: string | null): void {
+    if (name !== null) {
+      const registry = this.mcpGroupRegistry;
+      if (registry === undefined || !registry.has(name)) {
+        throw new Error2(ErrorCodes.MCP_SERVER_NOT_FOUND, `Unknown MCP group: ${name}`);
+      }
+    }
+    this.activeGroupName = name;
+  }
+
   private async connectMcpServers(
     manager: McpConnectionManager,
     callerServers?: Readonly<Record<string, McpServerConfig>>,
@@ -77,9 +155,13 @@ export class SessionMcpService extends Disposable implements ISessionMcpService 
       this.plugins.enabledMcpServers(),
     ]);
     const withCaller = mergeCallerMcpServers(base, callerServers);
+    const registry = withCaller?.groupRegistry;
+    this.mcpGroupRegistry = registry;
     const servers = { ...withCaller?.servers, ...pluginServers };
     if (Object.keys(servers).length === 0) return;
-    await manager.connectAll(servers);
+    const { eager, lazy } = partitionServersByGroup(servers, registry);
+    manager.registerLazyServers(lazy);
+    await manager.connectAll(eager);
     this.trackMcpInitialLoad(manager);
   }
 

@@ -133,3 +133,75 @@ describe('AgentProfileService.bind', () => {
     expect(svc.data().profileName).toBe(DEFAULT_AGENT_PROFILE_NAME);
   });
 });
+
+
+describe('security agent profiles', () => {
+  let ctx: TestAgentContext;
+  let homeDir: string;
+
+  beforeEach(async () => {
+    homeDir = await mkdtemp(join(tmpdir(), 'kimi-security-profiles-home-'));
+  });
+
+  afterEach(async () => {
+    await ctx?.dispose();
+    await rm(homeDir, { recursive: true, force: true });
+  });
+
+  it('registers the five security roles bound to MCP group servers', () => {
+    ctx = createTestAgent(hostEnvironmentServices(homeDir));
+    const catalog = ctx.get(IAgentProfileCatalogService);
+
+    const analyst = catalog.get('security-analyst');
+    expect(analyst).toBeDefined();
+    expect(analyst?.tools).toContain('mcp__*');
+    expect(analyst?.tools).not.toContain('MCPManager');
+
+    const android = catalog.get('android-reverser');
+    expect(android).toBeDefined();
+    expect(android?.tools).toEqual(
+      expect.arrayContaining([
+        'mcp__jadx__*',
+        'mcp__ida__*',
+        'mcp__jshook__*',
+        'mcp__adb__*',
+        'mcp__frida__*',
+      ]),
+    );
+    expect(android?.skillPrefixes).toEqual(['android-', 'apk-', 'audit-']);
+
+    const web = catalog.get('web-pentester');
+    expect(web).toBeDefined();
+    expect(web?.tools).toEqual(
+      expect.arrayContaining(['mcp__playwright__*', 'mcp__chrome-devtools__*', 'mcp__jshook__*']),
+    );
+    expect(web?.skillPrefixes).toEqual(['web-', 'cloud-', 'audit-']);
+
+    const binary = catalog.get('binary-reverser');
+    expect(binary).toBeDefined();
+    expect(binary?.tools).toEqual(
+      expect.arrayContaining(['mcp__ida__*', 'mcp__gdb__*', 'mcp__frida__*']),
+    );
+    expect(binary?.skillPrefixes).toEqual(['binary-', 'audit-', 'code-']);
+
+    const auditor = catalog.get('code-auditor');
+    expect(auditor).toBeDefined();
+    expect(auditor?.tools).toContain('mcp__semgrep__*');
+    expect(auditor?.skillPrefixes).toEqual(['audit-', 'code-']);
+  });
+
+  it('main agent profile carries MCPManager and its guidance', () => {
+    ctx = createTestAgent(hostEnvironmentServices(homeDir));
+    const catalog = ctx.get(IAgentProfileCatalogService);
+
+    const main = catalog.get(DEFAULT_AGENT_PROFILE_NAME);
+    expect(main?.tools).toContain('MCPManager');
+    const prompt = main?.systemPrompt({});
+    expect(prompt).toContain('MCPManager');
+    expect(prompt).toContain('list_groups');
+    expect(prompt).toContain('load_group');
+
+    const coder = catalog.get('coder');
+    expect(coder?.tools).not.toContain('MCPManager');
+  });
+});

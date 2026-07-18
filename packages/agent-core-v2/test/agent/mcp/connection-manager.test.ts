@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 import { Error2 } from '#/errors';
 import { McpConnectionManager, type McpServerEntry } from '#/agent/mcp/connection-manager';
+import { McpGroupRegistry } from '#/agent/mcp/group-registry';
 import { McpOAuthService } from '#/agent/mcp/oauth/service';
 
 import {
@@ -635,4 +636,77 @@ describe('McpConnectionManager', () => {
       await closeServer(server);
     }
   }, 15000);
+});
+
+describe('McpConnectionManager lazy groups', () => {
+  it('registers lazy servers without connecting them', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      cm.registerLazyServers({ alpha: stdioConfig(), beta: stdioConfig() });
+      const entries = cm.list();
+      expect(entries.map((e) => e.name).toSorted()).toEqual(['alpha', 'beta']);
+      for (const entry of entries) {
+        expect(entry.status).toBe('registered');
+        expect(entry.toolCount).toBe(0);
+      }
+      expect(cm.resolved('alpha')).toBeUndefined();
+    } finally {
+      await cm.shutdown();
+    }
+  });
+
+  it('registerLazyServers keeps disabled servers disabled', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      cm.registerLazyServers({ alpha: { ...stdioConfig(), enabled: false } });
+      expect(cm.get('alpha')?.status).toBe('disabled');
+    } finally {
+      await cm.shutdown();
+    }
+  });
+
+  it('loadGroup connects the group servers on demand', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      const configs = { alpha: stdioConfig(), beta: stdioConfig() };
+      cm.registerLazyServers(configs);
+      const registry = new McpGroupRegistry({ tools: { servers: ['alpha'] } }, configs);
+
+      await cm.loadGroup('tools', registry);
+
+      // The loaded server is no longer lazy: a connect was attempted (the
+      // terminal state is 'connected' where stdio fixtures run, 'failed'
+      // where the environment cannot spawn them).
+      expect(cm.get('alpha')?.status).not.toBe('registered');
+      expect(cm.get('alpha')?.status).not.toBe('pending');
+      // beta is not part of the loaded group: still lazy.
+      expect(cm.get('beta')?.status).toBe('registered');
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
+
+  it('loadGroup rejects unknown groups', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      const registry = new McpGroupRegistry({}, {});
+      await expect(cm.loadGroup('missing', registry)).rejects.toMatchObject({
+        code: 'mcp.server_not_found',
+      });
+    } finally {
+      await cm.shutdown();
+    }
+  });
+
+  it('reconnect connects a registered (lazy) server', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      cm.registerLazyServers({ alpha: stdioConfig() });
+      await cm.reconnect('alpha');
+      expect(cm.get('alpha')?.status).not.toBe('registered');
+      expect(cm.get('alpha')?.status).not.toBe('pending');
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
 });

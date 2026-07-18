@@ -40,6 +40,8 @@ import type {
   KimiConfig,
   KimiConfigPatch,
   ListSessionsOptions,
+  McpGroupInfo,
+  McpGroupRpcSurface,
   McpServerInfo,
   McpStartupMetrics,
   McpTestResult,
@@ -123,6 +125,14 @@ export interface ActivatePluginCommandRpcInput extends SessionIdRpcInput {
 
 export interface ReconnectMcpServerRpcInput extends SessionIdRpcInput {
   readonly name: string;
+}
+
+export interface LoadMcpGroupRpcInput extends SessionIdRpcInput {
+  readonly name: string;
+}
+
+export interface SetMcpGroupModeRpcInput extends SessionIdRpcInput {
+  readonly groupName: string | null;
 }
 
 type ResolvedCoreAPI = RPCMethods<CoreAPI>;
@@ -713,6 +723,39 @@ export abstract class SDKRpcClientBase {
   async reconnectMcpServer(input: ReconnectMcpServerRpcInput): Promise<void> {
     const rpc = await this.getRpc();
     return rpc.reconnectMcpServer({ sessionId: input.sessionId, name: input.name });
+  }
+
+  /**
+   * MCP group RPCs (agent-core-v2 `mcpGroups`). The v1 in-process engine does
+   * not implement them; calls reject with an "unknown method" style error,
+   * which hosts should surface as "engine does not support MCP groups".
+   */
+  private async mcpGroupRpc(): Promise<McpGroupRpcSurface> {
+    return (await this.getRpc()) as unknown as McpGroupRpcSurface;
+  }
+
+  async listMcpGroups(input: SessionIdRpcInput): Promise<readonly McpGroupInfo[]> {
+    const rpc = await this.mcpGroupRpc();
+    if (typeof rpc.listMcpGroups !== 'function') {
+      throw new TypeError('The current engine does not support MCP groups');
+    }
+    return rpc.listMcpGroups({ sessionId: input.sessionId });
+  }
+
+  async loadMcpGroup(input: LoadMcpGroupRpcInput): Promise<void> {
+    const rpc = await this.mcpGroupRpc();
+    if (typeof rpc.loadMcpGroup !== 'function') {
+      throw new TypeError('The current engine does not support MCP groups');
+    }
+    return rpc.loadMcpGroup({ sessionId: input.sessionId, name: input.name });
+  }
+
+  async setMcpGroupMode(input: SetMcpGroupModeRpcInput): Promise<void> {
+    const rpc = await this.mcpGroupRpc();
+    if (typeof rpc.setMcpGroupMode !== 'function') {
+      throw new TypeError('The current engine does not support MCP groups');
+    }
+    return rpc.setMcpGroupMode({ sessionId: input.sessionId, groupName: input.groupName });
   }
 
   async listPlugins(): Promise<readonly PluginSummary[]> {

@@ -64,7 +64,7 @@ export interface SkillCatalog {
   listInvocableSkills(): readonly SkillDefinition[];
   getSkillRoots(): readonly string[];
   getSkippedByPolicy(): readonly SkippedSkill[];
-  getModelSkillListing(): string;
+  getModelSkillListing(skillPrefixes?: readonly string[]): string;
 }
 
 export function normalizeSkillName(name: string): string {

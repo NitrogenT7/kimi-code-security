@@ -20,10 +20,17 @@ import { isRemoteMcpConfig } from './client-remote';
 import { SseMcpClient } from './client-sse';
 import type { UnexpectedCloseReason } from './client-shared';
 import { StdioMcpClient } from './client-stdio';
+import type { McpGroupRegistry } from './group-registry';
 import type { McpOAuthService } from '#/agent/mcp/oauth/service';
 import { assertMcpInputSchema, type MCPClient, type MCPToolDefinition } from './types';
 
-export type McpServerStatus = 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
+export type McpServerStatus =
+  | 'registered'
+  | 'pending'
+  | 'connected'
+  | 'failed'
+  | 'disabled'
+  | 'needs-auth';
 
 export interface McpServerEntry {
   readonly name: string;
@@ -210,6 +217,41 @@ export class McpConnectionManager {
       }
     }
     await Promise.allSettled(tasks);
+  }
+
+  /**
+   * Register servers as "known but not connected". This is the lazy-loading
+   * entry point: the servers are visible in `list()` with status `registered`,
+   * but no transport is started until `loadGroup`, `connect`, or `reconnect`
+   * is called.
+   */
+  registerLazyServers(configs: Record<string, McpServerConfig>): void {
+    for (const [name, config] of Object.entries(configs)) {
+      const existing = this.entries.get(name);
+      if (existing !== undefined) continue;
+      const disabled = config.enabled === false;
+      const entry: InternalEntry = {
+        name,
+        config,
+        attemptId: 0,
+        status: disabled ? 'disabled' : 'registered',
+      };
+      this.entries.set(name, entry);
+      this.emit(entry);
+    }
+  }
+
+  /**
+   * Resolve a group from the registry and connect all of its servers.
+   */
+  async loadGroup(groupName: string, registry: McpGroupRegistry): Promise<void> {
+    const configs = registry.resolveServers(groupName);
+    if (configs === undefined) {
+      throw new Error2(ErrorCodes.MCP_SERVER_NOT_FOUND, `Unknown MCP group: ${groupName}`);
+    }
+    await Promise.all(
+      Object.entries(configs).map(([name, config]) => this.connect(name, config)),
+    );
   }
 
   async reconnect(name: string): Promise<void> {

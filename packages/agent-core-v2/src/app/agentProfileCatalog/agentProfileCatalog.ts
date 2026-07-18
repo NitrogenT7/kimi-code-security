@@ -59,6 +59,13 @@ export interface AgentProfile {
   readonly description?: string;
   readonly whenToUse?: string;
   readonly tools: readonly string[];
+  /**
+   * Optional skill-name prefixes that sandbox this profile's skill listing:
+   * when set, the profile's system prompt only lists skills whose name starts
+   * with one of the prefixes (`'*'` disables filtering). Used by MCP-group-
+   * bound security roles.
+   */
+  readonly skillPrefixes?: readonly string[];
   systemPrompt(context: AgentProfileContext): string;
   readonly promptPrefix?: (ctx: AgentProfilePromptPrefixContext) => Promise<string>;
   readonly summaryPolicy?: AgentProfileSummaryPolicy;

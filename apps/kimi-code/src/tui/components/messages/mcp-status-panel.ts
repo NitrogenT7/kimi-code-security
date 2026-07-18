@@ -1,9 +1,10 @@
-import type { McpServerInfo } from '@moonshot-ai/kimi-code-sdk';
+import type { McpGroupInfo, McpServerInfo } from '@moonshot-ai/kimi-code-sdk';
 
 import { currentTheme } from '#/tui/theme';
 
 export interface McpStatusReportOptions {
   readonly servers: readonly McpServerInfo[];
+  readonly groups?: readonly McpGroupInfo[] | undefined;
 }
 
 const STATUS_PRIORITY: Record<McpServerInfo['status'], number> = {
@@ -99,7 +100,29 @@ export function buildMcpStatusReportLines(options: McpStatusReportOptions): stri
   const value = (text: string) => currentTheme.fg('text', text);
   const error = (text: string) => currentTheme.fg('error', text);
 
-  const lines: string[] = [accent('Servers')];
+  const lines: string[] = [];
+
+  const groups = options.groups;
+  if (groups !== undefined && groups.length > 0) {
+    lines.push(accent('Groups'));
+    for (const group of groups) {
+      const state = group.loaded ? value('loaded') : muted('not loaded');
+      lines.push(`  ${value(group.name)}  ${state}`);
+      const description = group.description ?? '';
+      if (description.length > 0) lines.push(`    ${muted(description)}`);
+      lines.push(`    ${muted('servers:')} ${value(group.servers.join(', '))}`);
+      if (group.skillPrefixes.length > 0) {
+        lines.push(`    ${muted('skills:')} ${value(group.skillPrefixes.join(', '))}`);
+      }
+    }
+    lines.push('');
+    lines.push(
+      `  ${muted('Load a group with')} ${value('/mcp <group>')} ${muted('or')} ${value('/mcp:<group>')}`,
+    );
+    lines.push('');
+  }
+
+  lines.push(accent('Servers'));
 
   if (servers.length === 0) {
     lines.push(muted('  No MCP servers configured. Run /mcp-config to add one.'));

@@ -274,6 +274,7 @@ function mapMcpStatus(status: McpEntry['status']): McpServer['status'] {
       return 'connecting';
     case 'connected':
       return 'connected';
+    case 'registered':
     case 'disabled':
       return 'disconnected';
     case 'failed':
