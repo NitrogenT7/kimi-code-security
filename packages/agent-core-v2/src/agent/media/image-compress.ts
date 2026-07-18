@@ -20,7 +20,11 @@
  *    {@link gateImageFormatParts} before any compression, so images outside
  *    the provider-accepted set (see ./image-format-policy) are never decoded
  *    or forwarded — one unsupported image in the session history would make
- *    every subsequent request fail.
+ *    every subsequent request fail. The gate also sniffs the decoded magic
+ *    bytes: a data URL declaring an accepted image type whose payload carries
+ *    no media magic at all (e.g. a base64-encoded tool error message) is
+ *    downgraded to a text notice (see ./image-payload), because the provider
+ *    would sniff the real bytes and reject every subsequent request.
  *  - PNG, JPEG, and (non-animated) WebP are re-encoded; WebP re-encodes
  *    through the PNG/JPEG ladder after a wasm decode (see ./webp-decode).
  *    GIF and animated WebP are passed through to preserve animation. Formats
@@ -39,7 +43,7 @@
 
 import type { ContentPart } from '#/app/llmProtocol/message';
 
-import { sniffImageDimensions } from './file-type';
+import { sniffImageDimensions, sniffMediaFromMagic } from './file-type';
 import {
   buildMalformedImageNotice,
   buildUnsupportedImageNotice,
@@ -51,6 +55,7 @@ import {
   resolveEffectiveImageMime,
   unsupportedImageMimeFromUrl,
 } from './image-format-policy';
+import { buildNonImagePayloadNotice, probeBase64Text } from './image-payload';
 import { decodeWebp, isAnimatedWebp } from './webp-decode';
 
 export const MAX_IMAGE_EDGE_PX = 2000;
@@ -340,10 +345,15 @@ export function gateImageFormatParts(parts: readonly ContentPart[]): ContentPart
         out.push(part);
         continue;
       }
-      const effectiveMime = resolveEffectiveImageMime(
-        parsed.mimeType,
-        decodeBase64Prefix(parsed.base64),
-      );
+      const header = decodeBase64Prefix(parsed.base64);
+      if (sniffMediaFromMagic(header) === null && isModelAcceptedImageMime(parsed.mimeType)) {
+        out.push({
+          type: 'text',
+          text: buildNonImagePayloadNotice(probeBase64Text(parsed.base64)),
+        });
+        continue;
+      }
+      const effectiveMime = resolveEffectiveImageMime(parsed.mimeType, header);
       if (!isModelAcceptedImageMime(effectiveMime)) {
         out.push({ type: 'text', text: buildUnsupportedImageNotice(effectiveMime) });
         continue;

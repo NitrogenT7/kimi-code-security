@@ -17,6 +17,15 @@ const MCP_OUTPUT_TRUNCATED_TEXT =
   '\n\n[Output truncated: exceeded 100000 character limit. ' +
   'Use pagination or more specific queries to get remaining content.]';
 
+const PNG_B64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
+const JPEG_B64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString('base64');
+const WEBP_B64 = Buffer.from([
+  0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+]).toString('base64');
+const PNG_B64_PREFIX = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]).toString(
+  'base64',
+);
+
 function isPromiseLike(value: ToolExecution | Promise<ToolExecution>): value is Promise<ToolExecution> {
   return typeof (value as Promise<ToolExecution>).then === 'function';
 }
@@ -60,18 +69,18 @@ describe('convertMCPContentBlock', () => {
   });
 
   test('converts image block with mimeType to image data URI', () => {
-    const block: MCPContentBlock = { type: 'image', data: 'AAA', mimeType: 'image/jpeg' };
+    const block: MCPContentBlock = { type: 'image', data: JPEG_B64, mimeType: 'image/jpeg' };
     expect(convertMCPContentBlock(block)).toEqual({
       type: 'image_url',
-      imageUrl: { url: 'data:image/jpeg;base64,AAA' },
+      imageUrl: { url: `data:image/jpeg;base64,${JPEG_B64}` },
     });
   });
 
   test('image block without mimeType defaults to image/png', () => {
-    const block: MCPContentBlock = { type: 'image', data: 'AAA' };
+    const block: MCPContentBlock = { type: 'image', data: PNG_B64 };
     expect(convertMCPContentBlock(block)).toEqual({
       type: 'image_url',
-      imageUrl: { url: 'data:image/png;base64,AAA' },
+      imageUrl: { url: `data:image/png;base64,${PNG_B64}` },
     });
   });
 
@@ -114,11 +123,11 @@ describe('convertMCPContentBlock', () => {
   test('converts blob EmbeddedResource with image/* mimeType to ImageURLPart', () => {
     const block = assertValidMcpBlock({
       type: 'resource',
-      resource: { uri: 'file:///pic.webp', mimeType: 'image/webp', blob: 'III' },
+      resource: { uri: 'file:///pic.webp', mimeType: 'image/webp', blob: WEBP_B64 },
     });
     expect(convertMCPContentBlock(block)).toEqual({
       type: 'image_url',
-      imageUrl: { url: 'data:image/webp;base64,III' },
+      imageUrl: { url: `data:image/webp;base64,${WEBP_B64}` },
     });
   });
 
@@ -242,6 +251,58 @@ describe('convertMCPContentBlock', () => {
     const block: MCPContentBlock = { type: 'image', mimeType: 'image/png' };
     expect(convertMCPContentBlock(block)).toBeNull();
   });
+
+  test('passes image blocks whose payload sniffs as a supported image', () => {
+    const cases: ReadonlyArray<{ data: string; mimeType: string }> = [
+      { data: PNG_B64, mimeType: 'image/png' },
+      { data: JPEG_B64, mimeType: 'image/jpeg' },
+      { data: WEBP_B64, mimeType: 'image/webp' },
+    ];
+    for (const { data, mimeType } of cases) {
+      expect(convertMCPContentBlock({ type: 'image', data, mimeType })).toEqual({
+        type: 'image_url',
+        imageUrl: { url: `data:${mimeType};base64,${data}` },
+      });
+    }
+  });
+
+  test('rewrites the declared MIME when it disagrees with the sniffed bytes', () => {
+    expect(
+      convertMCPContentBlock({ type: 'image', data: JPEG_B64, mimeType: 'image/png' }),
+    ).toEqual({
+      type: 'image_url',
+      imageUrl: { url: `data:image/jpeg;base64,${JPEG_B64}` },
+    });
+  });
+
+  test('downgrades an image block whose payload is text to a notice carrying the message', () => {
+    const block: MCPContentBlock = {
+      type: 'image',
+      data: Buffer.from('Failed to take take screenshot. Capturing failed.\n', 'utf8').toString(
+        'base64',
+      ),
+      mimeType: 'image/png',
+    };
+    const part = convertMCPContentBlock(block);
+    expect(part?.type).toBe('text');
+    const text = (part as { text: string }).text;
+    expect(text).toContain('image_url dropped');
+    expect(text).toContain('Failed to take take screenshot. Capturing failed.');
+  });
+
+  test('downgrades an image blob resource whose payload is text', () => {
+    const block = assertValidMcpBlock({
+      type: 'resource',
+      resource: {
+        uri: 'file:///shot.png',
+        mimeType: 'image/png',
+        blob: Buffer.from('screenshot backend unreachable', 'utf8').toString('base64'),
+      },
+    });
+    const part = convertMCPContentBlock(block);
+    expect(part?.type).toBe('text');
+    expect((part as { text: string }).text).toContain('screenshot backend unreachable');
+  });
 });
 
 describe('mcpResultToExecutableOutput', () => {
@@ -283,13 +344,13 @@ describe('mcpResultToExecutableOutput', () => {
 
   test('wraps media-only output in mcp_tool_result tags using the qualified name', async () => {
     const out = await mcpResultToExecutableOutput(
-      result([{ type: 'image', data: 'AAA', mimeType: 'image/png' }]),
+      result([{ type: 'image', data: PNG_B64, mimeType: 'image/png' }]),
       'mcp__github__create_pr',
     );
     expect(out.isError).toBe(false);
     expect(out.output).toEqual([
       { type: 'text', text: '<mcp_tool_result name="mcp__github__create_pr">' },
-      { type: 'image_url', imageUrl: { url: 'data:image/png;base64,AAA' } },
+      { type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}` } },
       { type: 'text', text: '</mcp_tool_result>' },
     ]);
   });
@@ -298,13 +359,13 @@ describe('mcpResultToExecutableOutput', () => {
     const out = await mcpResultToExecutableOutput(
       result([
         { type: 'text', text: 'caption' },
-        { type: 'image', data: 'AAA', mimeType: 'image/png' },
+        { type: 'image', data: PNG_B64, mimeType: 'image/png' },
       ]),
       'mcp__s__t',
     );
     expect(out.output).toEqual([
       { type: 'text', text: 'caption' },
-      { type: 'image_url', imageUrl: { url: 'data:image/png;base64,AAA' } },
+      { type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}` } },
     ]);
   });
 
@@ -312,13 +373,31 @@ describe('mcpResultToExecutableOutput', () => {
     const out = await mcpResultToExecutableOutput(
       result([
         { type: 'text', text: '' },
-        { type: 'image', data: 'AAA', mimeType: 'image/png' },
+        { type: 'image', data: PNG_B64, mimeType: 'image/png' },
       ]),
       'mcp__s__t',
     );
     const parts = out.output as ContentPart[];
     expect(parts[0]).toEqual({ type: 'text', text: '<mcp_tool_result name="mcp__s__t">' });
     expect(parts.at(-1)).toEqual({ type: 'text', text: '</mcp_tool_result>' });
+  });
+
+  test('a text-payload image block reaches the model as visible text, not an image', async () => {
+    const out = await mcpResultToExecutableOutput(
+      result([
+        {
+          type: 'image',
+          data: Buffer.from('Failed to take take screenshot. Capturing failed.\n', 'utf8').toString(
+            'base64',
+          ),
+          mimeType: 'image/png',
+        },
+      ]),
+      'mcp__s__snap',
+    );
+    expect(out.isError).toBe(false);
+    expect(typeof out.output).toBe('string');
+    expect(out.output as string).toContain('Failed to take take screenshot. Capturing failed.');
   });
 
   test('truncates oversized text and merges the notice into the surviving text part', async () => {
@@ -331,7 +410,7 @@ describe('mcpResultToExecutableOutput', () => {
   });
 
   test('drops oversized binary parts in favor of a per-part notice without touching the text budget', async () => {
-    const huge = 'x'.repeat(14 * 1024 * 1024);
+    const huge = PNG_B64_PREFIX + 'x'.repeat(14 * 1024 * 1024);
     const out = await mcpResultToExecutableOutput(
       result([{ type: 'image', data: huge, mimeType: 'image/png' }]),
       'mcp__s__big',
@@ -349,16 +428,17 @@ describe('mcpResultToExecutableOutput', () => {
   });
 
   test('binary part within the per-part cap survives intact alongside oversized text', async () => {
+    const data = PNG_B64_PREFIX + 'B'.repeat(500_000);
     const out = await mcpResultToExecutableOutput(
       result([
         { type: 'text', text: 'A'.repeat(100_000) },
-        { type: 'image', data: 'B'.repeat(500_000), mimeType: 'image/png' },
+        { type: 'image', data, mimeType: 'image/png' },
       ]),
       'mcp__s__t',
     );
     expect(out.output).toEqual([
       { type: 'text', text: 'A'.repeat(100_000) },
-      { type: 'image_url', imageUrl: { url: 'data:image/png;base64,' + 'B'.repeat(500_000) } },
+      { type: 'image_url', imageUrl: { url: `data:image/png;base64,${data}` } },
     ]);
     expect(out.truncated).toBeUndefined();
   });

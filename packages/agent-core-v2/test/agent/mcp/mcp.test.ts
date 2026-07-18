@@ -39,6 +39,10 @@ const MCP_OUTPUT_TRUNCATED_TEXT =
   '\n\n[Output truncated: exceeded 100000 character limit. ' +
   'Use pagination or more specific queries to get remaining content.]';
 
+const PNG_B64_PREFIX = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]).toString(
+  'base64',
+);
+
 interface ResolvedServer {
   readonly client: MCPClient;
   readonly tools: readonly KosongTool[];
@@ -409,7 +413,9 @@ describe('AgentMcpService', () => {
       },
       async callTool() {
         return {
-          content: [{ type: 'image', data: 'x'.repeat(100_000), mimeType: 'image/png' }],
+          content: [
+            { type: 'image', data: PNG_B64_PREFIX + 'x'.repeat(100_000), mimeType: 'image/png' },
+          ],
           isError: false,
         };
       },
@@ -432,7 +438,7 @@ describe('AgentMcpService', () => {
       { type: 'text', text: '<mcp_tool_result name="mcp__s__snap">' },
       {
         type: 'image_url',
-        imageUrl: { url: 'data:image/png;base64,' + 'x'.repeat(100_000) },
+        imageUrl: { url: 'data:image/png;base64,' + PNG_B64_PREFIX + 'x'.repeat(100_000) },
       },
       { type: 'text', text: '</mcp_tool_result>' },
     ]);

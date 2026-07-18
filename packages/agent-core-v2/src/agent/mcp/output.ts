@@ -4,7 +4,12 @@
  * Owns the full path from "MCP protocol content blocks" to "what the agent
  * loop feeds back to the model":
  *  1. Convert each {@link MCPContentBlock} to a kosong `ContentPart`
- *     (dropping unsupported shapes).
+ *     (dropping unsupported shapes). Image blocks and image blob resources
+ *     are sanitized against their actual bytes: a payload that sniffs as a
+ *     different image format gets its declared MIME rewritten, and a payload
+ *     with no media magic at all (e.g. a base64-encoded tool error message)
+ *     degrades to a text notice carrying the decoded text, so a broken tool
+ *     cannot poison every subsequent provider request.
  *  2. Wrap media-only outputs in `<mcp_tool_result name="…">` tags so the
  *     model can attribute binary output when several tools return media.
  *     Mirrors the in-tree `ReadMediaFile` convention.
@@ -36,6 +41,7 @@ import {
   isModelAcceptedImageMime,
 } from '#/agent/media/image-format-policy';
 import { persistOriginalImage } from '#/agent/media/image-originals';
+import { sanitizeImageUrlPart } from '#/agent/media/image-payload';
 import type { MCPContentBlock, MCPToolResult } from './types';
 
 export interface McpOutputOptions {
@@ -64,10 +70,10 @@ export function convertMCPContentBlock(block: MCPContentBlock): ContentPart | nu
 
   if (block.type === 'image' && typeof block.data === 'string') {
     const mimeType = block.mimeType ?? 'image/png';
-    return {
+    return sanitizeImageUrlPart({
       type: 'image_url',
       imageUrl: { url: `data:${mimeType};base64,${block.data}` },
-    };
+    });
   }
 
   if (block.type === 'audio' && typeof block.data === 'string') {
@@ -86,10 +92,10 @@ export function convertMCPContentBlock(block: MCPContentBlock): ContentPart | nu
     if (typeof res.blob === 'string') {
       const mimeType = res.mimeType ?? 'application/octet-stream';
       if (mimeType.startsWith('image/')) {
-        return {
+        return sanitizeImageUrlPart({
           type: 'image_url',
           imageUrl: { url: `data:${mimeType};base64,${res.blob}` },
-        };
+        });
       }
       if (mimeType.startsWith('audio/')) {
         return {

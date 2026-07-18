@@ -59,6 +59,15 @@ import {
   normalizeImageMime,
   unsupportedImageMimeFromUrl,
 } from '#/agent/media/image-format-policy';
+import { checkImagePayload, sanitizeImageUrlPart } from '#/agent/media/image-payload';
+import type { ContentPart } from '#/app/llmProtocol/message';
+
+const PNG_MAGIC = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const JPEG_MAGIC = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+const GIF_MAGIC = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+const WEBP_MAGIC = new Uint8Array([
+  0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+]);
 
 
 async function solidPng(width: number, height: number, color = 0x3366ccff): Promise<Uint8Array> {
@@ -600,8 +609,14 @@ describe('compressImageContentParts', () => {
   });
 
   it('passes the accepted formats through the format gate untouched', async () => {
-    for (const mime of ['image/png', 'image/jpeg', 'image/gif', 'image/webp']) {
-      const url = dataUrl(mime, new Uint8Array([1, 2, 3]));
+    const magicByMime: Readonly<Record<string, Uint8Array>> = {
+      'image/png': PNG_MAGIC,
+      'image/jpeg': JPEG_MAGIC,
+      'image/gif': GIF_MAGIC,
+      'image/webp': WEBP_MAGIC,
+    };
+    for (const [mime, magic] of Object.entries(magicByMime)) {
+      const url = dataUrl(mime, magic);
       const parts = [{ type: 'image_url' as const, imageUrl: { url } }];
       const { parts: out } = await compressImageContentParts(parts);
       expect(out[0]).toEqual({ type: 'image_url', imageUrl: { url } });
@@ -609,8 +624,7 @@ describe('compressImageContentParts', () => {
   });
 
   it('forwards accepted MIME aliases in canonical form', async () => {
-    const bytes = new Uint8Array([1, 2, 3]);
-    const base64 = Buffer.from(bytes).toString('base64');
+    const base64 = Buffer.from(JPEG_MAGIC).toString('base64');
     for (const alias of ['image/jpg', 'Image/JPEG', ' image/jpeg ']) {
       const parts = [
         { type: 'image_url' as const, imageUrl: { url: `data:${alias};base64,${base64}` } },
@@ -650,7 +664,7 @@ describe('gateImageFormatParts', () => {
       { type: 'image_url' as const, imageUrl: { url: dataUrl('image/avif', new Uint8Array([1])) } },
       { type: 'image_url' as const, imageUrl: { url: dataUrl('image/bmp', new Uint8Array([2])) } },
       { type: 'video_url' as const, videoUrl: { url: dataUrl('video/mp4', new Uint8Array([3])) } },
-      { type: 'image_url' as const, imageUrl: { url: dataUrl('image/png', new Uint8Array([4])) } },
+      { type: 'image_url' as const, imageUrl: { url: dataUrl('image/png', PNG_MAGIC) } },
     ];
     const out = gateImageFormatParts(parts);
 
@@ -668,7 +682,7 @@ describe('gateImageFormatParts', () => {
   });
 
   it('rewrites accepted MIME aliases to canonical form', () => {
-    const base64 = Buffer.from([1, 2, 3]).toString('base64');
+    const base64 = Buffer.from(JPEG_MAGIC).toString('base64');
     const out = gateImageFormatParts([
       { type: 'image_url', imageUrl: { url: `data:image/jpg;base64,${base64}` } },
     ]);
@@ -679,7 +693,7 @@ describe('gateImageFormatParts', () => {
   });
 
   it('rewrites an accepted MIME carrying parameters to the bare canonical form', () => {
-    const base64 = Buffer.from([1, 2, 3]).toString('base64');
+    const base64 = Buffer.from(JPEG_MAGIC).toString('base64');
     const out = gateImageFormatParts([
       { type: 'image_url', imageUrl: { url: `data:image/jpeg;charset=utf-8;base64,${base64}` } },
     ]);
@@ -719,14 +733,15 @@ describe('gateImageFormatParts', () => {
       imageUrl: { url: `data:image/png;base64,${pngBytes.toString('base64')}` },
     });
 
-    const garbage = gateImageFormatParts([
+    const impostor = gateImageFormatParts([
       { type: 'image_url', imageUrl: { url: `data:image/png;base64,${Buffer.from([1, 2, 3]).toString('base64')}` } },
     ]);
-    expect(garbage[0]).toMatchObject({ type: 'image_url' });
+    expect(impostor.some((p) => p.type === 'image_url')).toBe(false);
+    expect((impostor[0] as { text: string }).text).toContain('image_url dropped');
   });
 
   it('parses the base64 marker case-insensitively', () => {
-    const base64 = Buffer.from([1, 2, 3]).toString('base64');
+    const base64 = Buffer.from(JPEG_MAGIC).toString('base64');
 
     const accepted = gateImageFormatParts([
       { type: 'image_url', imageUrl: { url: `data:image/jpeg;BASE64,${base64}` } },
@@ -737,7 +752,10 @@ describe('gateImageFormatParts', () => {
     });
 
     const unsupported = gateImageFormatParts([
-      { type: 'image_url', imageUrl: { url: `data:image/avif;BASE64,${base64}` } },
+      {
+        type: 'image_url',
+        imageUrl: { url: `data:image/avif;BASE64,${Buffer.from([1, 2, 3]).toString('base64')}` },
+      },
     ]);
     expect(unsupported.some((p) => p.type === 'image_url')).toBe(false);
     expect((unsupported[0] as { text: string }).text).toContain('image/avif');
@@ -789,6 +807,123 @@ describe('gateImageFormatParts', () => {
     const notice = (out[0] as { text: string }).text;
     expect(notice.length).toBeLessThan(250);
     expect(notice).not.toContain(url);
+  });
+
+  it('downgrades an impostor text payload to a notice carrying the decoded message', () => {
+    const errorText = 'Failed to take take screenshot. Capturing failed.\n';
+    const base64 = Buffer.from(errorText, 'utf8').toString('base64');
+    const out = gateImageFormatParts([
+      { type: 'image_url', imageUrl: { url: `data:image/png;base64,${base64}` } },
+    ]);
+    expect(out.some((p) => p.type === 'image_url')).toBe(false);
+    const notice = (out[0] as { text: string }).text;
+    expect(notice).toContain('image_url dropped');
+    expect(notice).toContain('Failed to take take screenshot. Capturing failed.');
+  });
+
+  it('keeps the unsupported-format notice when the declared type is not accepted', () => {
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>', 'utf8').toString('base64');
+    const out = gateImageFormatParts([
+      { type: 'image_url', imageUrl: { url: `data:image/svg+xml;base64,${svg}` } },
+    ]);
+    expect(out.some((p) => p.type === 'image_url')).toBe(false);
+    expect((out[0] as { text: string }).text).toContain('image/svg+xml');
+  });
+});
+
+describe('checkImagePayload', () => {
+  const ERROR_TEXT = 'Failed to take take screenshot. Capturing failed.\n';
+  const ERROR_TEXT_B64 = Buffer.from(ERROR_TEXT, 'utf8').toString('base64');
+  const PNG_B64 = Buffer.from(PNG_MAGIC).toString('base64');
+  const JPEG_B64 = Buffer.from(JPEG_MAGIC).toString('base64');
+  const ZIP_B64 = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x0a, 0x00]).toString('base64');
+
+  it('accepts a payload whose magic bytes match an image format', () => {
+    expect(checkImagePayload(PNG_B64)).toEqual({ valid: true, mimeType: 'image/png' });
+    expect(checkImagePayload(JPEG_B64)).toEqual({ valid: true, mimeType: 'image/jpeg' });
+    expect(checkImagePayload(Buffer.from(GIF_MAGIC).toString('base64'))).toEqual({
+      valid: true,
+      mimeType: 'image/gif',
+    });
+    expect(checkImagePayload(Buffer.from(WEBP_MAGIC).toString('base64'))).toEqual({
+      valid: true,
+      mimeType: 'image/webp',
+    });
+  });
+
+  it('rejects a text payload and carries the decoded message', () => {
+    const check = checkImagePayload(ERROR_TEXT_B64);
+    expect(check.valid).toBe(false);
+    expect(check.valid === false && check.text).toBe(ERROR_TEXT.trim());
+  });
+
+  it('rejects a non-image binary payload without decoded text', () => {
+    expect(checkImagePayload(ZIP_B64)).toEqual({ valid: false });
+  });
+});
+
+describe('sanitizeImageUrlPart', () => {
+  const ERROR_TEXT = 'Failed to take take screenshot. Capturing failed.\n';
+  const ERROR_TEXT_B64 = Buffer.from(ERROR_TEXT, 'utf8').toString('base64');
+  const PNG_B64 = Buffer.from(PNG_MAGIC).toString('base64');
+  const JPEG_B64 = Buffer.from(JPEG_MAGIC).toString('base64');
+  const ZIP_B64 = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x0a, 0x00]).toString('base64');
+
+  function imagePart(url: string): ContentPart {
+    return { type: 'image_url', imageUrl: { url } };
+  }
+
+  it('passes non-image parts through untouched', () => {
+    const part: ContentPart = { type: 'text', text: 'hello' };
+    expect(sanitizeImageUrlPart(part)).toBe(part);
+  });
+
+  it('passes non-data URLs through untouched', () => {
+    const part = imagePart('https://example.com/img.png');
+    expect(sanitizeImageUrlPart(part)).toBe(part);
+  });
+
+  it('keeps a data URL whose payload is a real image', () => {
+    const part = imagePart(`data:image/png;base64,${PNG_B64}`);
+    expect(sanitizeImageUrlPart(part)).toBe(part);
+  });
+
+  it('rewrites the declared MIME when it disagrees with the magic bytes', () => {
+    const part = imagePart(`data:image/png;base64,${JPEG_B64}`);
+    expect(sanitizeImageUrlPart(part)).toEqual(imagePart(`data:image/jpeg;base64,${JPEG_B64}`));
+  });
+
+  it('preserves the imageUrl id when rewriting the declared MIME', () => {
+    const part: ContentPart = {
+      type: 'image_url',
+      imageUrl: { url: `data:image/png;base64,${JPEG_B64}`, id: 'att-1' },
+    };
+    expect(sanitizeImageUrlPart(part)).toEqual({
+      type: 'image_url',
+      imageUrl: { url: `data:image/jpeg;base64,${JPEG_B64}`, id: 'att-1' },
+    });
+  });
+
+  it('downgrades a text payload to a notice carrying the decoded message', () => {
+    const part = imagePart(`data:image/png;base64,${ERROR_TEXT_B64}`);
+    const out = sanitizeImageUrlPart(part);
+    expect(out.type).toBe('text');
+    const text = (out as { text: string }).text;
+    expect(text).toContain('image_url dropped');
+    expect(text).toContain('Failed to take take screenshot. Capturing failed.');
+  });
+
+  it('downgrades a non-image binary payload to a generic notice', () => {
+    const out = sanitizeImageUrlPart(imagePart(`data:image/png;base64,${ZIP_B64}`));
+    expect(out).toEqual({
+      type: 'text',
+      text: '[image_url dropped: payload was not a recognizable image.]',
+    });
+  });
+
+  it('downgrades a data URL without a base64 payload marker', () => {
+    const out = sanitizeImageUrlPart(imagePart('data:image/svg+xml,<svg/>'));
+    expect(out.type).toBe('text');
   });
 });
 
