@@ -29,6 +29,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DefaultCompactionStrategy,
 } from '#/agent/fullCompaction/strategy';
+import { RETENTION_PLAN_COMPACTION_FLAG_ENV } from '#/agent/fullCompaction/flag';
 import { COMPACTION_SUMMARY_PREFIX } from '#/agent/contextMemory/compactionHandoff';
 import { makeHookRunner } from '../externalHooks/runner-stub';
 import type { IExternalHooksRunnerService } from '#/app/externalHooksRunner/externalHooksRunner';
@@ -2754,6 +2755,82 @@ describe('FullCompaction', () => {
       text: expect.stringContaining('The conversation so far has been compacted'),
     });
     await ctx.expectResumeMatches();
+  });
+});
+
+describe('retention-plan compaction', () => {
+  function setupAgent(): TestAgentContext {
+    const ctx = testAgent();
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      tools: SNAPSHOT_VISIBLE_TOOLS,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    ctx.appendExchange(2, 'recent user two', 'recent assistant two', 120);
+    return ctx;
+  }
+
+  function lastUserText(ctx: TestAgentContext, callIndex: number): string {
+    const call = ctx.llmCalls[callIndex]!;
+    const last = call.history.at(-1)!;
+    return last.content
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('');
+  }
+
+  it('embeds the retention plan into the compaction instruction when the flag is enabled', async () => {
+    vi.stubEnv(RETENTION_PLAN_COMPACTION_FLAG_ENV, '1');
+    const ctx = setupAgent();
+    const compacted = ctx.once('full_compaction.complete');
+
+    ctx.mockNextResponse({ type: 'text', text: '## Must Retain\n1. keep the poisoning root cause' });
+    ctx.mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+    await compacted;
+
+    expect(ctx.llmCalls).toHaveLength(2);
+    expect(lastUserText(ctx, 0)).toContain('decide what MUST be kept');
+    expect(lastUserText(ctx, 1)).toContain('keep the poisoning root cause');
+  });
+
+  it('skips the planning pass when the flag is disabled', async () => {
+    const ctx = setupAgent();
+    const compacted = ctx.once('full_compaction.complete');
+
+    ctx.mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+    await compacted;
+
+    expect(ctx.llmCalls).toHaveLength(1);
+  });
+
+  it('falls back to standard compaction when the planning pass fails', async () => {
+    vi.stubEnv(RETENTION_PLAN_COMPACTION_FLAG_ENV, '1');
+    const ctx = setupAgent();
+    const compacted = ctx.once('full_compaction.complete');
+
+    // An empty plan response fails the planning pass; compaction must still succeed.
+    ctx.mockNextResponse({ type: 'text', text: '' });
+    ctx.mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    ctx.get(IAgentFullCompactionService).begin({ source: 'auto', instruction: undefined });
+    await compacted;
+
+    expect(ctx.llmCalls).toHaveLength(2);
+    expect(lastUserText(ctx, 1)).not.toContain('retention plan when deciding');
+  });
+
+  it('skips the planning pass for manual compaction even when the flag is enabled', async () => {
+    vi.stubEnv(RETENTION_PLAN_COMPACTION_FLAG_ENV, '1');
+    const ctx = setupAgent();
+    const compacted = ctx.once('full_compaction.complete');
+
+    ctx.mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    ctx.get(IAgentFullCompactionService).begin({ source: 'manual', instruction: undefined });
+    await compacted;
+
+    expect(ctx.llmCalls).toHaveLength(1);
   });
 });
 

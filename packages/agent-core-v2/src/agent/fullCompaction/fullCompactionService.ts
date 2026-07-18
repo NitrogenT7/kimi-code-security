@@ -41,7 +41,10 @@ import type { CompactionFailedEvent, CompactionFinishedEvent } from '#/app/telem
 import { ITelemetryService } from '#/app/telemetry/telemetry';
 import { ErrorCodes, Error2, isCodedError, isError2, toKimiErrorPayload, unwrapErrorCause } from "#/errors";
 import { IWireService } from '#/wire/wire';
+import { IFlagService } from '#/app/flag/flag';
 import compactionInstructionTemplate from './compaction-instruction.md?raw';
+import retentionPlanInstructionTemplate from './retention-plan-instruction.md?raw';
+import { RETENTION_PLAN_COMPACTION_FLAG_ID } from './flag';
 import {
   IAgentFullCompactionService,
   type FullCompactionInput,
@@ -66,6 +69,7 @@ import { OrderedHookSlot } from '#/hooks';
 
 export const MAX_COMPACTION_RETRY_ATTEMPTS = 5;
 const DEFAULT_COMPACTION_MAX_COMPLETION_TOKENS = 128 * 1024;
+const RETENTION_PLAN_MAX_TOKENS = 2048;
 const OVERFLOW_CONTEXT_SAFETY_RATIO = 0.85;
 const OVERFLOW_STATUS_RECOVERY_RATIO = 0.5;
 const MAX_COMPACTION_OVERFLOW_SHRINK_ATTEMPTS = 3;
@@ -128,6 +132,7 @@ export class AgentFullCompactionService extends Disposable implements IAgentFull
     @IEventBus private readonly eventBus: IEventBus,
     @ILogService private readonly log: ILogService,
     @IAgentLoopService private readonly loopService: IAgentLoopService,
+    @IFlagService private readonly flags: IFlagService,
   ) {
     super();
     this.strategy = new RuntimeCompactionStrategy(() => this.resolveModelContextWithEffectiveMax());
@@ -498,6 +503,53 @@ export class AgentFullCompactionService extends Disposable implements IAgentFull
     }
   }
 
+  /**
+   * Extra planning pass before automatic compaction (flag-gated, off by
+   * default): the model decides what must survive compaction, and the plan is
+   * embedded into the compaction instruction. Any failure falls back to
+   * standard compaction without a plan.
+   */
+  private async generateRetentionPlan(
+    source: CompactionBeginData['source'],
+    history: readonly ContextMessage[],
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    if (source !== 'auto') {
+      return undefined;
+    }
+    if (!this.flags.enabled(RETENTION_PLAN_COMPACTION_FLAG_ID)) {
+      return undefined;
+    }
+
+    const messages: Message[] = [
+      ...stripDynamicToolContext(history),
+      createUserMessage(renderPrompt(retentionPlanInstructionTemplate, {})),
+    ];
+
+    try {
+      const request = this.llmRequester.start(
+        {
+          messages,
+          maxOutputSize: RETENTION_PLAN_MAX_TOKENS,
+          source: {
+            type: 'operation',
+            requestKind: 'full_compaction',
+            logFields: { retentionPlan: true },
+          },
+        },
+        undefined,
+        signal,
+      );
+      const plan = collectSummary(await request.result).summary;
+      return plan.length > 0 ? plan : undefined;
+    } catch (error) {
+      this.log.warn('retention plan generation failed; falling back to standard compaction', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  }
+
   private async compactionRound(
     active: ActiveCompaction,
     data: Readonly<CompactionBeginData>,
@@ -523,9 +575,12 @@ export class AgentFullCompactionService extends Disposable implements IAgentFull
           : undefined;
       const compactionMaxOutputSize = resolvedModel.maxOutputSize ?? defaultCompactionCap;
 
-      const instruction = renderPrompt(compactionInstructionTemplate, {
-        customInstruction: data.instruction?.trim() ?? '',
-      }).trimEnd();
+      const retentionPlan = await this.generateRetentionPlan(
+        data.source,
+        originalHistory,
+        signal,
+      );
+      const instruction = buildCompactionInstruction(data.instruction, retentionPlan);
 
       const delays = retryBackoffDelays(MAX_COMPACTION_RETRY_ATTEMPTS);
       let attempt: CompactionAttemptResult | undefined;
@@ -708,6 +763,19 @@ function findAPIStatusError(error: unknown): APIStatusError | undefined {
     current = current instanceof Error ? current.cause : undefined;
   }
   return undefined;
+}
+
+function buildCompactionInstruction(
+  customInstruction: string | undefined,
+  retentionPlan: string | undefined,
+): string {
+  const base = renderPrompt(compactionInstructionTemplate, {
+    customInstruction: customInstruction?.trim() ?? '',
+  }).trimEnd();
+  if (!retentionPlan || retentionPlan.trim().length === 0) {
+    return base;
+  }
+  return `${base}\n\nUse the following retention plan when deciding what to keep in the summary:\n\n${retentionPlan.trim()}`;
 }
 
 function collectSummary(finish: LLMRequestFinish): CompactionAttemptResult {
