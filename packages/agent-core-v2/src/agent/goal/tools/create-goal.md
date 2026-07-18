@@ -13,7 +13,8 @@ the goal. If the user clearly insists after you warn them that the wording is va
 respect that and create the goal.
 
 Include a `completionCriterion` when the user provides one, or when it can be stated without
-inventing new requirements. Keep `objective` concise; reference long task descriptions by file
+inventing new requirements. Include a `purpose` when the user states why the goal matters. Keep
+`objective` concise; reference long task descriptions by file
 path rather than pasting them.
 
 Creating a goal fails if one already exists, so use `replace: true` only when the user explicitly

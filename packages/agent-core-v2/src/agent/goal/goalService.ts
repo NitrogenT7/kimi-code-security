@@ -78,11 +78,14 @@ import type {
   GoalSnapshot,
   GoalStatus,
   GoalToolResult,
+  RewriteGoalContentInput,
 } from './types';
 
 const MAX_GOAL_OBJECTIVE_LENGTH = 4000;
 
 const MAX_GOAL_COMPLETION_CRITERION_LENGTH = MAX_GOAL_OBJECTIVE_LENGTH;
+
+const MAX_GOAL_PURPOSE_LENGTH = MAX_GOAL_OBJECTIVE_LENGTH;
 
 const GOAL_CANCELLED_REMINDER = [
   'The user cancelled the current goal.',
@@ -340,6 +343,7 @@ export class AgentGoalService extends Disposable implements IAgentGoalService {
       createGoal({
         goalId: randomUUID(),
         objective,
+        purpose: normalizePurpose(input.purpose),
         completionCriterion: normalizeCompletionCriterion(input.completionCriterion),
         wallClockResumedAt,
       }),
@@ -450,6 +454,53 @@ export class AgentGoalService extends Disposable implements IAgentGoalService {
     const blocked = this.blockIfBudgetReached(next);
     if (blocked !== null) return blocked;
     this.refreshWallClockDeadline(next);
+    return this.toSnapshot(next);
+  }
+
+  /**
+   * Rewrites a lightweight goal into the four-element commander's-intent format
+   * during the first turn. This is how `/goal <text>` becomes a structured goal:
+   * the model calls UpdateGoal with the objective reformatted as
+   * [Purpose] / [Key Tasks] / [End State] / [Constraints], plus extracted
+   * `purpose` and `completionCriterion`.
+   *
+   * Guardrails:
+   * - Only allowed while the goal is `active`.
+   * - Only allowed during the first turn (`turnsUsed <= 1`) so the model cannot
+   *   drift the goal after work has begun.
+   * - Empty strings are normalized to `undefined` to keep the state clean.
+   */
+  async rewriteGoalContent(
+    input: RewriteGoalContentInput,
+    actor: GoalActor = 'model',
+  ): Promise<GoalSnapshot> {
+    this.assertSupportedAgent();
+    const state = this.requireState();
+    if (state.status !== 'active') {
+      throw new Error2(
+        ErrorCodes.GOAL_STATUS_INVALID,
+        `Cannot rewrite goal content in status "${state.status}"`,
+      );
+    }
+    if (state.turnsUsed > 1) {
+      throw new Error2(
+        ErrorCodes.GOAL_NOT_REWRITABLE,
+        'Goal content can only be rewritten during the first turn',
+      );
+    }
+
+    const objective = normalizeObjective(input.objective);
+    if (objective !== undefined) this.validateObjective(objective);
+    const purpose = normalizePurpose(input.purpose);
+    const completionCriterion = normalizeCompletionCriterion(input.completionCriterion);
+    if (objective === undefined && purpose === undefined && completionCriterion === undefined) {
+      return this.toSnapshot(state);
+    }
+
+    this.wire.dispatch(updateGoal({ objective, purpose, completionCriterion, actor }));
+    const next = this.requireState();
+    this.emitGoalUpdated(this.toSnapshot(next));
+    this.telemetry.track2('goal_content_rewritten', { actor, turns_used: next.turnsUsed });
     return this.toSnapshot(next);
   }
 
@@ -971,6 +1022,7 @@ export class AgentGoalService extends Disposable implements IAgentGoalService {
     return {
       goalId: state.goalId,
       objective: state.objective,
+      purpose: state.purpose,
       completionCriterion: state.completionCriterion,
       status: state.status,
       turnsUsed: state.turnsUsed,
@@ -1089,6 +1141,19 @@ function normalizeCompletionCriterion(value: string | undefined): string | undef
   if (!trimmed?.length) return undefined;
   return trimmed.length > MAX_GOAL_COMPLETION_CRITERION_LENGTH
     ? trimmed.slice(0, MAX_GOAL_COMPLETION_CRITERION_LENGTH)
+    : trimmed;
+}
+
+function normalizeObjective(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed?.length ? trimmed : undefined;
+}
+
+function normalizePurpose(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed?.length) return undefined;
+  return trimmed.length > MAX_GOAL_PURPOSE_LENGTH
+    ? trimmed.slice(0, MAX_GOAL_PURPOSE_LENGTH)
     : trimmed;
 }
 

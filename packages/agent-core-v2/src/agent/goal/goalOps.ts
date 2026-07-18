@@ -41,6 +41,7 @@ import type {
 export interface GoalState {
   readonly goalId: string;
   readonly objective: string;
+  readonly purpose?: string;
   readonly completionCriterion?: string;
   readonly status: GoalStatus;
   readonly turnsUsed: number;
@@ -90,6 +91,7 @@ export const createGoal = GoalModel.defineOp('goal.create', {
     .object({
       goalId: z.string(),
       objective: z.string(),
+      purpose: z.string().optional(),
       completionCriterion: z.string().optional(),
       wallClockResumedAt: z.number().finite().nonnegative().optional(),
       status: GoalStatusSchema.optional(),
@@ -100,6 +102,7 @@ export const createGoal = GoalModel.defineOp('goal.create', {
   apply: (_s, p) => ({
     goalId: p.goalId,
     objective: p.objective,
+    purpose: p.purpose,
     completionCriterion: p.completionCriterion,
     status: 'active',
     turnsUsed: 0,
@@ -116,6 +119,9 @@ export const updateGoal = GoalModel.defineOp('goal.update', {
       goalId: z.string().optional(),
       status: GoalStatusSchema.optional(),
       reason: z.string().optional(),
+      objective: z.string().optional(),
+      purpose: z.string().optional(),
+      completionCriterion: z.string().optional(),
       turnsUsed: z.number().finite().nonnegative().optional(),
       tokensUsed: z.number().finite().nonnegative().optional(),
       wallClockMs: z.number().finite().nonnegative().optional(),
@@ -154,6 +160,15 @@ export const updateGoal = GoalModel.defineOp('goal.update', {
     }
     if (p.budgetLimits !== undefined && p.budgetLimits !== s.budgetLimits) {
       next = { ...(next ?? s), budgetLimits: p.budgetLimits };
+    }
+    if (p.objective !== undefined && p.objective !== s.objective) {
+      next = { ...(next ?? s), objective: p.objective };
+    }
+    if (p.purpose !== undefined && p.purpose !== s.purpose) {
+      next = { ...(next ?? s), purpose: p.purpose };
+    }
+    if (p.completionCriterion !== undefined && p.completionCriterion !== s.completionCriterion) {
+      next = { ...(next ?? s), completionCriterion: p.completionCriterion };
     }
     return next ?? s;
   },

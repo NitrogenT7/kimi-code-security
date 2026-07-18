@@ -12,6 +12,7 @@ import type {
   GoalBudgetLimits,
   GoalSnapshot,
   GoalToolResult,
+  RewriteGoalContentInput,
 } from './types';
 
 export interface GoalReasonInput {
@@ -29,6 +30,10 @@ export interface IAgentGoalService {
   getGoal(): GoalToolResult;
   isGoalToolTarget(turnId: number, goalId: string): boolean;
   createGoal(input: CreateGoalInput, actor?: GoalActor): Promise<GoalSnapshot>;
+  rewriteGoalContent(
+    input: RewriteGoalContentInput,
+    actor?: GoalActor,
+  ): Promise<GoalSnapshot>;
   pauseGoal(input?: GoalReasonInput, actor?: GoalActor): Promise<GoalSnapshot>;
   resumeGoal(input?: ResumeGoalInput, actor?: GoalActor): Promise<GoalSnapshot>;
   cancelGoal(input?: GoalReasonInput, actor?: GoalActor): Promise<GoalSnapshot>;

@@ -28,6 +28,7 @@ export interface GoalBudgetReport {
 export interface GoalSnapshot {
   readonly goalId: string;
   readonly objective: string;
+  readonly purpose?: string;
   readonly completionCriterion?: string;
   readonly status: GoalStatus;
   readonly turnsUsed: number;
@@ -59,6 +60,20 @@ export interface GoalChange {
 
 export interface CreateGoalInput {
   readonly objective: string;
+  readonly purpose?: string;
   readonly completionCriterion?: string;
   readonly replace?: boolean;
+}
+
+/**
+ * First-turn rewrite of a lightweight goal into the four-element
+ * commander's-intent format: the objective is restructured as
+ * `[Purpose]` / `[Key Tasks]` / `[End State]` / `[Constraints]` and the
+ * `purpose` / `completionCriterion` fields carry the extracted Purpose and
+ * End State. Empty strings normalize to `undefined` (no change).
+ */
+export interface RewriteGoalContentInput {
+  readonly objective?: string;
+  readonly purpose?: string;
+  readonly completionCriterion?: string;
 }

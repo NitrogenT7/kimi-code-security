@@ -259,6 +259,11 @@ export interface GoalContinuedEvent {
   turns_used: number;
 }
 
+export interface GoalContentRewrittenEvent {
+  actor: TelemetryGoalActor;
+  turns_used: number;
+}
+
 export interface GoalClearedEvent {
   actor: TelemetryGoalActor;
 }
@@ -679,6 +684,14 @@ export const telemetryEventDefinitions = {
     owner: 'kimi-code',
     comment: 'A goal continues into another turn.',
     properties: { turns_used: 'Turns consumed so far' },
+  }),
+  goal_content_rewritten: defineTelemetryEvent<GoalContentRewrittenEvent>({
+    owner: 'kimi-code',
+    comment: 'A goal is rewritten into the four-element format during the first turn.',
+    properties: {
+      actor: 'Who rewrote the goal content',
+      turns_used: 'Turns consumed so far',
+    },
   }),
   goal_cleared: defineTelemetryEvent<GoalClearedEvent>({
     owner: 'kimi-code',

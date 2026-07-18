@@ -22,6 +22,7 @@ import { IAgentShellCommandService } from '#/agent/shellCommand/shellCommand';
 import { ISessionMetadata } from '#/session/sessionMetadata/sessionMetadata';
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
 import { ISessionBtwService } from '#/session/btw/btw';
+import { ISessionGoalTemplateService } from '#/session/sessionGoalTemplate/goalTemplate';
 import { IAgentSkillService } from '#/agent/skill/skill';
 import { IAgentSwarmService } from '#/agent/swarm/swarm';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
@@ -39,6 +40,7 @@ import type {
   DetachTaskPayload,
   EmptyPayload,
   EnterSwarmPayload,
+  GetGoalTemplatePayload,
   GetTaskOutputPayload,
   GetTasksPayload,
   PromptLaunchResult,
@@ -108,6 +110,7 @@ export class AgentRPCService implements IAgentRPCService {
     @ISessionMetadata private readonly metadata: ISessionMetadata,
     @ISessionContext private readonly sessionContext: ISessionContext,
     @ISessionBtwService private readonly btw: ISessionBtwService,
+    @ISessionGoalTemplateService private readonly goalTemplates: ISessionGoalTemplateService,
   ) { }
 
   async prompt(payload: PromptPayload): Promise<PromptLaunchResult | undefined> {
@@ -328,6 +331,14 @@ export class AgentRPCService implements IAgentRPCService {
 
   cancelGoal(_payload: EmptyPayload) {
     return this.goal.cancelGoal();
+  }
+
+  listGoalTemplates(_payload: EmptyPayload) {
+    return this.goalTemplates.listTemplates();
+  }
+
+  getGoalTemplate(payload: GetGoalTemplatePayload) {
+    return this.goalTemplates.getTemplate(payload.name);
   }
 
   getTaskOutput(payload: GetTaskOutputPayload): Promise<string> {

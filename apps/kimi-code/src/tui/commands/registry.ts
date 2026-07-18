@@ -4,6 +4,7 @@ import { basename, dirname, join, relative, resolve } from 'pathe';
 
 import type { AutocompleteItem } from '@moonshot-ai/pi-tui';
 
+import { listGoalTemplateNames } from '../../utils/goal-templates';
 import { completeLeadingArg, type ArgCompletionSpec } from './complete-args';
 import type { KimiSlashCommand, SlashCommandAvailability } from './types';
 
@@ -15,6 +16,7 @@ const GOAL_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'cancel', description: 'Cancel and remove the current goal' },
   { value: 'replace', description: 'Replace the current goal with a new objective' },
   { value: 'next', description: 'Queue an upcoming goal' },
+  { value: 'set', description: 'Start a goal from a template' },
 ];
 
 const GOAL_NEXT_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
@@ -41,7 +43,23 @@ export function goalArgumentCompletions(argumentPrefix: string): AutocompleteIte
       })) ?? null
     );
   }
+  const setMatch = argumentPrefix.match(/^set\s+(.*)$/i);
+  if (setMatch !== null) {
+    return completeGoalTemplateArg(setMatch[1] ?? '');
+  }
   return completeLeadingArg(GOAL_ARG_COMPLETIONS, argumentPrefix);
+}
+
+/** Template-name autocompletion for `/goal set <name>`. */
+function completeGoalTemplateArg(argumentPrefix: string): AutocompleteItem[] | null {
+  const items = listGoalTemplateNames(process.cwd())
+    .filter((name) => name.toLowerCase().startsWith(argumentPrefix.toLowerCase()))
+    .map((name) => ({
+      value: `set ${name}`,
+      label: name,
+      description: 'Goal template',
+    }));
+  return items.length > 0 ? items : null;
 }
 
 /** Argument autocompletion for the `/swarm` command (subcommands). */

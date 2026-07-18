@@ -43,6 +43,7 @@ import {
   IProviderService,
   ISessionApprovalService,
   ISessionFsService,
+  ISessionGoalTemplateService,
   ISessionIndex,
   ISessionInitService,
   ISessionInteractionService,
@@ -224,6 +225,7 @@ const EXPOSED_SERVICES: readonly ServiceIdentifier<unknown>[] = [
   ISessionWorkspaceContext,
   ISessionWorkspaceCommandService,
   ISessionFsService,
+  ISessionGoalTemplateService,
   // agent
   IAgentGoalService,
   IAgentPlanService,

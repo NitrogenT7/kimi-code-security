@@ -317,6 +317,28 @@ describe('AgentGoalService', () => {
       expect(goals.getGoal().goal?.completionCriterion).toBe('tests pass');
     });
 
+    it('stores a purpose when provided and normalizes empty input', async () => {
+      const snapshot = await goals.createGoal({
+        objective: 'Ship feature X',
+        purpose: '  keep the codebase maintainable  ',
+      });
+
+      expect(snapshot.purpose).toBe('keep the codebase maintainable');
+      expect(goals.getGoal().goal?.purpose).toBe('keep the codebase maintainable');
+
+      const empty = await goals.createGoal({ objective: 'other', purpose: '   ', replace: true });
+      expect(empty.purpose).toBeUndefined();
+    });
+
+    it('truncates an over-long purpose instead of failing', async () => {
+      const snapshot = await goals.createGoal({
+        objective: 'Ship feature X',
+        purpose: 'p'.repeat(4001),
+      });
+
+      expect(snapshot.purpose).toBe('p'.repeat(4000));
+    });
+
     it('truncates an over-long completion criterion instead of failing', async () => {
       const snapshot = await goals.createGoal({
         objective: 'Ship feature X',
@@ -380,6 +402,74 @@ describe('AgentGoalService', () => {
       const removed = await goals.cancelGoal({});
       expect(removed.status).toBe('active');
       expect(goals.getGoal().goal).toBeNull();
+    });
+  });
+
+  describe('AgentGoalService content rewrite', () => {
+    it('rewrites a lightweight goal into the four-element format during the first turn', async () => {
+      await goals.createGoal({ objective: 'Ship feature X' });
+
+      const snapshot = await goals.rewriteGoalContent({
+        objective: '[Purpose]\nShip it well\n\n[Key Tasks]\n- Build\n\n[End State]\nTests pass\n\n[Constraints]\nNo regressions',
+        purpose: 'Ship it well',
+        completionCriterion: 'Tests pass',
+      });
+
+      expect(snapshot.objective).toContain('[Purpose]');
+      expect(snapshot.purpose).toBe('Ship it well');
+      expect(snapshot.completionCriterion).toBe('Tests pass');
+      expect(goals.getGoal().goal?.purpose).toBe('Ship it well');
+      await ctx.wire.flush();
+      expect(goalRecords(records)).toContainEqual(
+        expect.objectContaining({
+          type: 'goal.update',
+          purpose: 'Ship it well',
+          completionCriterion: 'Tests pass',
+          actor: 'model',
+        }),
+      );
+    });
+
+    it('normalizes empty rewrite fields to no-ops', async () => {
+      await goals.createGoal({ objective: 'work', purpose: 'why' });
+
+      const snapshot = await goals.rewriteGoalContent({ objective: '   ', purpose: '  ' });
+
+      expect(snapshot.objective).toBe('work');
+      expect(snapshot.purpose).toBe('why');
+    });
+
+    it('still allows a rewrite at turnsUsed 1 but rejects it afterwards', async () => {
+      await goals.createGoal({ objective: 'work' });
+      await goals.incrementTurn();
+
+      await expect(goals.rewriteGoalContent({ purpose: 'late' })).resolves.toMatchObject({
+        purpose: 'late',
+      });
+
+      await goals.incrementTurn();
+      await expect(goals.rewriteGoalContent({ purpose: 'too late' })).rejects.toMatchObject({
+        code: ErrorCodes.GOAL_NOT_REWRITABLE,
+      });
+    });
+
+    it('rejects rewrites for non-active goals', async () => {
+      await goals.createGoal({ objective: 'work' });
+      await goals.pauseGoal();
+
+      await expect(goals.rewriteGoalContent({ purpose: 'late' })).rejects.toMatchObject({
+        code: ErrorCodes.GOAL_STATUS_INVALID,
+      });
+    });
+
+    it('rejects an over-long rewrite objective', async () => {
+      await goals.createGoal({ objective: 'work' });
+
+      await expect(
+        goals.rewriteGoalContent({ objective: 'x'.repeat(4001) }),
+      ).rejects.toMatchObject({
+        code: ErrorCodes.GOAL_OBJECTIVE_TOO_LONG,
+      });
     });
   });
 

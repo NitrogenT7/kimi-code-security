@@ -3,9 +3,14 @@
  * the goal's status directly; the turn driver reads the status at each turn
  * boundary and stops (`complete` / `blocked`) or keeps going (`active`).
  *
- * The argument is intentionally just a status enum — no reason or evidence. The
- * model explains itself in its own reply; the status is the machine-readable
- * signal. Registered for the main agent only, mirroring v1's
+ * Two modes:
+ * - Status (`active` / `complete` / `blocked`): the status is the
+ *   machine-readable signal; the model explains itself in its own reply.
+ * - First-turn content rewrite (`objective` / `purpose` /
+ *   `completionCriterion`): restructures a lightweight goal into the
+ *   four-element commander's-intent format. Only allowed during the first
+ *   turn (`turnsUsed <= 1`); afterwards changes are rejected.
+ * Registered for the main agent only, mirroring v1's
  * `agent.type === 'main'` gate.
  */
 
@@ -21,17 +26,49 @@ import {
   buildGoalBlockedReasonPrompt,
   buildGoalCompletionSummaryPrompt,
 } from './outcome-prompts';
+import { goalForModel } from './serialize';
 import DESCRIPTION from './update-goal.md?raw';
 
 export const UpdateGoalToolInputSchema = z
   .object({
     status: z
       .enum(['active', 'complete', 'blocked'])
+      .optional()
       .describe(
         'The lifecycle status to set for the current goal. Use `blocked` for impossible, unsafe, or contradictory objectives, or after the same non-terminal blocking condition repeats for at least 3 consecutive goal turns.',
       ),
+    objective: z
+      .string()
+      .optional()
+      .describe(
+        'Rewrite the goal objective into a structured four-element format: [Purpose] / [Key Tasks] / [End State] / [Constraints]. ' +
+          'Only allowed during the first turn (turnsUsed <= 1) of a lightweight goal; afterwards changes are rejected. ' +
+          "Do not change the user's original intent, only structure it.",
+      ),
+    purpose: z
+      .string()
+      .optional()
+      .describe(
+        'Extract the purpose from the objective. Only allowed during the first turn (turnsUsed <= 1).',
+      ),
+    completionCriterion: z
+      .string()
+      .optional()
+      .describe(
+        'Extract the end-state / completion criterion from the objective. Only allowed during the first turn (turnsUsed <= 1).',
+      ),
   })
-  .strict();
+  .strict()
+  .refine(
+    (data) =>
+      data.status !== undefined ||
+      data.objective !== undefined ||
+      data.purpose !== undefined ||
+      data.completionCriterion !== undefined,
+    {
+      message: 'At least one of status, objective, purpose, or completionCriterion must be provided.',
+    },
+  );
 
 export type UpdateGoalToolInput = z.infer<typeof UpdateGoalToolInputSchema>;
 
@@ -43,7 +80,11 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
   constructor(@IAgentGoalService private readonly goal: IAgentGoalService) {}
 
   resolveExecution(args: UpdateGoalToolInput): ToolExecution {
-    if (!isUpdateGoalStatus(args.status)) {
+    const hasContentUpdate =
+      args.objective !== undefined ||
+      args.purpose !== undefined ||
+      args.completionCriterion !== undefined;
+    if (!hasContentUpdate && !isUpdateGoalStatus(args.status)) {
       return {
         isError: true,
         output: 'Invalid goal status. Use `active`, `complete`, or `blocked`.',
@@ -53,6 +94,35 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
     const status = args.status;
     const currentGoal = this.goal.getGoal().goal;
     const goalIsActive = currentGoal?.status === 'active';
+
+    if (hasContentUpdate) {
+      return {
+        description: 'Rewriting goal into four-element format',
+        stopBatchAfterThis: false,
+        approvalRule: this.name,
+        execute: async ({ turnId }) => {
+          const goalAtExecution = this.goal.getGoal().goal;
+          if (goalAtExecution === null) {
+            return { output: 'Goal not rewritten: no current goal.' };
+          }
+          if (
+            goalAtExecution.goalId !== currentGoal?.goalId &&
+            !this.goal.isGoalToolTarget(turnId, goalAtExecution.goalId)
+          ) {
+            return { output: 'Goal not rewritten: the current goal changed.' };
+          }
+          const rewritten = await this.goal.rewriteGoalContent(
+            {
+              objective: args.objective,
+              purpose: args.purpose,
+              completionCriterion: args.completionCriterion,
+            },
+            'model',
+          );
+          return { output: JSON.stringify({ goal: goalForModel(rewritten) }, null, 2) };
+        },
+      };
+    }
 
     return {
       description: `Setting goal status: ${status}`,
@@ -96,7 +166,7 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
   }
 }
 
-function isUpdateGoalStatus(status: unknown): status is UpdateGoalToolInput['status'] {
+function isUpdateGoalStatus(status: unknown): status is 'active' | 'complete' | 'blocked' {
   return status === 'active' || status === 'complete' || status === 'blocked';
 }
 

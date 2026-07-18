@@ -26,6 +26,10 @@ export const CreateGoalToolInputSchema = z
       .string()
       .optional()
       .describe('How to verify the goal is complete. Include when the user provides one.'),
+    purpose: z
+      .string()
+      .optional()
+      .describe('Why the goal matters and the direction (the Purpose of the four-element format). Include when the user provides one.'),
     replace: z
       .boolean()
       .optional()
@@ -62,6 +66,7 @@ export class CreateGoalTool implements BuiltinTool<CreateGoalToolInput> {
         const snapshot = await this.goal.createGoal(
           {
             objective: args.objective,
+            purpose: args.purpose,
             completionCriterion: args.completionCriterion,
             replace: args.replace,
           },

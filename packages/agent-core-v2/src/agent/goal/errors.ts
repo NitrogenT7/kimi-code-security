@@ -14,6 +14,8 @@ export const GoalErrors = {
     GOAL_METADATA_RESERVED: 'goal.metadata_reserved',
     GOAL_NOT_RESUMABLE: 'goal.not_resumable',
     GOAL_UNSUPPORTED_AGENT: 'goal.unsupported_agent',
+    GOAL_NOT_REWRITABLE: 'goal.not_rewritable',
+    GOAL_TEMPLATE_NOT_FOUND: 'goal.template_not_found',
   },
   info: {
     'goal.already_exists': {
@@ -63,6 +65,18 @@ export const GoalErrors = {
       retryable: false,
       public: true,
       action: 'Run goal lifecycle commands on the main agent.',
+    },
+    'goal.not_rewritable': {
+      title: 'Goal content is no longer rewritable',
+      retryable: false,
+      public: true,
+      action: 'Goal content can only be rewritten during the first turn.',
+    },
+    'goal.template_not_found': {
+      title: 'Goal template not found',
+      retryable: false,
+      public: true,
+      action: 'List available goal templates with `/goal set` and pick one of those names.',
     },
   },
 } as const satisfies ErrorDomain;

@@ -45,6 +45,37 @@ vi.mock('#/tui/goal-queue-store', () => ({
   })),
 }));
 
+const SAMPLE_TEMPLATE = {
+  name: 'refactor',
+  description: 'Refactor without behavior changes',
+  path: '/workspace/.goal/refactor.md',
+  source: 'project' as const,
+  purpose: 'Improve maintainability',
+  keyTasks: '- Read the code\n- Refactor in small steps',
+  endState: 'Tests pass',
+  constraints: 'No new features',
+  body: 'Extra guidance.',
+};
+
+vi.mock('#/utils/goal-templates', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('#/utils/goal-templates')>();
+  return {
+    ...actual,
+    listGoalTemplates: vi.fn(async () => [
+      {
+        name: SAMPLE_TEMPLATE.name,
+        description: SAMPLE_TEMPLATE.description,
+        path: SAMPLE_TEMPLATE.path,
+        source: SAMPLE_TEMPLATE.source,
+      },
+    ]),
+    findGoalTemplate: vi.fn(async (_workDir: string, name: string) =>
+      name === SAMPLE_TEMPLATE.name ? SAMPLE_TEMPLATE : undefined,
+    ),
+    listGoalTemplateNames: vi.fn(() => [SAMPLE_TEMPLATE.name]),
+  };
+});
+
 const ENTER = '\r';
 const ESCAPE = '\u001B';
 const UP = '\u001B[A';
@@ -204,6 +235,12 @@ describe('parseGoalCommand', () => {
     });
   });
 
+  it('parses set as a template application command', () => {
+    expect(parseGoalCommand('set')).toEqual({ kind: 'set', templateName: undefined });
+    expect(parseGoalCommand('set refactor')).toEqual({ kind: 'set', templateName: 'refactor' });
+    expect(parseGoalCommand('set my template')).toEqual({ kind: 'set', templateName: 'my template' });
+  });
+
   it('shows a hint for /goal next without an objective', () => {
     expect(parseGoalCommand('next')).toEqual({
       kind: 'error',
@@ -264,6 +301,36 @@ describe('handleGoalCommand', () => {
     await handleGoalCommand(host, 'Ship feature X');
 
     expect(calls).toEqual([{ receiver: host, text: 'Ship feature X' }]);
+  });
+
+  it('/goal set lists available templates when no name is given', async () => {
+    await handleGoalCommand(host, 'set');
+
+    expect(host.showStatus).toHaveBeenCalledOnce();
+    const message = vi.mocked(host.showStatus).mock.calls[0]?.[0] as string;
+    expect(message).toContain('refactor (project): Refactor without behavior changes');
+    expect(session.createGoal).not.toHaveBeenCalled();
+  });
+
+  it('/goal set <name> applies the template and starts the goal', async () => {
+    await handleGoalCommand(host, 'set refactor');
+
+    expect(session.createGoal).toHaveBeenCalledOnce();
+    const input = vi.mocked(session.createGoal).mock.calls[0]?.[0] as { objective: string };
+    expect(input.objective).toContain('[Purpose]\nImprove maintainability');
+    expect(input.objective).toContain('[Key Tasks]\n- Read the code');
+    expect(input.objective).toContain('[End State]\nTests pass');
+    expect(input.objective).toContain('[Constraints]\nNo new features');
+    expect(input.objective).toContain('Extra guidance.');
+    expect(host.sendNormalUserInput).toHaveBeenCalledWith('Start working toward this goal.');
+  });
+
+  it('/goal set <name> reports an unknown template', async () => {
+    await handleGoalCommand(host, 'set missing');
+
+    expect(host.showError).toHaveBeenCalledOnce();
+    expect(vi.mocked(host.showError).mock.calls[0]?.[0]).toContain('"missing" not found');
+    expect(session.createGoal).not.toHaveBeenCalled();
   });
 
   it('asks before starting a goal in Manual mode', async () => {
@@ -737,7 +804,13 @@ describe('goalArgumentCompletions', () => {
   }
 
   it('offers every subcommand for an empty prefix', () => {
-    expect(values('')).toEqual(['status', 'pause', 'resume', 'cancel', 'replace', 'next']);
+    expect(values('')).toEqual(['status', 'pause', 'resume', 'cancel', 'replace', 'next', 'set']);
+  });
+
+  it('completes template names after /goal set', () => {
+    expect(values('set ref')).toEqual(['set refactor']);
+    expect(labels('set ref')).toEqual(['refactor']);
+    expect(values('set missing')).toBeNull();
   });
 
   it('prefix-filters subcommands case-insensitively', () => {

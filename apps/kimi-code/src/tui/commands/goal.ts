@@ -1,6 +1,11 @@
 import { ErrorCodes, isKimiError, type PermissionMode } from '@moonshot-ai/kimi-code-sdk';
 
 import {
+  composeGoalObjectiveFromTemplate,
+  findGoalTemplate,
+  listGoalTemplates,
+} from '../../utils/goal-templates';
+import {
   GoalStartPermissionPromptComponent,
   type GoalStartPermissionChoice,
 } from '../components/dialogs/goal-start-permission-prompt';
@@ -56,6 +61,7 @@ export type ParsedGoalCommand =
   | { readonly kind: 'pause' }
   | { readonly kind: 'resume' }
   | { readonly kind: 'cancel' }
+  | { readonly kind: 'set'; readonly templateName?: string }
   | {
       readonly kind: 'create';
       readonly objective: string;
@@ -69,10 +75,12 @@ const CONTROL_SUBCOMMANDS = new Set(['pause', 'resume', 'cancel']);
 
 /**
  * Parses the deterministic `/goal` command grammar. Reserved subcommands
- * (`pause`/`resume`/`cancel`/`status`/`replace`) are only honored as the first
+ * (`pause`/`resume`/`cancel`/`status`/`replace`/`set`) are only honored as the first
  * token; use `/goal -- <objective>` to start a goal whose text begins with one
  * of those words. (`cancel` is the single discard action — it removes the
- * current goal.) Stop conditions are expressed in the objective in natural
+ * current goal.) `/goal set [template-name]` applies a goal template from
+ * `.goal/` or `~/.agents/goals/`, composing a four-element objective. Stop
+ * conditions are expressed in the objective in natural
  * language (e.g. "…or stop after 20 turns"); the model honors them when it
  * self-audits each turn and reports `complete`/`blocked` via UpdateGoal.
  */
@@ -84,6 +92,10 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
   const first = tokens[0];
   if (first === 'next') {
     return parseNextGoalCommand(tokens);
+  }
+  if (first === 'set') {
+    const templateName = tokens.slice(1).join(' ').trim();
+    return { kind: 'set', templateName: templateName.length > 0 ? templateName : undefined };
   }
   if (first !== undefined && CONTROL_SUBCOMMANDS.has(first) && tokens.length === 1) {
     return { kind: first as 'pause' | 'resume' | 'cancel' };
@@ -138,6 +150,9 @@ export async function handleGoalCommand(host: SlashCommandHost, args: string): P
       return;
     case 'cancel':
       await cancelGoal(host);
+      return;
+    case 'set':
+      await handleGoalSetCommand(host, parsed.templateName);
       return;
     case 'next-add':
       await queueNextGoal(host, parsed);
@@ -483,6 +498,59 @@ async function cancelGoal(host: SlashCommandHost): Promise<void> {
   }
   host.track('goal_cancel');
   host.showNotice('Goal cancelled.');
+}
+
+async function handleGoalSetCommand(
+  host: SlashCommandHost,
+  templateName?: string,
+): Promise<void> {
+  if (host.state.appState.model.trim().length === 0 || host.session === undefined) {
+    host.showError(LLM_NOT_SET_MESSAGE);
+    return;
+  }
+
+  const workDir = process.cwd();
+  if (templateName === undefined) {
+    const templates = await listGoalTemplates(workDir);
+    if (templates.length === 0) {
+      host.showStatus('No goal templates found. Add markdown files to .goal/ or ~/.agents/goals/.');
+      return;
+    }
+    const lines = templates.map((t) => `- ${t.name} (${t.source}): ${t.description}`);
+    host.showStatus(`Goal templates:\n${lines.join('\n')}\nApply one with \`/goal set <name>\`.`);
+    return;
+  }
+
+  const template = await findGoalTemplate(workDir, templateName);
+  if (template === undefined) {
+    host.showError(
+      `Goal template "${templateName}" not found. Use \`/goal set\` to list available templates.`,
+    );
+    return;
+  }
+
+  const objective = composeGoalObjectiveFromTemplate(template);
+  if (objective.length > MAX_GOAL_OBJECTIVE_LENGTH) {
+    host.showError(
+      `Goal is too long (max ${MAX_GOAL_OBJECTIVE_LENGTH} characters). Reference long details by file path.`,
+    );
+    return;
+  }
+
+  host.track('goal_template_apply');
+  await createGoal(
+    host,
+    { kind: 'create', objective, replace: false },
+    `set ${template.name}`,
+    {
+      sendInput: () => {
+        // The structured goal is already injected into the next turn via the
+        // goal injector, so we do not repeat the full objective here. Send a
+        // short trigger so the model starts working immediately.
+        host.sendNormalUserInput('Start working toward this goal.');
+      },
+    },
+  );
 }
 
 async function showGoalStatus(host: SlashCommandHost): Promise<void> {

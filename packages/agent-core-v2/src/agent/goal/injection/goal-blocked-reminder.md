@@ -3,7 +3,10 @@ There is a goal, currently blocked{% if reason %} ({{ reason }}){% endif %}. It 
 <untrusted_objective>
 {{ objective }}
 </untrusted_objective>
-{% if completionCriterion %}<untrusted_completion_criterion>
+{% if purpose %}<untrusted_purpose>
+{{ purpose }}
+</untrusted_purpose>
+{% endif %}{% if completionCriterion %}<untrusted_completion_criterion>
 {{ completionCriterion }}
 </untrusted_completion_criterion>
 {% endif %}

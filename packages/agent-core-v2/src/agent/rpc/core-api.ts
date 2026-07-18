@@ -24,6 +24,7 @@ import type { SessionWarning } from '#/app/sessionLegacy/sessionProtocol';
 import type { UsageStatus } from '#/agent/usage/usage';
 
 import type { ExportSessionPayload, ExportSessionResult } from '#/app/sessionExport/sessionExport';
+import type { GoalTemplateDetail, GoalTemplateSummary } from '#/app/goalTemplate/types';
 import type { PluginCommandDef, PluginInfo, PluginSummary, ReloadSummary } from '#/app/plugin/types';
 import type { WithAgentId, WithSessionId } from './types';
 
@@ -279,7 +280,15 @@ export type {
 
 export interface CreateGoalPayload {
   readonly objective: string;
+  readonly purpose?: string;
+  readonly completionCriterion?: string;
   readonly replace?: boolean;
+}
+
+export type { GoalTemplateDetail, GoalTemplateSummary };
+
+export interface GetGoalTemplatePayload {
+  readonly name: string;
 }
 
 export interface GetKimiConfigPayload {
@@ -333,6 +342,8 @@ export interface AgentAPI {
   pauseGoal: (payload: EmptyPayload) => GoalSnapshot;
   resumeGoal: (payload: EmptyPayload) => GoalSnapshot;
   cancelGoal: (payload: EmptyPayload) => GoalSnapshot;
+  listGoalTemplates: (payload: EmptyPayload) => readonly GoalTemplateSummary[];
+  getGoalTemplate: (payload: GetGoalTemplatePayload) => GoalTemplateDetail;
   getTaskOutput: (payload: GetTaskOutputPayload) => string;
   getContext: (payload: EmptyPayload) => AgentContextData;
   getConfig: (payload: EmptyPayload) => AgentConfigData;

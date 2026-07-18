@@ -30,6 +30,7 @@ import {
 import { getToolContributions } from '#/agent/toolRegistry/toolContribution';
 import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { IEventBus } from '#/app/event/eventBus';
+import { ErrorCodes } from '#/errors';
 
 import {
   agentService,
@@ -256,6 +257,57 @@ describe('goal tools', () => {
     for (const status of ['paused', 'impossible', 'cancelled', '']) {
       expect(UpdateGoalToolInputSchema.safeParse({ status }).success).toBe(false);
     }
+  });
+
+  it('UpdateGoal accepts first-turn rewrite params and requires at least one field', () => {
+    expect(UpdateGoalToolInputSchema.safeParse({ objective: '[Purpose]\nP' }).success).toBe(true);
+    expect(UpdateGoalToolInputSchema.safeParse({ purpose: 'P' }).success).toBe(true);
+    expect(UpdateGoalToolInputSchema.safeParse({ completionCriterion: 'E' }).success).toBe(true);
+    expect(UpdateGoalToolInputSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('UpdateGoal rewrites goal content during the first turn', async () => {
+    await goals.createGoal({ objective: 'Ship feature X' });
+    const execution = updateGoalTool.resolveExecution({
+      objective: '[Purpose]\nShip it well',
+      purpose: 'Ship it well',
+      completionCriterion: 'Tests pass',
+    });
+    if (execution.isError === true) throw new Error('execution should not be an error');
+    expect(execution.stopBatchAfterThis).toBeFalsy();
+
+    const result = await execution.execute({ turnId: 0, toolCallId: 'call_rewrite', signal });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.stopTurn).toBeFalsy();
+    expect(result.output).toContain('Ship it well');
+    expect(goals.getGoal().goal).toMatchObject({
+      objective: '[Purpose]\nShip it well',
+      purpose: 'Ship it well',
+      completionCriterion: 'Tests pass',
+    });
+  });
+
+  it('UpdateGoal rejects a rewrite after the first turn', async () => {
+    await goals.createGoal({ objective: 'work' });
+    await countGoalTurn(1);
+    await countGoalTurn(2);
+    const execution = updateGoalTool.resolveExecution({ purpose: 'too late' });
+    if (execution.isError === true) throw new Error('execution should not be an error');
+
+    await expect(
+      execution.execute({ turnId: 0, toolCallId: 'call_late_rewrite', signal }),
+    ).rejects.toMatchObject({ code: ErrorCodes.GOAL_NOT_REWRITABLE });
+    expect(goals.getGoal().goal?.purpose).toBeUndefined();
+  });
+
+  it('UpdateGoal rewrite reports no current goal', async () => {
+    const execution = updateGoalTool.resolveExecution({ purpose: 'P' });
+    if (execution.isError === true) throw new Error('execution should not be an error');
+
+    const result = await execution.execute({ turnId: 0, toolCallId: 'call_no_goal', signal });
+
+    expect(result.output).toBe('Goal not rewritten: no current goal.');
   });
 
   it('UpdateGoal forbids model-driven goal pauses', async () => {

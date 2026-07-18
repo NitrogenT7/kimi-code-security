@@ -36,6 +36,7 @@ function buildBlockedNote(goal: GoalSnapshot): string {
   return renderPrompt(GOAL_BLOCKED_REMINDER, {
     reason: reason === undefined ? '' : escapeUntrustedText(reason),
     objective: escapeUntrustedText(goal.objective),
+    purpose: escapedPurpose(goal),
     completionCriterion: escapedCompletionCriterion(goal),
   });
 }
@@ -45,6 +46,7 @@ function buildPausedNote(goal: GoalSnapshot): string {
   return renderPrompt(GOAL_PAUSED_REMINDER, {
     reason: reason === undefined ? '' : escapeUntrustedText(reason),
     objective: escapeUntrustedText(goal.objective),
+    purpose: escapedPurpose(goal),
     completionCriterion: escapedCompletionCriterion(goal),
   });
 }
@@ -52,12 +54,32 @@ function buildPausedNote(goal: GoalSnapshot): string {
 function buildGoalReminder(goal: GoalSnapshot): string {
   return renderPrompt(GOAL_ACTIVE_REMINDER, {
     objective: escapeUntrustedText(goal.objective),
+    purpose: escapedPurpose(goal),
     completionCriterion: escapedCompletionCriterion(goal),
     status: goal.status,
     progress: `${goal.turnsUsed} continuation turns, ${goal.tokensUsed} tokens, ${formatElapsed(goal.wallClockMs)} elapsed`,
     budgets: formatBudgets(goal),
     nearingBudget: isNearingBudget(goal),
+    needsFourElementRewrite: !hasFourElementStructure(goal.objective),
   });
+}
+
+/**
+ * Whether the objective already carries the four-element commander's-intent
+ * markers ([Purpose] / 目的 / Purpose). When it does not, the active reminder
+ * asks the model to rewrite it via UpdateGoal on the first turn.
+ */
+function hasFourElementStructure(objective: string): boolean {
+  return (
+    objective.includes('[Purpose]') ||
+    objective.includes('目的') ||
+    objective.includes('Purpose')
+  );
+}
+
+function escapedPurpose(goal: GoalSnapshot): string {
+  if (goal.purpose === undefined) return '';
+  return escapeUntrustedText(goal.purpose);
 }
 
 function escapedCompletionCriterion(goal: GoalSnapshot): string {
