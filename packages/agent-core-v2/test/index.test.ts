@@ -21,11 +21,26 @@ import { AppendLogStore } from '#/persistence/backends/node-fs/appendLogStore';
 import { InMemoryStorageService } from '#/persistence/backends/memory/inMemoryStorageService';
 import { IAppendLogStore } from '#/persistence/interface/appendLogStore';
 import { IFileSystemStorageService } from '#/persistence/interface/storage';
-import { todoSet, TodoModel } from '#/session/todo/todoOps';
+import { todoSet, FindingsModel, TodoModel } from '#/session/todo/todoOps';
+import type { QuestionItem } from '#/session/todo/todoItem';
 import { OP_REGISTRY } from '#/wire/op';
 import { IWireService } from '#/wire/wire';
 import { AGENT_WIRE_RECORD_KEY } from '#/wire/record';
 import { registerTestAgentWire, restoreTestAgentWire } from './wire/stubs';
+
+function makeQuestion(overrides: Partial<QuestionItem> & { question: string }): QuestionItem {
+  return {
+    type: 'question',
+    id: `test-${Math.random().toString(36).slice(2, 8)}`,
+    status: 'pending',
+    evidence: [],
+    blockers: [],
+    confidence: 'medium',
+    depth: 'deep',
+    subQuestions: [],
+    ...overrides,
+  };
+}
 
 const V1_RECORD_TYPES: ReadonlySet<string> = new Set([
   'metadata',
@@ -99,7 +114,8 @@ describe('v1 wire vocabulary', () => {
 
   it('stamps persisted records with time, except the metadata envelope', async () => {
     await wire.restore();
-    wire.dispatch(todoSet({ key: 'todo', value: [{ title: 'x', status: 'pending' }] }));
+    const question = makeQuestion({ question: 'x' });
+    wire.dispatch(todoSet({ key: 'todo', value: [question] }));
 
     const records = await readRecords();
     expect(records).toEqual([
@@ -111,13 +127,59 @@ describe('v1 wire vocabulary', () => {
       {
         type: 'tools.update_store',
         key: 'todo',
-        value: [{ title: 'x', status: 'pending' }],
+        value: [question],
         time: expect.any(Number),
       },
     ]);
   });
 
   it('round-trips the todo list through the persisted tools.update_store record', async () => {
+    const question = makeQuestion({ question: 'restore me', status: 'investigating' });
+    wire.dispatch(todoSet({ key: 'todo', value: [question] }));
+    const records = await readRecords();
+
+    const store = new DisposableStore();
+    disposables.add(store);
+    const ix2 = store.add(new TestInstantiationService());
+    ix2.stub(IFileSystemStorageService, new InMemoryStorageService());
+    ix2.set(IAppendLogStore, new SyncDescriptor(AppendLogStore));
+    const log2 = ix2.get(IAppendLogStore);
+    const fresh = registerTestAgentWire(ix2, SCOPE, { log: log2 });
+
+    await restoreTestAgentWire(fresh, log2, SCOPE, records);
+
+    expect(fresh.getModel(TodoModel)).toEqual([question]);
+  });
+
+  it('round-trips the findings archive through the persisted tools.update_store record', async () => {
+    const finding = {
+      id: 'f1',
+      question: 'Was it reachable?',
+      conclusion: 'Yes',
+      evidence: [{ status: 'confirmed', description: 'Confirmed' }],
+      confidence: 'high',
+      depth: 'deep',
+      status: 'resolved',
+      resolvedAt: 42,
+      subFindings: [],
+    };
+    wire.dispatch(todoSet({ key: 'findings', value: [finding] }));
+    const records = await readRecords();
+
+    const store = new DisposableStore();
+    disposables.add(store);
+    const ix2 = store.add(new TestInstantiationService());
+    ix2.stub(IFileSystemStorageService, new InMemoryStorageService());
+    ix2.set(IAppendLogStore, new SyncDescriptor(AppendLogStore));
+    const log2 = ix2.get(IAppendLogStore);
+    const fresh = registerTestAgentWire(ix2, SCOPE, { log: log2 });
+
+    await restoreTestAgentWire(fresh, log2, SCOPE, records);
+
+    expect(fresh.getModel(FindingsModel)).toEqual([finding]);
+  });
+
+  it('migrates legacy { title, status } records when replaying the todo store', async () => {
     wire.dispatch(
       todoSet({ key: 'todo', value: [{ title: 'restore me', status: 'in_progress' }] }),
     );
@@ -133,7 +195,15 @@ describe('v1 wire vocabulary', () => {
 
     await restoreTestAgentWire(fresh, log2, SCOPE, records);
 
-    expect(fresh.getModel(TodoModel)).toEqual([{ title: 'restore me', status: 'in_progress' }]);
+    const todos = fresh.getModel(TodoModel);
+    expect(todos).toHaveLength(1);
+    expect(todos[0]).toMatchObject({
+      type: 'question',
+      question: 'restore me',
+      status: 'investigating',
+      confidence: 'medium',
+      depth: 'deep',
+    });
   });
 });
 

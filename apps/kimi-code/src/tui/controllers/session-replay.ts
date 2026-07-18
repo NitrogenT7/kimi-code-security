@@ -9,16 +9,27 @@ import type {
   ToolCall,
 } from '@moonshot-ai/kimi-code-sdk';
 
+import type {
+  UiFindingItem,
+  UiQuestionItem,
+} from '../components/chrome/investigation-board';
 import { ToolCallComponent } from '../components/messages/tool-call';
 import { currentTheme } from '../theme';
-import type { TodoItem } from '../components/chrome/todo-panel';
 import type {
   AppState,
   BackgroundAgentMetadata,
   ToolResultBlockData,
   TranscriptEntry,
 } from '../types';
-import { formatErrorMessage, isTodoItemShape } from '../utils/event-payload';
+import {
+  formatErrorMessage,
+  isQuestionItemShape,
+  isTodoItemShape,
+  migrateTodoItemShape,
+  normalizeFindingItem,
+  normalizeQuestionItem,
+  questionToFinding,
+} from '../utils/event-payload';
 import { formatBackgroundAgentTranscript } from '../utils/background-agent-status';
 import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
 import { buildGoalCompletionMessage } from '../utils/goal-completion';
@@ -110,26 +121,42 @@ export class SessionReplayRenderer {
 
   private hydrateSnapshot(agent: ResumedAgentState): void {
     this.host.setAppState(appStateFromResumeAgent(agent));
-    this.hydrateTodoPanel(agent);
+    this.hydrateInvestigationBoard(agent);
     this.hydrateBackgroundState(agent);
   }
 
-  private hydrateTodoPanel(agent: ResumedAgentState): void {
+  private hydrateInvestigationBoard(agent: ResumedAgentState): void {
+    const questions: UiQuestionItem[] = [];
+    const findings = new Map<string, UiFindingItem>();
+
     const rawTodos = agent.toolStore?.['todo'];
-    if (!Array.isArray(rawTodos)) {
-      this.host.streamingUI.setTodoList([]);
-      return;
+    if (Array.isArray(rawTodos)) {
+      for (const item of rawTodos) {
+        const q = isQuestionItemShape(item)
+          ? normalizeQuestionItem(item)
+          : isTodoItemShape(item)
+            ? migrateTodoItemShape(item)
+            : null;
+        if (q === null) continue;
+        if (q.status === 'pending' || q.status === 'investigating') {
+          questions.push(q);
+        } else {
+          findings.set(q.id, questionToFinding(q));
+        }
+      }
     }
 
-    const todos = rawTodos
-      .filter((todo): todo is TodoItem => isTodoItemShape(todo))
-      .map((todo) => ({ title: todo.title, status: todo.status }));
-    if (todos.length > 0 && todos.every((todo) => todo.status === 'done')) {
-      this.host.streamingUI.setTodoList([]);
-      return;
+    const rawFindings = agent.toolStore?.['findings'];
+    if (Array.isArray(rawFindings)) {
+      for (const item of rawFindings) {
+        const finding = normalizeFindingItem(item);
+        if (finding !== null) findings.set(finding.id, finding);
+      }
     }
 
-    this.host.streamingUI.setTodoList(todos);
+    const resolvedFindings = [...findings.values()];
+    this.host.sessionEventHandler.setInvestigationFindings(resolvedFindings);
+    this.host.streamingUI.setInvestigation(questions, resolvedFindings);
   }
 
   /**

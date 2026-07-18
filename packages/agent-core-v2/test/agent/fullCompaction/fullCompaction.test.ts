@@ -2658,15 +2658,49 @@ describe('FullCompaction', () => {
   });
 
 
-  it('appends the todo list to the compaction summary', async () => {
+  it('appends the todo list and findings digest to the compaction summary', async () => {
     const todos = [
-      { title: 'Fix the auth bug', status: 'in_progress' },
-      { title: 'Add tests', status: 'pending' },
+      {
+        type: 'question',
+        id: 'q1',
+        question: 'Is the auth bug fixed?',
+        status: 'investigating',
+        confidence: 'medium',
+        depth: 'deep',
+        evidence: [],
+        blockers: [],
+        subQuestions: [],
+      },
+      {
+        type: 'question',
+        id: 'q2',
+        question: 'Are tests added?',
+        status: 'pending',
+        confidence: 'low',
+        depth: 'quick',
+        evidence: [],
+        blockers: [],
+        subQuestions: [],
+      },
+    ] as const;
+    const findings = [
+      {
+        id: 'f1',
+        question: 'Was the sink reachable?',
+        conclusion: 'Yes, through path X',
+        evidence: [{ status: 'confirmed', description: 'Path X confirmed' }],
+        confidence: 'high',
+        depth: 'deep',
+        status: 'resolved',
+        resolvedAt: 1,
+        subFindings: [],
+      },
     ] as const;
     const ctx = testAgent(
       sessionServices((reg) => {
         reg.definePartialInstance(ISessionTodoService, {
           getTodos: () => todos,
+          getFindings: () => findings,
         });
       }),
     );
@@ -2702,7 +2736,17 @@ describe('FullCompaction', () => {
     expect(history[2]).toMatchObject({
       role: 'user',
       text: expect.stringContaining(
-        'Compacted summary.\n\n## TODO List\n  [in_progress] Fix the auth bug\n  [pending] Add tests',
+        'Compacted summary.\n\n## TODO List\n1. [investigating] Is the auth bug fixed?',
+      ),
+    });
+    expect(history[2]).toMatchObject({
+      role: 'user',
+      text: expect.stringContaining('2. [pending] Are tests added?'),
+    });
+    expect(history[2]).toMatchObject({
+      role: 'user',
+      text: expect.stringContaining(
+        '## Findings\n1. [resolved] Was the sink reachable? (confidence: high, depth: deep)\n   Conclusion: Yes, through path X',
       ),
     });
     expect(ctx.context.get().at(-1)?.content[0]).toMatchObject({

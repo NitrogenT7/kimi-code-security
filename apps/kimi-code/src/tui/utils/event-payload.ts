@@ -1,5 +1,10 @@
 import { isKimiError } from '@moonshot-ai/kimi-code-sdk';
 
+import type {
+  UiEvidenceItem,
+  UiFindingItem,
+  UiQuestionItem,
+} from '#/tui/components/chrome/investigation-board';
 import {
   STREAMING_ARGS_FIELD_RE,
   STREAMING_ARGS_PREVIEW_MAX_CHARS,
@@ -87,6 +92,107 @@ export function isTodoItemShape(
   const rec = value as { title?: unknown; status?: unknown };
   if (typeof rec.title !== 'string' || rec.title.length === 0) return false;
   return rec.status === 'pending' || rec.status === 'in_progress' || rec.status === 'done';
+}
+
+export function isQuestionItemShape(
+  value: unknown,
+): value is { type: string; id: string; question: string; status: string } {
+  if (typeof value !== 'object' || value === null) return false;
+  const rec = value as Record<string, unknown>;
+  if (rec['type'] !== 'question') return false;
+  if (typeof rec['id'] !== 'string' || rec['id'].trim().length === 0) return false;
+  if (typeof rec['question'] !== 'string' || rec['question'].trim().length === 0) return false;
+  const s = rec['status'];
+  return s === 'pending' || s === 'investigating' || s === 'resolved' || s === 'inconclusive';
+}
+
+/**
+ * Normalize an untrusted TodoList item into a fully-populated
+ * {@link UiQuestionItem}. Older sessions persisted question items before the
+ * `blockers`/`evidence` fields existed, and the LLM may also omit optional
+ * fields; without defaulting, the InvestigationBoard renderer crashes on
+ * `q.blockers.length` / `q.evidence.length`. Returns null if the value is not
+ * a question-shaped item.
+ */
+export function normalizeQuestionItem(value: unknown): UiQuestionItem | null {
+  if (!isQuestionItemShape(value)) return null;
+  const rec = value as Record<string, unknown>;
+
+  const evidence: UiEvidenceItem[] = Array.isArray(rec['evidence'])
+    ? rec['evidence']
+        .filter((e): e is Record<string, unknown> => typeof e === 'object' && e !== null)
+        .map((e) => ({
+          status:
+            e['status'] === 'confirmed' || e['status'] === 'refuted' ? e['status'] : 'checking',
+          description: typeof e['description'] === 'string' ? e['description'] : '',
+        }))
+    : [];
+
+  const blockers: string[] = Array.isArray(rec['blockers'])
+    ? rec['blockers'].filter((b): b is string => typeof b === 'string')
+    : [];
+
+  return {
+    id: rec['id'] as string,
+    question: rec['question'] as string,
+    status: rec['status'] as UiQuestionItem['status'],
+    evidence,
+    blockers,
+    confidence: typeof rec['confidence'] === 'string' ? rec['confidence'] : 'medium',
+    depth: typeof rec['depth'] === 'string' ? rec['depth'] : 'deep',
+    conclusion: typeof rec['conclusion'] === 'string' ? rec['conclusion'] : undefined,
+    parentId: typeof rec['parentId'] === 'string' ? rec['parentId'] : undefined,
+  };
+}
+
+/** Migrate a legacy `{ title, status }` item into a fully-populated question item. */
+export function migrateTodoItemShape(value: {
+  title: string;
+  status: 'pending' | 'in_progress' | 'done';
+}): UiQuestionItem {
+  return {
+    id: String(Math.random()).slice(2, 10),
+    question: value.title,
+    status:
+      value.status === 'done'
+        ? 'resolved'
+        : value.status === 'in_progress'
+          ? 'investigating'
+          : 'pending',
+    evidence: [],
+    blockers: [],
+    confidence: 'medium',
+    depth: 'deep',
+  };
+}
+
+/** Project a question item into a finding entry for the conclusions area. */
+export function questionToFinding(q: UiQuestionItem): UiFindingItem {
+  return {
+    id: q.id,
+    question: q.question,
+    conclusion: q.conclusion ?? (q.status === 'inconclusive' ? 'Unable to determine' : ''),
+    confidence: q.confidence,
+    depth: q.depth,
+    status: q.status === 'resolved' ? 'resolved' : 'inconclusive',
+  };
+}
+
+/** Normalize an archived finding record from the findings tool store. */
+export function normalizeFindingItem(value: unknown): UiFindingItem | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const rec = value as Record<string, unknown>;
+  if (typeof rec['id'] !== 'string' || rec['id'].trim().length === 0) return null;
+  if (typeof rec['question'] !== 'string' || rec['question'].trim().length === 0) return null;
+  if (rec['status'] !== 'resolved' && rec['status'] !== 'inconclusive') return null;
+  return {
+    id: rec['id'],
+    question: rec['question'],
+    conclusion: typeof rec['conclusion'] === 'string' ? rec['conclusion'] : '',
+    confidence: typeof rec['confidence'] === 'string' ? rec['confidence'] : 'medium',
+    depth: typeof rec['depth'] === 'string' ? rec['depth'] : 'deep',
+    status: rec['status'],
+  };
 }
 
 export function formatErrorMessage(error: unknown): string {

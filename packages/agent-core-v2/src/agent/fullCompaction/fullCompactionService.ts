@@ -25,6 +25,7 @@ import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { stripDynamicToolContext } from '#/agent/toolSelect/dynamicTools';
 import { IAgentToolSelectService } from '#/agent/toolSelect/toolSelect';
 import { ISessionTodoService } from '#/session/todo/sessionTodo';
+import { renderFindingsDigest } from '#/session/todo/findings';
 import { renderTodoList, type TodoItem } from '#/session/todo/todoItem';
 import {
   APIContextOverflowError,
@@ -666,10 +667,18 @@ export class AgentFullCompactionService extends Disposable implements IAgentFull
 
   private postProcessSummary(summary: string): string {
     const todos = this.currentTodos();
-    if (todos.length === 0) {
+    const findingsDigest = renderFindingsDigest(this.todo.getFindings());
+    if (todos.length === 0 && findingsDigest === undefined) {
       return summary;
     }
-    return `${summary.trim()}\n\n${renderTodoList(todos, '## TODO List')}`;
+    const sections = [summary.trim()];
+    if (todos.length > 0) {
+      sections.push(renderTodoList(todos, '## TODO List', { includeResolved: true }));
+    }
+    if (findingsDigest !== undefined) {
+      sections.push(findingsDigest);
+    }
+    return sections.join('\n\n');
   }
 
   private currentTodos(): readonly TodoItem[] {

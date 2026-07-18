@@ -52,12 +52,12 @@ describe('createTUIState', () => {
     expect(state.terminal).toBeDefined();
     expect(state.transcriptContainer).toBeDefined();
     expect(state.activityContainer).toBeDefined();
-    expect(state.todoPanelContainer).toBeDefined();
+    expect(state.investigationBoardContainer).toBeDefined();
     expect(state.queueContainer).toBeDefined();
     expect(state.editorContainer).toBeDefined();
     expect(state.editor).toBeDefined();
     expect(state.footer).toBeDefined();
-    expect(state.todoPanel).toBeDefined();
+    expect(state.investigationBoard).toBeDefined();
     expect(state.theme.palette).toBeDefined();
 
     // App state is cloned from initialAppState, not reused by reference.

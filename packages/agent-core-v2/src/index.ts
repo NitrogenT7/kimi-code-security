@@ -153,6 +153,13 @@ export * from '#/session/sessionSkillCatalog/extraFileSkillSource';
 export * from '#/session/sessionSkillCatalog/explicitFileSkillSource';
 export * from '#/session/sessionSkillCatalog/workspaceFileSkillSource';
 export * from '#/session/sessionSkillCatalog/pluginSkillSource';
+export * from '#/app/goalTemplate/types';
+export * from '#/app/goalTemplate/parser';
+export * from '#/app/goalTemplate/scanner';
+export * from '#/app/goalTemplate/registry';
+export * from '#/session/sessionGoalTemplate/goalTemplate';
+import '#/session/sessionGoalTemplate/goalTemplateService';
+export * from '#/session/sessionGoalTemplate/goalTemplateService';
 export * from '#/agent/permissionGate/permissionGate';
 export * from '#/agent/permissionGate/permissionGateService';
 import '#/app/flag/flag';
@@ -338,6 +345,13 @@ export {
   persistOriginalImage,
   sessionMediaOriginalsDir,
 } from '#/agent/media/image-originals';
+export {
+  buildNonImagePayloadNotice,
+  checkImagePayload,
+  probeBase64Text,
+  sanitizeImageUrlPart,
+  type ImagePayloadCheck,
+} from '#/agent/media/image-payload';
 export * from '#/app/edit/fileEdit';
 export * from '#/app/edit/fileEditService';
 export * from '#/app/edit/editService';
@@ -437,7 +451,28 @@ export * from '#/session/sessionInit/sessionInitService';
 export * from '#/session/sessionInit/profile/init';
 export * from '#/session/swarm/sessionSwarm';
 export * from '#/session/swarm/sessionSwarmService';
-export * from '#/session/todo/todoItem';
+export {
+  TODO_LIST_TOOL_NAME,
+  TODO_STORE_KEY,
+  EvidenceItemSchema,
+  QuestionItemSchema,
+  isOldFormatTodo,
+  migrateOldTodo,
+  looksLikeQuestionItem,
+  normalizeQuestionItem,
+  validateTodoItem,
+  readTodoItems,
+  renderTodoList,
+  type QuestionStatus,
+  type EvidenceStatus,
+  type Confidence,
+  type Depth,
+  type EvidenceItem,
+  type QuestionItem as TodoQuestionItem,
+  type TodoItem,
+  type OldTodoItem,
+} from '#/session/todo/todoItem';
+export * from '#/session/todo/findings';
 export * from '#/session/todo/todoListReminder';
 export * from '#/session/todo/sessionTodo';
 export * from '#/session/todo/sessionTodoService';

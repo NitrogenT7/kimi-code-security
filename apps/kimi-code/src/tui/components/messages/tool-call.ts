@@ -2180,7 +2180,7 @@ export class ToolCallComponent extends Container {
     }
 
     // TodoList: the authoritative list is shown in the dedicated
-    // TodoPanel before the input area, so repeating the text dump here is
+    // InvestigationBoard before the input area, so repeating the text dump here is
     // pure clutter. Keep the headline, drop the body.
     if (this.toolCall.name === 'TodoList' && !result.is_error) {
       return;

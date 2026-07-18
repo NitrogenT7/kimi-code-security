@@ -1,20 +1,23 @@
 /**
  * `todo` domain (L4) — `ISessionTodoService` implementation.
  *
- * Holds the session's shared todo list as a stateless facade over the main
- * agent's `TodoModel`: `getTodos` reads `wire.getModel(TodoModel)` live, and
- * every mutation only dispatches a `tools.update_store` Op to the main agent's
- * wire (the single source of truth and replayable timeline), then emits
- * `onDidChange` from the rebuilt Model. The service keeps no list copy of its
- * own, so the live view and the post-replay view can never drift. Binds the
- * `TodoListTool` and the stale-todo reminder into every agent (`onDidCreate`),
- * borrowing each agent's services through its `IAgentScopeHandle.accessor`.
- * Per-agent bindings are disposed when the agent is disposed. Bound at
- * Session scope.
+ * Holds the session's shared question list and findings archive as a
+ * stateless facade over the main agent's `TodoModel` / `FindingsModel`:
+ * `getTodos` / `getFindings` read `wire.getModel(...)` live, and every
+ * mutation only dispatches `tools.update_store` Ops (`key: 'todo'` plus, when
+ * the replacement drops answered questions, `key: 'findings'` carrying the
+ * archived conclusions) to the main agent's wire (the single source of truth
+ * and replayable timeline), then emits `onDidChange` from the rebuilt Model.
+ * The service keeps no list copy of its own, so the live view and the
+ * post-replay view can never drift. Binds the stale-todo reminder into every
+ * agent (`onDidCreate`), borrowing each agent's services through its
+ * `IAgentScopeHandle.accessor`. Per-agent bindings are disposed when the
+ * agent is disposed. Bound at Session scope.
  *
- * The session owns the todo facade and tool bindings, while the main Agent wire
- * owns the replayable state. This is an explicit cross-scope orchestration
- * boundary: there is no second session-level wire aggregate or journal.
+ * The session owns the todo facade and reminder bindings, while the main
+ * Agent wire owns the replayable state. This is an explicit cross-scope
+ * orchestration boundary: there is no second session-level wire aggregate or
+ * journal.
  */
 
 import { Disposable, toDisposable, type IDisposable } from '#/_base/di/lifecycle';
@@ -28,9 +31,10 @@ import { IAgentProfileService } from '#/agent/profile/profile';
 import { IAgentLifecycleService } from '#/session/agentLifecycle/agentLifecycle';
 import { IWireService } from '#/wire/wire';
 
+import { FINDINGS_STORE_KEY, mergeArchivedFindings, type FindingItem } from './findings';
 import { ISessionTodoService } from './sessionTodo';
-import { TodoModel, todoSet } from './todoOps';
-import { TODO_LIST_TOOL_NAME, type TodoItem } from './todoItem';
+import { FindingsModel, TodoModel, todoSet } from './todoOps';
+import { TODO_LIST_TOOL_NAME, TODO_STORE_KEY, type TodoItem } from './todoItem';
 import { TODO_LIST_REMINDER_VARIANT, todoListStaleReminder } from './todoListReminder';
 
 const MAIN_AGENT_ID = 'main';
@@ -76,11 +80,14 @@ export class SessionTodoService extends Disposable implements ISessionTodoServic
     return main.accessor.get(IWireService).getModel(TodoModel);
   }
 
+  getFindings(): readonly FindingItem[] {
+    const main = this.agentLifecycle.get(MAIN_AGENT_ID);
+    if (main === undefined) return [];
+    return main.accessor.get(IWireService).getModel(FindingsModel);
+  }
+
   setTodos(todos: readonly TodoItem[]): void {
-    const next: readonly TodoItem[] = todos.map((todo) => ({
-      title: todo.title,
-      status: todo.status,
-    }));
+    const next: readonly TodoItem[] = todos.map((todo) => ({ ...todo }));
     this.dispatchTodoSet(next);
   }
 
@@ -92,7 +99,15 @@ export class SessionTodoService extends Disposable implements ISessionTodoServic
     const main = this.agentLifecycle.get(MAIN_AGENT_ID);
     if (main === undefined) return;
     const wire = main.accessor.get(IWireService);
-    wire.dispatch(todoSet({ key: 'todo', value: todos }));
+    const findings = mergeArchivedFindings(
+      wire.getModel(TodoModel),
+      todos,
+      wire.getModel(FindingsModel),
+    );
+    wire.dispatch(todoSet({ key: TODO_STORE_KEY, value: todos }));
+    if (findings !== undefined) {
+      wire.dispatch(todoSet({ key: FINDINGS_STORE_KEY, value: findings }));
+    }
     this.onDidChangeEmitter.fire(wire.getModel(TodoModel));
   }
 
