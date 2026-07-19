@@ -14,6 +14,11 @@ import { waitForAgentWireEvent } from './session-runtime-helpers';
 import { recordingTelemetry, type TelemetryRecord } from './telemetry';
 import { TEST_IDENTITY } from './test-identity';
 
+// node-sdk/agent-core normalize paths to forward slashes (pathe). Mirror that
+// in path assertions so they hold on Windows, where node:path produces
+// backslashes.
+const toPosix = (p: string): string => p.replaceAll('\\', '/');
+
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -106,6 +111,7 @@ describe('KimiHarness.createSession transport link', () => {
         event: 'session_started',
         sessionId: session.id,
         properties: {
+          client_id: null,
           client_name: 'kimi-code-cli',
           client_version: '0.0.0-test',
           ui_mode: 'shell',
@@ -127,6 +133,7 @@ describe('KimiHarness.createSession transport link', () => {
         event: 'session_started',
         sessionId: session.id,
         properties: {
+          client_id: null,
           client_name: 'kimi-code-cli',
           client_version: '0.0.0-test',
           ui_mode: 'shell',
@@ -164,10 +171,142 @@ describe('KimiHarness.createSession transport link', () => {
         event: 'session_started',
         sessionId: session.id,
         properties: {
+          client_id: null,
           client_name: 'kimi-code-cli',
           client_version: '0.0.0-test',
           ui_mode: 'print',
           resumed: false,
+        },
+      });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('merges process-level sessionStartedProperties into session_started', async () => {
+    const homeDir = await makeTempDir();
+    const workDir = await makeTempDir();
+    const records: TelemetryRecord[] = [];
+    const harness = createKimiHarness({
+      identity: TEST_IDENTITY,
+      homeDir,
+      telemetry: recordingTelemetry(records),
+      sessionStartedProperties: { yolo: true, plan: false },
+    });
+
+    try {
+      const session = await harness.createSession({
+        id: 'ses_process_props',
+        workDir,
+      });
+
+      expect(records).toContainEqual({
+        event: 'session_started',
+        sessionId: session.id,
+        properties: {
+          client_id: null,
+          client_name: 'kimi-code-cli',
+          client_version: '0.0.0-test',
+          ui_mode: 'shell',
+          resumed: false,
+          yolo: true,
+          plan: false,
+        },
+      });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('merges session-level sessionStartedProperties and overrides process-level ones', async () => {
+    const homeDir = await makeTempDir();
+    const workDir = await makeTempDir();
+    const records: TelemetryRecord[] = [];
+    const harness = createKimiHarness({
+      identity: TEST_IDENTITY,
+      homeDir,
+      telemetry: recordingTelemetry(records),
+      sessionStartedProperties: { mode: 'process', source: 'process' },
+    });
+
+    try {
+      const session = await harness.createSession({
+        id: 'ses_scoped_props',
+        workDir,
+        sessionStartedProperties: { mode: 'new' },
+      });
+
+      expect(records).toContainEqual({
+        event: 'session_started',
+        sessionId: session.id,
+        properties: {
+          client_id: null,
+          client_name: 'kimi-code-cli',
+          client_version: '0.0.0-test',
+          ui_mode: 'shell',
+          resumed: false,
+          mode: 'new',
+          source: 'process',
+        },
+      });
+
+      await session.close();
+      await harness.resumeSession({
+        id: session.id,
+        sessionStartedProperties: { mode: 'load' },
+      });
+
+      expect(records).toContainEqual({
+        event: 'session_started',
+        sessionId: session.id,
+        properties: {
+          client_id: null,
+          client_name: 'kimi-code-cli',
+          client_version: '0.0.0-test',
+          ui_mode: 'shell',
+          resumed: true,
+          mode: 'load',
+          source: 'process',
+        },
+      });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('does not let sessionStartedProperties override canonical session_started fields', async () => {
+    const homeDir = await makeTempDir();
+    const workDir = await makeTempDir();
+    const records: TelemetryRecord[] = [];
+    const harness = createKimiHarness({
+      identity: TEST_IDENTITY,
+      homeDir,
+      telemetry: recordingTelemetry(records),
+    });
+
+    try {
+      const session = await harness.createSession({
+        id: 'ses_reserved_keys',
+        workDir,
+        sessionStartedProperties: {
+          client_name: 'evil',
+          client_version: 'evil',
+          ui_mode: 'evil',
+          resumed: true,
+          extra: 'kept',
+        },
+      });
+
+      expect(records).toContainEqual({
+        event: 'session_started',
+        sessionId: session.id,
+        properties: {
+          client_id: null,
+          client_name: 'kimi-code-cli',
+          client_version: '0.0.0-test',
+          ui_mode: 'shell',
+          resumed: false,
+          extra: 'kept',
         },
       });
     } finally {
@@ -201,6 +340,7 @@ describe('KimiHarness.createSession transport link', () => {
         event: 'session_started',
         sessionId: forked.id,
         properties: {
+          client_id: null,
           client_name: 'kimi-code-cli',
           client_version: '0.0.0-test',
           ui_mode: 'shell',
@@ -236,6 +376,7 @@ describe('KimiHarness.createSession transport link', () => {
         event: 'session_started',
         sessionId: session.id,
         properties: {
+          client_id: null,
           client_name: null,
           client_version: null,
           ui_mode: 'shell',
@@ -264,7 +405,7 @@ describe('KimiHarness.createSession transport link', () => {
       });
 
       expect(session.id).toBe('ses_transport_link');
-      expect(session.workDir).toBe(workDir);
+      expect(session.workDir).toBe(toPosix(workDir));
       await expect(session.getStatus()).resolves.toMatchObject({ model: 'kimi-test-model' });
       expect(harness.sessions.get(session.id)).toBe(session);
       const configEvent = await waitForAgentWireEvent(
@@ -282,7 +423,7 @@ describe('KimiHarness.createSession transport link', () => {
       const summaries = await harness.listSessions({ workDir });
       const summary = summaries.find((item) => item.id === session.id);
       expect(summary?.sessionDir).not.toBe(join(homeDir, 'sessions', session.id));
-      expect(summary?.sessionDir).toContain(join(homeDir, 'sessions'));
+      expect(summary?.sessionDir).toContain(toPosix(join(homeDir, 'sessions')));
       expect(existsSync(join(summary!.sessionDir, 'state.json'))).toBe(true);
       expect(await readFile(join(homeDir, 'session_index.jsonl'), 'utf-8')).toContain(session.id);
 
@@ -290,7 +431,7 @@ describe('KimiHarness.createSession transport link', () => {
       expect(summariesById).toHaveLength(1);
       expect(summariesById[0]).toMatchObject({
         id: session.id,
-        workDir,
+        workDir: toPosix(workDir),
       });
       await expect(harness.listSessions({ sessionId: 'ses_missing' })).resolves.toEqual([]);
     } finally {
@@ -446,6 +587,84 @@ effort = "medium"
     expect(coreSessionIds(harness)).toEqual([]);
   });
 
+  it('permanently deletes an active session', async () => {
+    const homeDir = await makeTempDir();
+    const workDir = await makeTempDir();
+    const harness = createKimiHarness({
+      identity: TEST_IDENTITY,
+      homeDir,
+    });
+
+    try {
+      const session = await harness.createSession({ id: 'ses_delete_active', workDir });
+      const [summary] = await harness.listSessions({ sessionId: session.id });
+
+      await harness.deleteSession(session.id);
+
+      expect(harness.getSession(session.id)).toBeUndefined();
+      await expect(harness.listSessions({ sessionId: session.id })).resolves.toEqual([]);
+      expect(existsSync(summary!.sessionDir)).toBe(false);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('returns session.not_found when deleteSession targets a missing id', async () => {
+    const homeDir = await makeTempDir();
+    const harness = createKimiHarness({ identity: TEST_IDENTITY, homeDir });
+
+    try {
+      await expect(harness.deleteSession('ses_delete_missing')).rejects.toMatchObject({
+        name: 'KimiError',
+        code: 'session.not_found',
+      } satisfies Partial<KimiError>);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('allows a deleted session id to be created again', async () => {
+    const homeDir = await makeTempDir();
+    const workDir = await makeTempDir();
+    const harness = createKimiHarness({ identity: TEST_IDENTITY, homeDir });
+    const sessionId = 'ses_delete_recreate';
+
+    try {
+      await harness.createSession({ id: sessionId, workDir });
+      await harness.deleteSession(sessionId);
+
+      const recreated = await harness.createSession({ id: sessionId, workDir });
+
+      expect(recreated.id).toBe(sessionId);
+      await expect(harness.listSessions({ sessionId })).resolves.toHaveLength(1);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('preserves a legacy source directory referenced by session metadata', async () => {
+    const homeDir = await makeTempDir();
+    const workDir = await makeTempDir();
+    const legacySourceDir = await makeTempDir();
+    const markerPath = join(legacySourceDir, 'legacy-marker.txt');
+    await writeFile(markerPath, 'legacy source remains', 'utf-8');
+    const harness = createKimiHarness({ identity: TEST_IDENTITY, homeDir });
+
+    try {
+      const session = await harness.createSession({
+        id: 'ses_delete_migrated',
+        workDir,
+        metadata: { kimi_cli_source_path: legacySourceDir },
+      });
+
+      await harness.deleteSession(session.id);
+
+      await expect(readFile(markerPath, 'utf-8')).resolves.toBe('legacy source remains');
+    } finally {
+      await harness.close();
+    }
+  });
+
   it('applies initial thinking and permission runtime options', async () => {
     const homeDir = await makeTempDir();
     const workDir = await makeTempDir();
@@ -467,11 +686,11 @@ effort = "medium"
           homeDir,
           session.id,
           'config.update',
-          (event) => event['thinkingLevel'] === 'low',
+          (event) => event['thinkingEffort'] === 'low',
         ),
       ).resolves.toMatchObject({
         type: 'config.update',
-        thinkingLevel: 'low',
+        thinkingEffort: 'low',
       });
       await expect(
         waitForAgentWireEvent(

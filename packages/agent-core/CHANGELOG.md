@@ -1,5 +1,151 @@
 # @moonshot-ai/agent-core
 
+## 0.15.5
+
+### Patch Changes
+
+- [#1769](https://github.com/MoonshotAI/kimi-code/pull/1769) [`d1ca65e`](https://github.com/MoonshotAI/kimi-code/commit/d1ca65e1de189617e9edbc54010e62d472a1de3d) Thanks [@wbxl2000](https://github.com/wbxl2000)! - Support in-process editor hosts with session lifecycle, context, MCP configuration, and cross-platform session storage APIs.
+
+## 0.15.4
+
+### Patch Changes
+
+- [#1638](https://github.com/MoonshotAI/kimi-code/pull/1638) [`7c889f3`](https://github.com/MoonshotAI/kimi-code/commit/7c889f3a960482cc9382203bda55d972b6fb6acd) Thanks [@RealKai42](https://github.com/RealKai42)! - In auto permission mode, plan exits are now marked as auto-approved (not user-reviewed) in both the tool result and the transcript, so the agent no longer treats automatic plan approval as a user signal to start executing.
+
+- Updated dependencies [[`ceb158d`](https://github.com/MoonshotAI/kimi-code/commit/ceb158dc54586f254819edbc83c27e21dca1ecf6), [`0303b82`](https://github.com/MoonshotAI/kimi-code/commit/0303b82c3e691836163ecf906febfb6324c81d74)]:
+  - @moonshot-ai/protocol@0.4.0
+
+## 0.15.3
+
+### Patch Changes
+
+- [#1372](https://github.com/MoonshotAI/kimi-code/pull/1372) [`d111c02`](https://github.com/MoonshotAI/kimi-code/commit/d111c02ea08ee32b4c61225d29acd69ea3f256e8) - Apply the 16 MiB output cap to background shell commands too, so a runaway background command can no longer fill the disk or crash the process; it is now terminated with the same guidance to redirect large output to a file.
+
+## 0.15.2
+
+### Patch Changes
+
+- [#1349](https://github.com/MoonshotAI/kimi-code/pull/1349) [`e9db9ca`](https://github.com/MoonshotAI/kimi-code/commit/e9db9cafcf7a0d26122b2cac247d866d7724fd7a) - Record model response ids in session wire logs to make individual model requests easier to trace.
+
+## 0.15.1
+
+### Patch Changes
+
+- [#1285](https://github.com/MoonshotAI/kimi-code/pull/1285) [`c434b4c`](https://github.com/MoonshotAI/kimi-code/commit/c434b4c3e658b686e5f0d0d7d3a2b4cfbfbcaffa) - Cap the output a single foreground shell command may stream so a runaway command can no longer crash the process. A command that produces a very large or unbounded amount of output (e.g. `b3sum --length 18446744073709551615`) previously grew the live-output buffer until Node aborted with a JavaScript heap out-of-memory error; it is now gracefully terminated once its output exceeds 16 MiB, and the result explains how to redirect large output to a file instead. The per-task output ring buffer is also maintained in O(1) per chunk rather than O(n²). Background tasks are unaffected.
+
+- [#1308](https://github.com/MoonshotAI/kimi-code/pull/1308) [`4dd926b`](https://github.com/MoonshotAI/kimi-code/commit/4dd926b0ac8f901030b012827a418274cd7434ae) - Drop orphan tool results at the projection boundary so a malformed history cannot brick a session. A `tool` result whose assistant `tool_call` is nowhere in the history (e.g. an older session whose compaction cut fell inside a tool exchange, restored via the legacy path) is now removed from every projected request, not only on the post-400 strict resend. The stored history is left faithful to the wire records — so consumers that model it, like the transcript fold length, stay in sync — while a strict provider (OpenAI / DeepSeek) always receives a valid request. The drop is surfaced via the projection-repair log rather than done silently.
+
+- [#1296](https://github.com/MoonshotAI/kimi-code/pull/1296) [`021de54`](https://github.com/MoonshotAI/kimi-code/commit/021de5433b43bf944ae77637e74581bf509d5d14) - Align model-facing prompts with actual tool behavior. Fix descriptions that drifted from the implementation (Grep `glob` matching against absolute paths, Glob accepting relative `path`, FetchURL extraction modes, files-only Glob results, cron pinned-date recurrence), disclose enforced-but-silent behavior (idle-only cron delivery, the 5-year no-fire rejection, VCS directories always excluded, sensitive-file exemptions, image downsampling, the subagent summary-length floor, background rejection before launch), resolve cross-surface contradictions (AskUserQuestion background polling guidance, AgentSwarm resume typing, `&&` chaining vs parallel calls, dangling optional-tool names in the shared system prompt), and add missing guidance (denied-call handling for the root agent, read-only role statement for the plan subagent, coder handoff requirements, web/`gh` routing, a dual-use content-safety boundary, scope discipline, and dependency-verification norms).
+
+- Updated dependencies [[`93ec6cb`](https://github.com/MoonshotAI/kimi-code/commit/93ec6cb6526021156a951f8c513c45f138bf5dbb), [`4dd926b`](https://github.com/MoonshotAI/kimi-code/commit/4dd926b0ac8f901030b012827a418274cd7434ae)]:
+  - @moonshot-ai/kosong@0.5.2
+
+## 0.15.0
+
+### Minor Changes
+
+- [#1260](https://github.com/MoonshotAI/kimi-code/pull/1260) [`e47ca10`](https://github.com/MoonshotAI/kimi-code/commit/e47ca10267e75d0b462f9f54e1ae6fc188521703) - WebSearch now sends only the query and returns lightweight result summaries (title, source site, date, URL, snippet) instead of inlined page content; fetch a result's full page content on demand with FetchURL. Both tools now include a citation reminder in their results.
+
+### Patch Changes
+
+- [#1258](https://github.com/MoonshotAI/kimi-code/pull/1258) [`b905dd4`](https://github.com/MoonshotAI/kimi-code/commit/b905dd49108c567d0fecd38a096808c121672795) - Show draft pull requests with a distinct draft status instead of displaying them as open.
+
+- [#1269](https://github.com/MoonshotAI/kimi-code/pull/1269) [`bf35f63`](https://github.com/MoonshotAI/kimi-code/commit/bf35f63c5d9b53625f3bf04f50b9a0bb49ced2c9) - Honor `base_url` for the `google-genai` and `vertexai` providers. A configured base URL was previously ignored and requests always went to `generativelanguage.googleapis.com`; it is now forwarded to the Google GenAI SDK (with `GOOGLE_GEMINI_BASE_URL` / `GOOGLE_VERTEX_BASE_URL` env fallbacks), so Gemini-compatible proxies and gateways can be used. Give the host root only — the SDK appends the API version segment itself.
+
+- Updated dependencies [[`b905dd4`](https://github.com/MoonshotAI/kimi-code/commit/b905dd49108c567d0fecd38a096808c121672795), [`bf35f63`](https://github.com/MoonshotAI/kimi-code/commit/bf35f63c5d9b53625f3bf04f50b9a0bb49ced2c9), [`074bb9b`](https://github.com/MoonshotAI/kimi-code/commit/074bb9ba1359dd3ea2a55eff81986f2bb4772793)]:
+  - @moonshot-ai/protocol@0.3.2
+  - @moonshot-ai/kosong@0.5.1
+
+## 0.14.3
+
+### Patch Changes
+
+- [#1221](https://github.com/MoonshotAI/kimi-code/pull/1221) [`a3f9cec`](https://github.com/MoonshotAI/kimi-code/commit/a3f9cec8a975f11e37e992e42f954789ed394207) - Fix duplicate workspaces showing in the web sidebar when the same folder is registered more than once.
+
+- Updated dependencies [[`ceb27f5`](https://github.com/MoonshotAI/kimi-code/commit/ceb27f5e449e177493f320d90e292487a8fc3410)]:
+  - @moonshot-ai/protocol@0.3.1
+
+## 0.14.2
+
+### Patch Changes
+
+- [#1068](https://github.com/MoonshotAI/kimi-code/pull/1068) [`c82dcf9`](https://github.com/MoonshotAI/kimi-code/commit/c82dcf9cd8276eddf6acbf1030d1712b83a38083) - Glob now uses ripgrep, so it respects .gitignore by default, supports brace patterns, returns only files, and keeps partial results with a warning when some directories are unreadable.
+
+- [#1209](https://github.com/MoonshotAI/kimi-code/pull/1209) [`0635387`](https://github.com/MoonshotAI/kimi-code/commit/063538744f64a1bd3da6f37ebd0643d10bfc068f) - Align malformed tool call argument handling with schema validation fallback.
+
+## 0.14.1
+
+### Patch Changes
+
+- [#1131](https://github.com/MoonshotAI/kimi-code/pull/1131) [`76c643b`](https://github.com/MoonshotAI/kimi-code/commit/76c643bcb6da447c8c47728b4f58512a7a11cfa6) - Cap completion tokens to the remaining context window for chat-completions providers, avoiding context-overflow and invalid max_tokens errors.
+
+- Updated dependencies [[`76c643b`](https://github.com/MoonshotAI/kimi-code/commit/76c643bcb6da447c8c47728b4f58512a7a11cfa6)]:
+  - @moonshot-ai/kosong@0.5.0
+
+## 0.14.0
+
+### Minor Changes
+
+- [#812](https://github.com/MoonshotAI/kimi-code/pull/812) [`c0eeca2`](https://github.com/MoonshotAI/kimi-code/commit/c0eeca24692edd736eecd3c2541d7566bac9f80f) - Added the ability to add extra workspace directories:
+
+  - Use the `/add-dir <path>` command to add extra working directories to the current session, or remember them for the project.
+  - Use `kimi --add-dir <path>` to add them on startup.
+  - Project-level local config is now managed in `.kimi-code/local.toml`; we recommend adding it to your `.gitignore`.
+
+### Patch Changes
+
+- [#970](https://github.com/MoonshotAI/kimi-code/pull/970) [`2730079`](https://github.com/MoonshotAI/kimi-code/commit/27300797f2149900219b05dda49dce65e71fa85a) - Detect the real image format from file contents when reading media, so a mismatched filename extension no longer produces a data URL the model API rejects.
+
+## 0.13.1
+
+### Patch Changes
+
+- [#813](https://github.com/MoonshotAI/kimi-code/pull/813) [`7b5b818`](https://github.com/MoonshotAI/kimi-code/commit/7b5b8188157ec902e5cd4e73545bc5ca6c52bb76) - Fix repeated compaction handling when context remains over the blocking threshold.
+
+- [#805](https://github.com/MoonshotAI/kimi-code/pull/805) [`3e6196e`](https://github.com/MoonshotAI/kimi-code/commit/3e6196e6b227c66860651f4335e06973865b2714) - Project session replay ranges over rendered replay records instead of raw persisted records.
+
+- [#804](https://github.com/MoonshotAI/kimi-code/pull/804) [`299b9fc`](https://github.com/MoonshotAI/kimi-code/commit/299b9fcad4c9c4b755fae4dfae01a1dbf60aec3c) - Prevent session shutdown from resuming the agent when stopping background tasks.
+
+- [#823](https://github.com/MoonshotAI/kimi-code/pull/823) [`90fc04b`](https://github.com/MoonshotAI/kimi-code/commit/90fc04b7072ec20055022c50583d35286ca715a6) - Remove redundant LLM request logging context plumbing.
+
+- Updated dependencies [[`d0d5821`](https://github.com/MoonshotAI/kimi-code/commit/d0d58219007cd9d7355f1ea8900e9777b66abda2), [`b45672c`](https://github.com/MoonshotAI/kimi-code/commit/b45672cdaac9959024c3ae36bf35b16a423aa1dc)]:
+  - @moonshot-ai/kosong@0.4.6
+  - @moonshot-ai/kaos@0.1.6
+
+## 0.13.0
+
+### Minor Changes
+
+- [#744](https://github.com/MoonshotAI/kimi-code/pull/744) [`18f299f`](https://github.com/MoonshotAI/kimi-code/commit/18f299fd0b266545a1f7cebae9f58b83b9d9776e) - Add support for legacy SSE MCP servers alongside stdio and streamable HTTP transports.
+
+### Patch Changes
+
+- [#777](https://github.com/MoonshotAI/kimi-code/pull/777) [`4516f62`](https://github.com/MoonshotAI/kimi-code/commit/4516f62f6a7e4dd7675a3aec16b2a26c5e310d83) - Clarify AGENTS.md prompt guidance and mark truncated instruction files.
+
+- [#780](https://github.com/MoonshotAI/kimi-code/pull/780) [`8a92db6`](https://github.com/MoonshotAI/kimi-code/commit/8a92db6a0c110a21c6e6e86622f498e836178e5f) - Prompt the CLI to show one brief same-language status sentence before non-trivial tool calls.
+
+- [#786](https://github.com/MoonshotAI/kimi-code/pull/786) [`e10b25f`](https://github.com/MoonshotAI/kimi-code/commit/e10b25f9be18ca64aada0d0a3cab0e02fdbd46df) - Stop writing resume version markers into persisted agent metadata.
+
+- [#768](https://github.com/MoonshotAI/kimi-code/pull/768) [`c6a9967`](https://github.com/MoonshotAI/kimi-code/commit/c6a996756cd8f1fb317b6eee6f4e668eebc7dc14) - Recover resumed sessions when an interrupted tool call result was not recorded.
+
+- [#777](https://github.com/MoonshotAI/kimi-code/pull/777) [`4516f62`](https://github.com/MoonshotAI/kimi-code/commit/4516f62f6a7e4dd7675a3aec16b2a26c5e310d83) - Collapse hidden directories in the workspace prompt and explain how to inspect them.
+
+- [#766](https://github.com/MoonshotAI/kimi-code/pull/766) [`9cef896`](https://github.com/MoonshotAI/kimi-code/commit/9cef89656311974a57e6675f474ea6c2adb1d8e9) - Clarify that compaction summaries must be emitted in the final answer.
+
+- [#765](https://github.com/MoonshotAI/kimi-code/pull/765) [`046856b`](https://github.com/MoonshotAI/kimi-code/commit/046856b740afb604132e914f1fc489de72394036) - Read media files using header-detected types before falling back to media extensions.
+
+- [#785](https://github.com/MoonshotAI/kimi-code/pull/785) [`4578f05`](https://github.com/MoonshotAI/kimi-code/commit/4578f05f44101f24d45c6452e2a6993cbb52e331) - Include the skill's directory on the loaded-skill context block so the agent can locate a skill's bundled resources (scripts, templates) after it is invoked.
+
+- [#784](https://github.com/MoonshotAI/kimi-code/pull/784) [`a562ef5`](https://github.com/MoonshotAI/kimi-code/commit/a562ef54e537a36211c48f0fe19e9252e83397a0) - Decouple agent skill access from session-specific registry implementations.
+
+- [#776](https://github.com/MoonshotAI/kimi-code/pull/776) [`ecd7a0a`](https://github.com/MoonshotAI/kimi-code/commit/ecd7a0afb646d14a14c780a4088fd8a59da134ad) - Resolve model capabilities through a static lookup instead of instantiating a temporary provider.
+
+- [#787](https://github.com/MoonshotAI/kimi-code/pull/787) [`1eb363f`](https://github.com/MoonshotAI/kimi-code/commit/1eb363f655aa44abc1e5c3af89016f00764ecc95) - Extend the same-language rule to the model's reasoning, so thinking follows the user's language while keeping code and technical terms in their original form.
+
+- Updated dependencies [[`73be7ba`](https://github.com/MoonshotAI/kimi-code/commit/73be7ba17d41df7999d4c1fba410994e7024eb7b), [`18f299f`](https://github.com/MoonshotAI/kimi-code/commit/18f299fd0b266545a1f7cebae9f58b83b9d9776e), [`ecd7a0a`](https://github.com/MoonshotAI/kimi-code/commit/ecd7a0afb646d14a14c780a4088fd8a59da134ad)]:
+  - @moonshot-ai/kosong@0.4.5
+  - @moonshot-ai/protocol@0.3.0
+
 ## 0.12.3
 
 ### Patch Changes

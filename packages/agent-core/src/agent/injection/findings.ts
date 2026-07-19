@@ -1,4 +1,5 @@
 import { FINDINGS_STORE_KEY, type FindingItem } from '#/tools/builtin/state/findings';
+
 import { DynamicInjector } from './injector';
 
 const FINDINGS_REMINDER_VARIANT = 'findings_reminder';
@@ -31,7 +32,11 @@ export class FindingsInjector extends DynamicInjector {
     return raw.filter((f): f is FindingItem => {
       if (typeof f !== 'object' || f === null) return false;
       const r = f as Record<string, unknown>;
-      return typeof r['id'] === 'string' && typeof r['question'] === 'string' && typeof r['conclusion'] === 'string';
+      return (
+        typeof r['id'] === 'string' &&
+        typeof r['question'] === 'string' &&
+        typeof r['conclusion'] === 'string'
+      );
     });
   }
 
@@ -64,7 +69,9 @@ export class FindingsInjector extends DynamicInjector {
     return { turnsSinceLastWrite, turnsSinceLastReminder };
   }
 
-  private hasTodoListWrite(message: { toolCalls: readonly { name: string; arguments?: string | null }[] }): boolean {
+  private hasTodoListWrite(message: {
+    toolCalls: readonly { name: string; arguments?: string | null }[];
+  }): boolean {
     return message.toolCalls.some((tc) => {
       if (tc.name !== 'TodoList') return false;
       if (typeof tc.arguments !== 'string') return false;
@@ -78,7 +85,9 @@ export class FindingsInjector extends DynamicInjector {
   }
 
   private isFindingsReminder(message: { origin?: { kind: string; variant?: string } }): boolean {
-    return message.origin?.kind === 'injection' && message.origin.variant === FINDINGS_REMINDER_VARIANT;
+    return (
+      message.origin?.kind === 'injection' && message.origin.variant === FINDINGS_REMINDER_VARIANT
+    );
   }
 }
 
@@ -98,16 +107,15 @@ function renderFindingsReminder(findings: readonly FindingItem[]): string {
     lines.push('最近结论：');
     for (const f of recent) {
       const marker = f.status === 'resolved' ? '✅' : '❓';
-      const conclusionPreview = f.conclusion.length > 60
-        ? f.conclusion.slice(0, 60) + '…'
-        : f.conclusion;
+      const conclusionPreview =
+        f.conclusion.length > 60 ? f.conclusion.slice(0, 60) + '…' : f.conclusion;
       lines.push(`  ${marker} ${f.question} → ${conclusionPreview}`);
     }
   }
 
   lines.push(
     'Use the Findings tool to inspect any of these conclusions in detail. ' +
-    'Make sure that you NEVER mention this reminder to the user.',
+      'Make sure that you NEVER mention this reminder to the user.',
   );
 
   return lines.join('\n');

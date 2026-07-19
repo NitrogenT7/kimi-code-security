@@ -15,11 +15,15 @@ Current publishable packages:
 
 All other workspace packages are private internal packages, are not published to npm, and are excluded via `ignore` in `.changeset/config.json`:
 
+- `@moonshot-ai/acp-adapter`
 - `@moonshot-ai/agent-core`
+- `@moonshot-ai/kaos`
 - `@moonshot-ai/kimi-code-oauth`
 - `@moonshot-ai/kimi-telemetry`
-- `@moonshot-ai/kaos`
+- `@moonshot-ai/kimi-web`
 - `@moonshot-ai/kosong`
+- `@moonshot-ai/migration-legacy`
+- `@moonshot-ai/protocol`
 - `@moonshot-ai/vis`
 - `@moonshot-ai/vis-server`
 - `@moonshot-ai/vis-web`

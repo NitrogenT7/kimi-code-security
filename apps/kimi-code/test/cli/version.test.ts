@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import {
   buildKimiDefaultHeaders,
+  createKimiCodeUserAgent,
   getHostPackageJsonPath,
   getHostPackageRoot,
   getVersion,
@@ -15,7 +16,7 @@ describe('cli version helpers', () => {
     const pkgPath = getHostPackageJsonPath();
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string };
 
-    expect(pkgPath.endsWith('/apps/kimi-code/package.json')).toBe(true);
+    expect(pkgPath.endsWith(join('apps', 'kimi-code', 'package.json'))).toBe(true);
     expect(getHostPackageRoot()).toBe(dirname(pkgPath));
     expect(getVersion()).toBe(pkg.version);
   });
@@ -24,5 +25,9 @@ describe('cli version helpers', () => {
     const headers = buildKimiDefaultHeaders('1.2.3');
 
     expect(headers['User-Agent']).toBe('kimi-code-cli/1.2.3');
+  });
+
+  it('builds the product user-agent for ad-hoc fetches', () => {
+    expect(createKimiCodeUserAgent('1.2.3')).toBe('kimi-code-cli/1.2.3');
   });
 });

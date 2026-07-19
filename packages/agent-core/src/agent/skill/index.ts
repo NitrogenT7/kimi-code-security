@@ -1,13 +1,17 @@
 import { randomUUID } from 'node:crypto';
 
-import type { ActivateSkillPayload } from '#/rpc';
 import type { ContentPart } from '@moonshot-ai/kosong';
 
-import type { Agent } from '..';
 import { ErrorCodes, KimiError } from '#/errors';
-import { isUserActivatableSkillType, type SkillDefinition, type SkillRegistry } from '../../skill';
+import type { ActivateSkillPayload } from '#/rpc';
+
+import type { Agent } from '..';
+import { isUserActivatableSkillType, type SkillDefinition } from '../../skill';
 import type { SkillActivationOrigin } from '../context';
 import { renderUserSlashSkillPrompt } from './prompt';
+import type { SkillRegistry } from './types';
+
+export type { SkillRegistry } from './types';
 
 export class SkillManager {
   constructor(
@@ -21,7 +25,10 @@ export class SkillManager {
       throw new KimiError(ErrorCodes.SKILL_NOT_FOUND, `Skill "${input.name}" was not found`);
     }
     if (!isUserActivatableSkillType(skill.metadata.type)) {
-      throw new KimiError(ErrorCodes.SKILL_TYPE_UNSUPPORTED, `Skill "${skill.name}" cannot be activated by the user`);
+      throw new KimiError(
+        ErrorCodes.SKILL_TYPE_UNSUPPORTED,
+        `Skill "${skill.name}" cannot be activated by the user`,
+      );
     }
 
     this.assertSkillAllowed(skill);
@@ -36,6 +43,7 @@ export class SkillManager {
           skillArgs,
           skillContent,
           skillSource: skill.source,
+          skillDir: skill.dir,
         }),
       },
     ];

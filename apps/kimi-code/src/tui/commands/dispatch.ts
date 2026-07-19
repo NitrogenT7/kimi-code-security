@@ -1,39 +1,32 @@
-import type { Component, Focusable } from '@earendil-works/pi-tui';
+import type { Component, Focusable } from '@moonshot-ai/pi-tui';
 import type { DeviceAuthorization } from '@moonshot-ai/kimi-code-oauth';
 import type { KimiHarness, Session } from '@moonshot-ai/kimi-code-sdk';
 
 import type { ColorToken, ThemeName } from '#/tui/theme';
-import type { ResolvedTheme } from '../theme/colors';
-import {
-  LLM_NOT_SET_MESSAGE,
-} from '../constant/kimi-tui';
-import { formatErrorMessage } from '../utils/event-payload';
-import { parseSlashInput } from './parse';
-import {
-  resolveSlashCommandInput,
-  slashBusyMessage,
-  slashCommandBusyReason,
-} from './resolve';
-import type { BuiltinSlashCommandName } from './registry';
+
+import { LLM_NOT_SET_MESSAGE } from '../constant/kimi-tui';
 import type { AuthFlowController } from '../controllers/auth-flow';
 import type { BtwPanelController } from '../controllers/btw-panel';
 import type { StreamingUIController } from '../controllers/streaming-ui';
 import type { TasksBrowserController } from '../controllers/tasks-browser';
+import { tryHandleDanceCommand } from '../easter-eggs/dance';
+import type { ResolvedTheme } from '../theme/colors';
+import type { TUIState } from '../tui-state';
 import type {
   AppState,
   LoginProgressSpinnerHandle,
   QueuedMessage,
   TranscriptEntry,
 } from '../types';
-import type { TUIState } from '../tui-state';
-
+import { formatErrorMessage } from '../utils/event-payload';
 import { handleLoginCommand, handleLogoutCommand } from './auth';
 import { handleBtwCommand } from './btw';
-import { tryHandleDanceCommand } from '../easter-eggs/dance';
+import { handleCopyCommand } from './copy';
 import {
   handleAutoCommand,
   handleCompactCommand,
   handleEditorCommand,
+  handleEffortCommand,
   handleModelCommand,
   handlePlanCommand,
   handleThemeCommand,
@@ -44,9 +37,7 @@ import {
   showSettingsSelector,
 } from './config';
 import { handleGoalCommand } from './goal';
-import { handleProviderCommand } from './provider';
 import {
-  handleChangelogCommand,
   handleFeedbackCommand,
   handleLoadMcpGroupCommand,
   handleMcpCommand,
@@ -55,9 +46,13 @@ import {
   showStatusReport,
   showUsage,
 } from './info';
+import { handleAddDirCommand } from './add-dir';
+import { parseSlashInput } from './parse';
 import { handlePluginsCommand } from './plugins';
+import { handleProviderCommand } from './provider';
+import type { BuiltinSlashCommandName } from './registry';
 import { handleReloadCommand, handleReloadTuiCommand } from './reload';
-import { handleSwarmCommand } from './swarm';
+import { resolveSlashCommandInput, slashBusyMessage, slashCommandBusyReason } from './resolve';
 import {
   handleExportDebugZipCommand,
   handleExportMdCommand,
@@ -65,21 +60,23 @@ import {
   handleInitCommand,
   handleTitleCommand,
 } from './session';
+import { handleSwarmCommand } from './swarm';
 import { handleUndoCommand } from './undo';
+import { handleWebCommand } from './web';
 
 // ---------------------------------------------------------------------------
 // Re-exports — keep existing consumers working
 // ---------------------------------------------------------------------------
 
-export {
-  handleLoginCommand,
-  handleLogoutCommand,
-} from './auth';
+export { handleLoginCommand, handleLogoutCommand } from './auth';
 export { handleBtwCommand } from './btw';
+export { handleCopyCommand } from './copy';
+export { handleAddDirCommand } from './add-dir';
 export {
   handleAutoCommand,
   handleCompactCommand,
   handleEditorCommand,
+  handleEffortCommand,
   handleModelCommand,
   handlePlanCommand,
   handleThemeCommand,
@@ -91,7 +88,6 @@ export {
 } from './config';
 export { handleSwarmCommand } from './swarm';
 export {
-  handleChangelogCommand,
   handleFeedbackCommand,
   handleLoadMcpGroupCommand,
   handleMcpCommand,
@@ -111,6 +107,7 @@ export {
   handleTitleCommand,
 } from './session';
 export { handleUndoCommand } from './undo';
+export { handleWebCommand } from './web';
 
 // ---------------------------------------------------------------------------
 // Host interface
@@ -155,12 +152,20 @@ export interface SlashCommandHost {
 
   // Dispatch
   stop(exitCode?: number): Promise<void>;
+  setExitOpenUrl(url: string): void;
   showHelpPanel(): void;
   createNewSession(): Promise<void>;
   showSessionPicker(): Promise<void>;
   sendNormalUserInput(text: string): void;
   sendSkillActivation(session: Session, skillName: string, skillArgs: string): void;
+  activatePluginCommand(
+    session: Session,
+    pluginId: string,
+    commandName: string,
+    args: string,
+  ): void;
   readonly skillCommandMap: Map<string, string>;
+  readonly pluginCommandMap: Map<string, string>;
 
   // Controller refs
   readonly streamingUI: StreamingUIController;
@@ -184,7 +189,8 @@ export function dispatchInput(host: SlashCommandHost, text: string): void {
 async function executeSlashCommand(host: SlashCommandHost, input: string): Promise<void> {
   const parsedCommand = parseSlashInput(input);
 
-  // /mcp:<group> one-shot loader and /mcp:off reset
+  // /mcp:<group> one-shot loader and /mcp:off reset — handled before builtin
+  // resolution because `mcp:<group>` is not a registered command name.
   if (parsedCommand !== null) {
     if (parsedCommand.name === 'mcp:off') {
       const busyReason = slashCommandBusyReason({
@@ -232,6 +238,7 @@ async function executeSlashCommand(host: SlashCommandHost, input: string): Promi
   const intent = resolveSlashCommandInput({
     input,
     skillCommandMap: host.skillCommandMap,
+    pluginCommandMap: host.pluginCommandMap,
     isStreaming: host.state.appState.streamingPhase !== 'idle',
     isCompacting: host.state.appState.isCompacting,
   });
@@ -261,6 +268,20 @@ async function executeSlashCommand(host: SlashCommandHost, input: string): Promi
         skill_name: intent.skillName,
       });
       host.sendSkillActivation(session, intent.skillName, intent.args);
+      return;
+    }
+    case 'plugin-command': {
+      if (host.state.appState.model.trim().length === 0) {
+        host.showError(LLM_NOT_SET_MESSAGE);
+        return;
+      }
+      const session = host.session;
+      if (session === undefined) {
+        host.showError(LLM_NOT_SET_MESSAGE);
+        return;
+      }
+      host.track('input_command', { command: `${intent.pluginId}:${intent.commandName}` });
+      host.activatePluginCommand(session, intent.pluginId, intent.commandName, intent.args);
       return;
     }
     case 'message':
@@ -301,9 +322,6 @@ async function handleBuiltInSlashCommand(
     case 'version':
       host.showStatus(`Kimi Code v${host.state.appState.version}`);
       return;
-    case 'changelog':
-      await handleChangelogCommand(host);
-      return;
     case 'new':
       await host.createNewSession();
       host.state.ui.requestRender();
@@ -319,6 +337,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'plugins':
       void handlePluginsCommand(host, args);
+      return;
+    case 'add-dir':
+      await handleAddDirCommand(host, args);
       return;
     case 'experiments':
       await showExperimentsPanel(host);
@@ -336,7 +357,10 @@ async function handleBuiltInSlashCommand(
       await handleThemeCommand(host, args);
       return;
     case 'model':
-      handleModelCommand(host, args);
+      await handleModelCommand(host, args);
+      return;
+    case 'effort':
+      await handleEffortCommand(host, args);
       return;
     case 'provider':
       await handleProviderCommand(host);
@@ -392,6 +416,9 @@ async function handleBuiltInSlashCommand(
     case 'export-debug-zip':
       await handleExportDebugZipCommand(host);
       return;
+    case 'copy':
+      await handleCopyCommand(host);
+      return;
     case 'login':
       await handleLoginCommand(host);
       return;
@@ -400,6 +427,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'undo':
       await handleUndoCommand(host, args);
+      return;
+    case 'web':
+      await handleWebCommand(host);
       return;
     default:
       host.showError(`Unknown slash command: /${String(name)}`);

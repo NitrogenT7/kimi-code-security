@@ -180,6 +180,28 @@ describe('loadMcpServers', () => {
     });
   });
 
+  it('preserves an UNC-style project root when resolving a relative stdio cwd', async () => {
+    const home = makeTempDir();
+    const repoRoot = makeTempDir();
+    const cwd = join(repoRoot, 'packages', 'agent-core');
+    await mkdir(join(repoRoot, '.git'), { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    await writeJson(join(repoRoot, '.mcp.json'), {
+      mcpServers: {
+        local: { command: 'node.exe', cwd: 'tools/mcp server' },
+      },
+    });
+    const uncStyleCwd = `/${cwd}`;
+
+    const servers = await loadMcpServers({ cwd: uncStyleCwd, homeDir: home });
+
+    expect(servers['local']).toEqual({
+      transport: 'stdio',
+      command: 'node.exe',
+      cwd: `/${join(repoRoot, 'tools', 'mcp server')}`,
+    });
+  });
+
   it('throws KimiError(config.invalid) on invalid JSON', async () => {
     const home = makeTempDir();
     const cwd = makeTempDir();
@@ -194,7 +216,7 @@ describe('loadMcpServers', () => {
     const home = makeTempDir();
     const cwd = makeTempDir();
     await writeJson(join(home, 'mcp.json'), {
-      mcpServers: { bad: { transport: 'ws', url: 'wss://x' } },
+      mcpServers: { bad: { transport: 'websocket', url: 'https://x' } },
     });
     await expect(loadMcpServers({ cwd, homeDir: home })).rejects.toMatchObject({
       code: ErrorCodes.CONFIG_INVALID,
@@ -240,6 +262,46 @@ describe('loadMcpServers', () => {
     expect(servers['remote']).toEqual({
       transport: 'http',
       url: 'https://mcp.example.com/sse',
+    });
+  });
+
+  it('preserves the OAuth marker on a remote server entry', async () => {
+    const home = makeTempDir();
+    const cwd = makeTempDir();
+    await writeJson(join(home, 'mcp.json'), {
+      mcpServers: {
+        remote: { url: 'https://mcp.example.com/mcp', auth: 'oauth' },
+      },
+    });
+
+    const servers = await loadMcpServers({ cwd, homeDir: home });
+
+    expect(servers['remote']).toEqual({
+      transport: 'http',
+      url: 'https://mcp.example.com/mcp',
+      auth: 'oauth',
+    });
+  });
+
+  it('loads explicit SSE server config', async () => {
+    const home = makeTempDir();
+    const cwd = makeTempDir();
+    await writeJson(join(home, 'mcp.json'), {
+      mcpServers: {
+        legacy: {
+          transport: 'sse',
+          url: 'https://mcp.example.com/sse',
+          headers: { 'X-Tenant': 'kimi' },
+          bearerTokenEnvVar: 'LEGACY_MCP_TOKEN',
+        },
+      },
+    });
+    const servers = await loadMcpServers({ cwd, homeDir: home });
+    expect(servers['legacy']).toEqual({
+      transport: 'sse',
+      url: 'https://mcp.example.com/sse',
+      headers: { 'X-Tenant': 'kimi' },
+      bearerTokenEnvVar: 'LEGACY_MCP_TOKEN',
     });
   });
 

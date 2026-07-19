@@ -66,7 +66,8 @@ export type {
   LLM,
   LLMChatParams,
   LLMChatResponse,
-  LLMRequestLogContext,
+  LLMRequestLogFields,
+  LLMRequestTrace,
   LLMStreamTiming,
   ToolCallDelta,
 } from './llm';

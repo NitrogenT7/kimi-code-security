@@ -78,11 +78,10 @@ interface ResumeStateSnapshot {
     readonly cwd: string;
     readonly provider: ProviderConfig | undefined;
     readonly profileName: string | undefined;
-    readonly thinkingLevel: string;
+    readonly thinkingEffort: string;
     readonly systemPrompt: string;
   };
   readonly context: ReturnType<Agent['context']['data']>;
-  readonly fullCompaction: Agent['fullCompaction']['compactedHistory'];
   readonly permission: ReturnType<Agent['permission']['data']>;
   readonly tools: ReturnType<Agent['tools']['data']>;
   readonly toolStore: ReturnType<Agent['tools']['storeData']>;
@@ -130,6 +129,7 @@ export function createCommandKaos(stdout: string): Kaos {
       exitCode: 0,
       wait: vi.fn().mockResolvedValue(0),
       kill: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
     };
   }
 
@@ -224,7 +224,7 @@ export class AgentTestContext {
       cwd: process.cwd(),
       modelAlias: provider.model,
       systemPrompt: DEFAULT_TEST_SYSTEM_PROMPT,
-      thinkingLevel: 'off',
+      thinkingEffort: 'off',
     });
 
     if (tools.length > 0) {
@@ -737,7 +737,7 @@ export class AgentTestContext {
 
   async expectResumeMatches(): Promise<void> {
     const resumed = testAgent({
-      kaos: createResumeNoSideEffectKaos(this.agent.config.cwd),
+      kaos: createResumeNoSideEffectKaos(this.agent.config.cwd, this.agent.kaos.pathClass()),
       runtime: {
         urlFetcher: this.agent.toolServices?.urlFetcher,
         webSearcher: this.agent.toolServices?.webSearcher,
@@ -962,24 +962,29 @@ const failOnResumeGenerate: GenerateFn = async () => {
   throw new Error('Resume replay unexpectedly called the LLM');
 };
 
-function createResumeNoSideEffectKaos(initialCwd: string): Kaos {
+function createResumeNoSideEffectKaos(
+  initialCwd: string,
+  pathClass: 'posix' | 'win32',
+): Kaos {
   const fail = (method: string): never => {
     throw new Error(`Resume replay unexpectedly called kaos.${method}`);
   };
 
   // Replay may carry `config.update({cwd})` events that route through
   // `kaos.chdir(...)`; let those mutate an internal cwd field so replay
-  // succeeds. Actual fs I/O methods remain forbidden.
+  // succeeds. Actual fs I/O methods remain forbidden. `pathClass` mirrors
+  // the live agent's kaos so platform-conditional tool descriptions (e.g.
+  // Glob's Windows note) match the original in `expectResumeMatches`.
   let cwd = initialCwd;
   return {
     name: 'resume-no-side-effects',
     osEnv: TEST_OS_ENV,
-    pathClass: () => 'posix',
+    pathClass: () => pathClass,
     normpath: (p: string) => p,
     gethome: () => '/home/test',
     getcwd: () => cwd,
-    withCwd: (next: string) => createResumeNoSideEffectKaos(next),
-    withEnv: () => createResumeNoSideEffectKaos(cwd),
+    withCwd: (next: string) => createResumeNoSideEffectKaos(next, pathClass),
+    withEnv: () => createResumeNoSideEffectKaos(cwd, pathClass),
     chdir: async (next: string) => {
       cwd = next;
     },
@@ -1002,7 +1007,6 @@ function resumeStateSnapshot(agent: Agent): ResumeStateSnapshot {
     background: agent.background.list(false),
     config: configStateSnapshot(agent),
     context: resumeContextSnapshot(agent),
-    fullCompaction: agent.fullCompaction.compactedHistory,
     permission: agent.permission.data(),
     tools: agent.tools.data(),
     toolStore: agent.tools.storeData(),
@@ -1036,10 +1040,10 @@ function configStateSnapshot(agent: Agent): ResumeStateSnapshot['config'] {
   } catch {}
 
   return {
-    cwd: agent.config.cwd,
+    cwd: agent.config.cwd.replaceAll('\\', '/'),
     provider,
     profileName: agent.config.profileName,
-    thinkingLevel: agent.config.thinkingLevel,
+    thinkingEffort: agent.config.thinkingEffort,
     systemPrompt: agent.config.systemPrompt,
   };
 }
@@ -1090,6 +1094,7 @@ function capabilityNames(capabilities: ModelCapability | undefined): string[] {
     capabilities.audio_in ? 'audio_in' : undefined,
     capabilities.thinking ? 'thinking' : undefined,
     capabilities.tool_use ? 'tool_use' : undefined,
+    capabilities.dynamically_loaded_tools === true ? 'dynamically_loaded_tools' : undefined,
   ].filter((capability): capability is string => capability !== undefined);
 }
 

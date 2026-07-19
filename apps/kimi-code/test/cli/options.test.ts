@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createProgram } from '#/cli/commands';
 import type { CLIOptions } from '#/cli/options';
-import { OptionConflictError, validateOptions } from '#/cli/options';
+import { OptionConflictError, OUTPUT_FORMAT_ENV, resolveOutputFormat, validateOptions } from '#/cli/options';
 
 function parse(argv: string[]): CLIOptions {
   let captured: CLIOptions | undefined;
@@ -41,6 +41,7 @@ describe('CLI options parsing', () => {
       expect(opts.outputFormat).toBeUndefined();
       expect(opts.prompt).toBeUndefined();
       expect(opts.skillsDirs).toEqual([]);
+      expect(opts.addDirs).toEqual([]);
     });
   });
 
@@ -152,6 +153,10 @@ describe('CLI options parsing', () => {
 
     it('-C sets continue', () => {
       expect(parse(['-C']).continue).toBe(true);
+    });
+
+    it('-c is an alias for --continue', () => {
+      expect(parse(['-c']).continue).toBe(true);
     });
 
     it('--continue and --session combined raises a conflict', () => {
@@ -298,12 +303,100 @@ describe('CLI options parsing', () => {
     });
   });
 
+  describe('KIMI_MODEL_OUTPUT_FORMAT', () => {
+    it('defaults to text when unset in prompt mode', () => {
+      expect(resolveOutputFormat({ prompt: 'run this', outputFormat: undefined }, {})).toBe('text');
+    });
+
+    it('uses stream-json from the env in prompt mode', () => {
+      expect(
+        resolveOutputFormat(
+          { prompt: 'run this', outputFormat: undefined },
+          { [OUTPUT_FORMAT_ENV]: 'stream-json' },
+        ),
+      ).toBe('stream-json');
+    });
+
+    it('uses text from the env in prompt mode', () => {
+      expect(
+        resolveOutputFormat(
+          { prompt: 'run this', outputFormat: undefined },
+          { [OUTPUT_FORMAT_ENV]: 'text' },
+        ),
+      ).toBe('text');
+    });
+
+    it('trims surrounding whitespace from the env value', () => {
+      expect(
+        resolveOutputFormat(
+          { prompt: 'run this', outputFormat: undefined },
+          { [OUTPUT_FORMAT_ENV]: '  stream-json  ' },
+        ),
+      ).toBe('stream-json');
+    });
+
+    it('lets the --output-format flag override the env', () => {
+      expect(
+        resolveOutputFormat(
+          { prompt: 'run this', outputFormat: 'text' },
+          { [OUTPUT_FORMAT_ENV]: 'stream-json' },
+        ),
+      ).toBe('text');
+    });
+
+    it('ignores the env outside prompt mode', () => {
+      expect(
+        resolveOutputFormat(
+          { prompt: undefined, outputFormat: undefined },
+          { [OUTPUT_FORMAT_ENV]: 'stream-json' },
+        ),
+      ).toBe('text');
+    });
+
+    it('rejects an invalid env value', () => {
+      expect(() =>
+        resolveOutputFormat(
+          { prompt: 'run this', outputFormat: undefined },
+          { [OUTPUT_FORMAT_ENV]: 'json' },
+        ),
+      ).toThrow(OptionConflictError);
+      expect(() =>
+        resolveOutputFormat(
+          { prompt: 'run this', outputFormat: undefined },
+          { [OUTPUT_FORMAT_ENV]: 'json' },
+        ),
+      ).toThrow('Invalid KIMI_MODEL_OUTPUT_FORMAT value "json"');
+    });
+
+    it('fails validation fast for an invalid env value in prompt mode', () => {
+      const opts = parse(['-p', 'run this']);
+      expect(() => validateOptions(opts, { [OUTPUT_FORMAT_ENV]: 'json' })).toThrow(
+        OptionConflictError,
+      );
+    });
+
+    it('does not validate the env outside prompt mode', () => {
+      const opts = parse([]);
+      expect(() => validateOptions(opts, { [OUTPUT_FORMAT_ENV]: 'json' })).not.toThrow();
+    });
+  });
+
   describe('--skills-dir', () => {
     it('collects repeated skill directories', () => {
       expect(parse(['--skills-dir', '/one', '--skills-dir=/two']).skillsDirs).toEqual([
         '/one',
         '/two',
       ]);
+    });
+  });
+
+  describe('--add-dir', () => {
+    it('parses one additional workspace directory', () => {
+      expect(parse(['--add-dir', '/shared']).addDirs).toEqual(['/shared']);
+    });
+
+    it('parses repeated additional workspace directories', () => {
+      expect(parse(['--add-dir', '/one', '--add-dir=/two']).addDirs).toEqual(['/one', '/two']);
     });
   });
 
@@ -332,6 +425,30 @@ describe('CLI options parsing', () => {
       expect(upgradeCalls).toBe(1);
     });
 
+    it('routes update alias to the upgrade handler', () => {
+      let upgradeCalls = 0;
+      const program = createProgram(
+        '0.0.0',
+        () => {
+          throw new Error('main action should not run');
+        },
+        () => {},
+        () => {},
+        () => {
+          upgradeCalls += 1;
+        },
+      );
+      program.exitOverride();
+      program.configureOutput({
+        writeOut: () => {},
+        writeErr: () => {},
+      });
+
+      program.parse(['node', 'kimi', 'update']);
+
+      expect(upgradeCalls).toBe(1);
+    });
+
     it('registers the visible sub-commands', () => {
       const program = createProgram(
         '0.0.0',
@@ -345,8 +462,11 @@ describe('CLI options parsing', () => {
         'export',
         'provider',
         'acp',
+        'server',
+        'web',
         'login',
         'doctor',
+        'vis',
         'migrate',
         'upgrade',
       ]);
@@ -364,7 +484,6 @@ describe('CLI options parsing', () => {
         '--print',
         '--wire',
         '--agent=default',
-        '--add-dir=/',
         '--raw-model',
         '--config-file=x',
         '--quiet',

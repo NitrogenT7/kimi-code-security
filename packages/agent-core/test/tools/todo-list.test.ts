@@ -40,7 +40,7 @@ function makeStore(initial: readonly TodoItem[] = []): {
   let todos = [...initial];
   return {
     store: {
-      get: (key) => (key === TODO_STORE_KEY ? todos : undefined),
+      get: (key) => (key === TODO_STORE_KEY ? (todos as never) : undefined),
       set: (key, value) => {
         if (key === TODO_STORE_KEY) {
           todos = [...(value as readonly TodoItem[])];
@@ -60,6 +60,18 @@ function makeTool(initial: readonly TodoItem[] = []): {
 }
 
 describe('TodoListTool', () => {
+  it('exposes the visible todo items in the tool-call display', () => {
+    const { tool } = makeTool([makeQuestion({ question: 'existing', status: 'investigating' })]);
+
+    const execution = tool.resolveExecution({});
+
+    if (execution.isError === true) throw new TypeError('expected runnable execution');
+    expect(execution.display).toEqual({
+      kind: 'todo_list',
+      items: [{ title: 'existing', status: 'investigating' }],
+    });
+  });
+
   it('has name, description, and parameters from the current schema', () => {
     const { tool } = makeTool();
 
@@ -68,9 +80,9 @@ describe('TodoListTool', () => {
     expect(tool.name).toBe(TODO_LIST_TOOL_NAME);
     expect(tool.description.length).toBeGreaterThan(0);
     expect(TodoListInputSchema.safeParse({}).success).toBe(true);
-    expect(TodoListInputSchema.safeParse({ todos: [makeQuestion({ question: 'q?' })] }).success).toBe(
-      true,
-    );
+    expect(
+      TodoListInputSchema.safeParse({ todos: [makeQuestion({ question: 'q?' })] }).success,
+    ).toBe(true);
     expect(tool.parameters).toMatchObject({
       type: 'object',
       properties: {
@@ -86,8 +98,8 @@ describe('TodoListTool', () => {
     // an object"). The advertised schema must match the documented contract.
     const { tool } = makeTool();
 
-    const todos = (tool.parameters as { properties: { todos: Record<string, unknown> } })
-      .properties.todos;
+    const todos = (tool.parameters as { properties: { todos: Record<string, unknown> } }).properties
+      .todos;
     const items = todos['items'] as {
       type: string;
       required: string[];
@@ -423,8 +435,10 @@ describe('TodoListTool', () => {
   it('archives removed resolved items to findings board', async () => {
     const store: Record<string, unknown> = {};
     const toolStore: ToolStore = {
-      get: (key) => store[key],
-      set: (key, value) => { store[key] = value; },
+      get: (key) => store[key] as never,
+      set: (key, value) => {
+        store[key] = value;
+      },
     };
     const tool = new TodoListTool(toolStore);
 
@@ -444,7 +458,10 @@ describe('TodoListTool', () => {
     ];
 
     const r1 = await executeTool(tool, {
-      turnId: 't1', toolCallId: 'call_1', args: { todos: initialTodos }, signal,
+      turnId: 't1',
+      toolCallId: 'call_1',
+      args: { todos: initialTodos },
+      signal,
     });
     expect(r1).toMatchObject({ isError: false });
 
@@ -454,7 +471,10 @@ describe('TodoListTool', () => {
     ];
 
     const r2 = await executeTool(tool, {
-      turnId: 't2', toolCallId: 'call_2', args: { todos: updatedTodos }, signal,
+      turnId: 't2',
+      toolCallId: 'call_2',
+      args: { todos: updatedTodos },
+      signal,
     });
     expect(r2).toMatchObject({ isError: false });
 
@@ -472,14 +492,23 @@ describe('TodoListTool', () => {
   it('does not archive pending/investigating items removed from the list', async () => {
     const store: Record<string, unknown> = {};
     const toolStore: ToolStore = {
-      get: (key) => store[key],
-      set: (key, value) => { store[key] = value; },
+      get: (key) => store[key] as never,
+      set: (key, value) => {
+        store[key] = value;
+      },
     };
     const tool = new TodoListTool(toolStore);
 
     // Write list with an investigating item, then remove it
-    const initial = [makeQuestion({ id: 'active-1', question: 'Active?', status: 'investigating' })];
-    await executeTool(tool, { turnId: 't1', toolCallId: 'call_1', args: { todos: initial }, signal });
+    const initial = [
+      makeQuestion({ id: 'active-1', question: 'Active?', status: 'investigating' }),
+    ];
+    await executeTool(tool, {
+      turnId: 't1',
+      toolCallId: 'call_1',
+      args: { todos: initial },
+      signal,
+    });
 
     // Remove it
     await executeTool(tool, { turnId: 't2', toolCallId: 'call_2', args: { todos: [] }, signal });
@@ -501,7 +530,10 @@ describe('TodoListTool', () => {
     ]);
 
     const result = await executeTool(tool, {
-      turnId: 't1', toolCallId: 'call_1', args: {}, signal,
+      turnId: 't1',
+      toolCallId: 'call_1',
+      args: {},
+      signal,
     });
 
     console.log('OUTPUT:', result.output);
@@ -525,7 +557,7 @@ describe('TodoListTool', () => {
             status: 'investigating',
             confidence: 'medium',
             depth: 'deep',
-            evidence: null,  // ← LLM might send null
+            evidence: null, // ← LLM might send null
             blockers: [],
             subQuestions: [],
           },

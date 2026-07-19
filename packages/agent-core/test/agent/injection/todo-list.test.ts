@@ -124,7 +124,11 @@ describe('TodoListReminderInjector', () => {
 
   it('injects a reminder after enough assistant turns since the last TodoList write', async () => {
     const todos: TodoItem[] = [
-      makeQuestion({ question: 'Read current TodoList implementation', status: 'investigating', evidence: [{ status: 'checking', description: 'Started reading' }] }),
+      makeQuestion({
+        question: 'Read current TodoList implementation',
+        status: 'investigating',
+        evidence: [{ status: 'checking', description: 'Started reading' }],
+      }),
       makeQuestion({ question: 'Add reminder injector tests', status: 'pending' }),
     ];
     const history = [todoListWrite(todos), ...Array.from({ length: 10 }, () => assistantMessage())];
@@ -142,7 +146,13 @@ describe('TodoListReminderInjector', () => {
   });
 
   it('does not inject before the assistant-turn threshold', async () => {
-    const todos: TodoItem[] = [makeQuestion({ question: 'Read code', status: 'investigating', evidence: [{ status: 'checking', description: 'Started' }] })];
+    const todos: TodoItem[] = [
+      makeQuestion({
+        question: 'Read code',
+        status: 'investigating',
+        evidence: [{ status: 'checking', description: 'Started' }],
+      }),
+    ];
     const history = [todoListWrite(todos), ...Array.from({ length: 9 }, () => assistantMessage())];
     const agent = todoAgent({ history, todos, todoListActive: true });
     const injector = new TodoListReminderInjector(agent);
@@ -153,7 +163,13 @@ describe('TodoListReminderInjector', () => {
   });
 
   it('does not inject another reminder before the reminder spacing threshold', async () => {
-    const todos: TodoItem[] = [makeQuestion({ question: 'Read code', status: 'investigating', evidence: [{ status: 'checking', description: 'Started' }] })];
+    const todos: TodoItem[] = [
+      makeQuestion({
+        question: 'Read code',
+        status: 'investigating',
+        evidence: [{ status: 'checking', description: 'Started' }],
+      }),
+    ];
     const history = [
       todoListWrite(todos),
       ...Array.from({ length: 10 }, () => assistantMessage()),
@@ -169,7 +185,13 @@ describe('TodoListReminderInjector', () => {
   });
 
   it('does not treat TodoList query mode as a write', async () => {
-    const todos: TodoItem[] = [makeQuestion({ question: 'Read code', status: 'investigating', evidence: [{ status: 'checking', description: 'Started reading' }] })];
+    const todos: TodoItem[] = [
+      makeQuestion({
+        question: 'Read code',
+        status: 'investigating',
+        evidence: [{ status: 'checking', description: 'Started reading' }],
+      }),
+    ];
     const history = [
       todoListWrite(todos),
       ...Array.from({ length: 5 }, () => assistantMessage()),
@@ -186,7 +208,11 @@ describe('TodoListReminderInjector', () => {
 
   it('injects stalled-reminder when questions lack evidence', async () => {
     const todos: TodoItem[] = [
-      makeQuestion({ question: 'Investigate without evidence', status: 'investigating', evidence: [] }),
+      makeQuestion({
+        question: 'Investigate without evidence',
+        status: 'investigating',
+        evidence: [],
+      }),
     ];
     const history = [todoListWrite(todos), ...Array.from({ length: 10 }, () => assistantMessage())];
     const agent = todoAgent({ history, todos, todoListActive: true });
@@ -195,7 +221,9 @@ describe('TodoListReminderInjector', () => {
     await injector.inject();
 
     const text = lastReminderText(history);
-    expect(text).toContain('Some questions remain in "investigating" status without recorded evidence');
+    expect(text).toContain(
+      'Some questions remain in "investigating" status without recorded evidence',
+    );
     expect(text).not.toContain('The TodoList tool has not been updated recently');
   });
 

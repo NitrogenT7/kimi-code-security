@@ -2,6 +2,7 @@ import type { Kaos } from '@moonshot-ai/kaos';
 import {
   ErrorCodes,
   KimiError,
+  ImageLimits,
   withTelemetryContext,
   type ExperimentalFeatureState,
 } from '@moonshot-ai/agent-core';
@@ -10,6 +11,7 @@ import { Session } from '#/session';
 import type { KimiAuthFacade } from '#/auth';
 import type { SDKRpcClientBase } from '#/rpc';
 import type {
+  AuthenticateMcpServerOptions,
   ConfigDiagnostics,
   CreateSessionOptions,
   ExportSessionInput,
@@ -20,12 +22,17 @@ import type {
   KimiConfigPatch,
   KimiHostIdentity,
   ListSessionsOptions,
+  McpServerConfig,
+  McpTestResult,
   RenameSessionInput,
   ResumeSessionInput,
+  ReloadSessionInput,
   SessionSummary,
+  SkillSummary,
   TelemetryClient,
   TelemetryContextPatch,
   TelemetryProperties,
+  TestMcpServerOptions,
 } from '#/types';
 
 export interface KimiHarnessRuntimeOptions {
@@ -37,6 +44,14 @@ export interface KimiHarnessRuntimeOptions {
   readonly telemetry: TelemetryClient;
   readonly ensureConfigFile: () => Promise<void>;
   readonly onClose: () => void | Promise<void>;
+  readonly sessionStartedProperties?: TelemetryProperties;
+  /**
+   * Owner-scoped [image] limits for prompt-ingestion compression in the
+   * client process (paste-time, ACP prompt conversion). In-process cores
+   * (SDKRpcClient) hand over their core's instance; daemon-client hosts
+   * leave it undefined and ingestion falls back to env/built-in defaults.
+   */
+  readonly imageLimits?: ImageLimits | undefined;
 }
 
 export class KimiHarness {
@@ -50,6 +65,13 @@ export class KimiHarness {
   private readonly activeSessions = new Map<string, Session>();
   private readonly ensureConfigFileImpl: () => Promise<void>;
   private readonly closeImpl: () => void | Promise<void>;
+  private readonly sessionStartedProperties: TelemetryProperties;
+
+  /**
+   * Ingestion-side [image] limits owned by this harness's core; undefined for
+   * daemon-client hosts, where the env var / built-in defaults apply.
+   */
+  readonly imageLimits: ImageLimits | undefined;
 
   constructor(
     private readonly rpc: SDKRpcClientBase,
@@ -63,6 +85,8 @@ export class KimiHarness {
     this.auth = options.auth;
     this.ensureConfigFileImpl = options.ensureConfigFile;
     this.closeImpl = options.onClose;
+    this.sessionStartedProperties = options.sessionStartedProperties ?? {};
+    this.imageLimits = options.imageLimits;
   }
 
   get sessions(): ReadonlyMap<string, Session> {
@@ -86,7 +110,7 @@ export class KimiHarness {
   }
 
   async createSession(options: CreateSessionOptions): Promise<Session> {
-    const { planMode, kaos, persistenceKaos, ...coreOptions } = options;
+    const { planMode, kaos, persistenceKaos, sessionStartedProperties, ...coreOptions } = options;
     const summary =
       kaos === undefined && persistenceKaos === undefined
         ? await this.rpc.createSession(coreOptions)
@@ -104,7 +128,7 @@ export class KimiHarness {
     if (planMode === true) {
       await session.setPlanMode(true);
     }
-    this.trackSessionStarted(summary.id, false);
+    this.trackSessionStarted(summary.id, false, sessionStartedProperties);
     this.trackSessionEvent(session.id, 'session_new');
     return session;
   }
@@ -112,7 +136,7 @@ export class KimiHarness {
   async resumeSession(input: ResumeSessionInput): Promise<Session> {
     const id = normalizeSessionId(input.id);
     const active = this.activeSessions.get(id);
-    const { kaos, persistenceKaos, ...resumeInput } = input;
+    const { kaos, persistenceKaos, sessionStartedProperties, ...resumeInput } = input;
     if (active !== undefined) {
       if (kaos !== undefined || persistenceKaos !== undefined) {
         await this.rpc.resumeSessionWithKaos({ ...resumeInput, id }, kaos ?? persistenceKaos as Kaos, persistenceKaos);
@@ -134,21 +158,26 @@ export class KimiHarness {
       },
     });
     this.activeSessions.set(session.id, session);
-    this.trackSessionStarted(summary.id, true);
+    this.trackSessionStarted(summary.id, true, sessionStartedProperties);
     this.trackSessionEvent(session.id, 'session_resume');
     return session;
   }
 
-  async reloadSession(input: ResumeSessionInput): Promise<Session> {
+  async reloadSession(input: ReloadSessionInput): Promise<Session> {
     const id = normalizeSessionId(input.id);
     const active = this.activeSessions.get(id);
     if (active !== undefined) {
-      await active.reloadSession();
+      await active.reloadSession({
+        forcePluginSessionStartReminder: input.forcePluginSessionStartReminder,
+      });
       this.trackSessionEvent(active.id, 'session_reload');
       return active;
     }
 
-    const summary = await this.rpc.reloadSession({ sessionId: id });
+    const summary = await this.rpc.reloadSession({
+      sessionId: id,
+      forcePluginSessionStartReminder: input.forcePluginSessionStartReminder,
+    });
     const session = new Session({
       id: summary.id,
       workDir: summary.workDir,
@@ -170,6 +199,7 @@ export class KimiHarness {
       forkId: input.forkId,
       title: input.title,
       metadata: input.metadata,
+      turnIndex: input.turnIndex,
     });
     const session = new Session({
       id: summary.id,
@@ -194,6 +224,12 @@ export class KimiHarness {
     await this.activeSessions.get(id)?.close();
   }
 
+  async deleteSession(id: string): Promise<void> {
+    const sessionId = normalizeSessionId(id);
+    await this.activeSessions.get(sessionId)?.close();
+    await this.rpc.deleteSession({ sessionId });
+  }
+
   async renameSession(input: RenameSessionInput): Promise<void> {
     await this.rpc.renameSession(input);
     this.activeSessions.get(input.id)?.emitMetaUpdated({ title: input.title });
@@ -210,6 +246,11 @@ export class KimiHarness {
 
   async listSessions(options: ListSessionsOptions = {}): Promise<readonly SessionSummary[]> {
     return this.rpc.listSessions(options);
+  }
+
+  /** Skills visible to a new session in `workDir`, without creating that session. */
+  async listWorkspaceSkills(workDir: string): Promise<readonly SkillSummary[]> {
+    return this.rpc.listWorkspaceSkills(workDir);
   }
 
   async getConfig(options: GetConfigOptions = {}): Promise<KimiConfig> {
@@ -237,6 +278,55 @@ export class KimiHarness {
     return this.rpc.removeProvider(providerId);
   }
 
+  /** User-global MCP entries from `<KIMI_CODE_HOME>/mcp.json` only. */
+  async listMcpServers(): Promise<readonly McpServerConfig[]> {
+    return this.rpc.listGlobalMcpServers();
+  }
+
+  async addMcpServer(server: McpServerConfig): Promise<readonly McpServerConfig[]> {
+    return this.rpc.addGlobalMcpServer(server);
+  }
+
+  async updateMcpServer(server: McpServerConfig): Promise<readonly McpServerConfig[]> {
+    return this.rpc.updateGlobalMcpServer(server);
+  }
+
+  async removeMcpServer(name: string): Promise<readonly McpServerConfig[]> {
+    return this.rpc.removeGlobalMcpServer(name);
+  }
+
+  async authenticateMcpServer(
+    name: string,
+    options: AuthenticateMcpServerOptions,
+  ): Promise<void> {
+    const started = await this.rpc.beginGlobalMcpServerAuth(name);
+    if (started.status === 'already-authorized') return;
+    try {
+      const opened = await options.onAuthorizationUrl(started.authorizationUrl);
+      if (opened === false) {
+        throw new KimiError(ErrorCodes.REQUEST_INVALID, 'MCP OAuth authorization was cancelled');
+      }
+      await this.rpc.completeGlobalMcpServerAuth(
+        { flowId: started.flowId, timeoutMs: options.timeoutMs },
+        options.signal,
+      );
+    } catch (error) {
+      await this.rpc.cancelGlobalMcpServerAuth(started.flowId).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async resetMcpServerAuth(name: string): Promise<void> {
+    return this.rpc.resetGlobalMcpServerAuth(name);
+  }
+
+  async testMcpServer(
+    name: string,
+    options: TestMcpServerOptions = {},
+  ): Promise<McpTestResult> {
+    return this.rpc.testGlobalMcpServer(name, options);
+  }
+
   async close(): Promise<void> {
     await Promise.all(Array.from(this.activeSessions.values(), (session) => session.close()));
     await this.closeImpl();
@@ -246,8 +336,21 @@ export class KimiHarness {
     withTelemetryContext(this.telemetry, { sessionId: eventSessionId }).track(event);
   }
 
-  private trackSessionStarted(eventSessionId: string, resumed: boolean): void {
+  private trackSessionStarted(
+    eventSessionId: string,
+    resumed: boolean,
+    sessionScoped?: TelemetryProperties,
+  ): void {
     withTelemetryContext(this.telemetry, { sessionId: eventSessionId }).track('session_started', {
+      ...this.sessionStartedProperties,
+      ...sessionScoped,
+      // Canonical fields are owned by the harness and must win over any
+      // caller-supplied sessionStartedProperties that happen to share a key.
+      // `client_id` is always null here: a single-process host has no
+      // per-connection client id (that concept only exists for daemon clients,
+      // see core-impl.ts). Kept as an explicit key so both producers share the
+      // same session_started schema.
+      client_id: null,
       client_name: this.identity?.userAgentProduct ?? null,
       client_version: this.identity?.version ?? null,
       ui_mode: this.uiMode,

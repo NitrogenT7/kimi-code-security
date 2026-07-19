@@ -1,4 +1,4 @@
-import { Container, Text } from '@earendil-works/pi-tui';
+import { Container, Text } from '@moonshot-ai/pi-tui';
 
 import { currentTheme } from '#/tui/theme';
 
@@ -42,9 +42,7 @@ export class ShellRunComponent extends Container {
     super();
     this.textComponent = new Text(this.renderText(), 0, 0);
     this.addChild(this.textComponent);
-    this.timer = setInterval(() => {
-      this.tick();
-    }, TIMER_INTERVAL_MS);
+    this.timer = setInterval(() => this.tick(), TIMER_INTERVAL_MS);
   }
 
   append(text: string): void {

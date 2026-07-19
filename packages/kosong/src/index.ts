@@ -25,7 +25,7 @@ export type {
 
 // Provider interfaces
 export * from './provider';
-export { createProvider } from './providers';
+export { createProvider, getModelCapability } from './providers';
 export type { ProviderConfig, ProviderType } from './providers';
 // Kimi provider: exported so callers can narrow a `ChatProvider` to the Kimi
 // backend (instanceof) and apply Kimi-specific request params (generation
@@ -34,7 +34,7 @@ export { KimiChatProvider } from './providers/kimi';
 export type { ExtraBody, GenerationKwargs, KimiOptions, ThinkingConfig } from './providers/kimi';
 
 // Model capability matrix
-export { UNKNOWN_CAPABILITY, isUnknownCapability } from './capability';
+export { isUnknownCapability, UNKNOWN_CAPABILITY } from './capability';
 export type { ModelCapability } from './capability';
 
 // Model catalog (models.dev-style) metadata
@@ -63,12 +63,17 @@ export {
   APIContextOverflowError,
   APIEmptyResponseError,
   APIProviderRateLimitError,
+  APIRequestTooLargeError,
   APIStatusError,
   APITimeoutError,
   ChatProviderError,
   isContextOverflowStatusError,
+  isImageFormatError,
   isProviderRateLimitError,
+  isRecoverableRequestStructureError,
+  isRequestTooLargeStatusError,
   isRetryableGenerateError,
+  isToolExchangeAdjacencyError,
 } from './errors';
 
 /**

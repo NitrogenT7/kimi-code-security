@@ -9,16 +9,27 @@ import type {
   ToolCall,
 } from '@moonshot-ai/kimi-code-sdk';
 
+import type {
+  UiFindingItem,
+  UiQuestionItem,
+} from '../components/chrome/investigation-board';
 import { ToolCallComponent } from '../components/messages/tool-call';
 import { currentTheme } from '../theme';
-import type { UiFindingItem, UiQuestionItem } from '../components/chrome/investigation-board';
 import type {
   AppState,
   BackgroundAgentMetadata,
   ToolResultBlockData,
   TranscriptEntry,
 } from '../types';
-import { formatErrorMessage, isQuestionItemShape, isTodoItemShape } from '../utils/event-payload';
+import {
+  formatErrorMessage,
+  isQuestionItemShape,
+  isTodoItemShape,
+  migrateTodoItemShape,
+  normalizeFindingItem,
+  normalizeQuestionItem,
+  questionToFinding,
+} from '../utils/event-payload';
 import { formatBackgroundAgentTranscript } from '../utils/background-agent-status';
 import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
 import { buildGoalCompletionMessage } from '../utils/goal-completion';
@@ -37,10 +48,12 @@ import {
   replayBackgroundProjection,
   replayEntry,
   skillActivationFromOrigin,
+  pluginCommandFromOrigin,
   toolCallFromReplayMessage,
   toolResultOutput,
   type ReplayRenderContext,
   type SkillActivationProjection,
+  type PluginCommandProjection,
 } from '../utils/message-replay';
 import type { StreamingUIController } from './streaming-ui';
 import type { SessionEventHandler } from './session-event-handler';
@@ -57,6 +70,7 @@ export interface SessionReplayHost {
   setAppState(patch: Partial<AppState>): void;
   showError(msg: string): void;
   appendTranscriptEntry(entry: TranscriptEntry): void;
+  mergeAllTurnSteps(): void;
 }
 
 function extractBashTag(
@@ -90,6 +104,7 @@ export class SessionReplayRenderer {
       this.hydrateSnapshot(main);
       this.renderRecords(main);
       this.applyTerminalBackgroundAgentStatuses(main);
+      this.host.mergeAllTurnSteps();
       return true;
     } catch (error) {
       const message = formatErrorMessage(error);
@@ -106,62 +121,42 @@ export class SessionReplayRenderer {
 
   private hydrateSnapshot(agent: ResumedAgentState): void {
     this.host.setAppState(appStateFromResumeAgent(agent));
-    this.hydrateTodoPanel(agent);
+    this.hydrateInvestigationBoard(agent);
     this.hydrateBackgroundState(agent);
   }
 
-  private hydrateTodoPanel(agent: ResumedAgentState): void {
-    const rawTodos = agent.toolStore?.['todo'];
-    if (!Array.isArray(rawTodos)) {
-      this.host.streamingUI.setInvestigation([], []);
-      return;
-    }
-
+  private hydrateInvestigationBoard(agent: ResumedAgentState): void {
     const questions: UiQuestionItem[] = [];
-    const findings: UiFindingItem[] = [];
-    for (const item of rawTodos) {
-      // Support both old format ({title, status}) and new QuestionItem format
-      if (isQuestionItemShape(item)) {
-        const q = item as unknown as UiQuestionItem;
+    const findings = new Map<string, UiFindingItem>();
+
+    const rawTodos = agent.toolStore?.['todo'];
+    if (Array.isArray(rawTodos)) {
+      for (const item of rawTodos) {
+        const q = isQuestionItemShape(item)
+          ? normalizeQuestionItem(item)
+          : isTodoItemShape(item)
+            ? migrateTodoItemShape(item)
+            : null;
+        if (q === null) continue;
         if (q.status === 'pending' || q.status === 'investigating') {
           questions.push(q);
-        } else if (q.status === 'resolved' || q.status === 'inconclusive') {
-          findings.push({
-            id: q.id,
-            question: q.question,
-            conclusion: q.conclusion ?? (q.status === 'inconclusive' ? 'Unable to determine' : ''),
-            confidence: q.confidence,
-            depth: q.depth,
-            status: q.status,
-          });
-        }
-      } else if (isTodoItemShape(item)) {
-        // Migrate old format on the fly
-        const q: UiQuestionItem = {
-          id: String(Math.random()).slice(2, 10),
-          question: item.title,
-          status: item.status === 'done' ? 'resolved' : item.status === 'in_progress' ? 'investigating' : 'pending',
-          evidence: [],
-          blockers: [],
-          confidence: 'medium',
-          depth: 'deep',
-        };
-        if (q.status === 'resolved' || q.status === 'inconclusive') {
-          findings.push({
-            id: q.id,
-            question: q.question,
-            conclusion: q.status === 'resolved' ? 'Completed (migrated)' : 'Unable to determine',
-            confidence: q.confidence,
-            depth: q.depth,
-            status: q.status,
-          });
         } else {
-          questions.push(q);
+          findings.set(q.id, questionToFinding(q));
         }
       }
     }
 
-    this.host.streamingUI.setInvestigation(questions, findings);
+    const rawFindings = agent.toolStore?.['findings'];
+    if (Array.isArray(rawFindings)) {
+      for (const item of rawFindings) {
+        const finding = normalizeFindingItem(item);
+        if (finding !== null) findings.set(finding.id, finding);
+      }
+    }
+
+    const resolvedFindings = [...findings.values()];
+    this.host.sessionEventHandler.setInvestigationFindings(resolvedFindings);
+    this.host.streamingUI.setInvestigation(questions, resolvedFindings);
   }
 
   /**
@@ -356,6 +351,14 @@ export class SessionReplayRenderer {
       }
       return;
     }
+    const pluginCommand = pluginCommandFromOrigin(message.origin);
+    if (pluginCommand !== undefined) {
+      this.renderPluginCommand(context, pluginCommand);
+      if (message.origin?.kind === 'plugin_command' && message.origin.trigger === 'user-slash') {
+        this.advanceTurn(context);
+      }
+      return;
+    }
 
     this.advanceTurn(context);
     this.host.appendTranscriptEntry(
@@ -453,6 +456,32 @@ export class SessionReplayRenderer {
     });
   }
 
+  private renderPluginCommand(
+    context: ReplayRenderContext,
+    command: PluginCommandProjection,
+  ): void {
+    const { sessionEventHandler } = this.host;
+    if (context.pluginCommandActivationIds.has(command.activationId)) return;
+    if (sessionEventHandler.renderedPluginCommandActivationIds.has(command.activationId)) return;
+    context.pluginCommandActivationIds.add(command.activationId);
+    sessionEventHandler.renderedPluginCommandActivationIds.add(command.activationId);
+    this.host.appendTranscriptEntry({
+      ...replayEntry(
+        context,
+        'plugin_command',
+        `/${command.pluginId}:${command.commandName}`,
+        'plain',
+      ),
+      pluginCommandData: {
+        activationId: command.activationId,
+        pluginId: command.pluginId,
+        commandName: command.commandName,
+        args: command.commandArgs,
+        trigger: command.trigger,
+      },
+    });
+  }
+
   private renderCompaction(context: ReplayRenderContext, record: CompactionReplayRecord): void {
     this.flushAssistant(context);
     if (record.result === undefined) return;
@@ -470,6 +499,7 @@ export class SessionReplayRenderer {
     this.host.appendTranscriptEntry({
       ...replayEntry(context, 'status', 'Compaction complete', 'plain'),
       compactionData: {
+        summary: record.result.summary,
         tokensBefore: record.result.tokensBefore,
         tokensAfter: record.result.tokensAfter,
         instruction: record.instruction,
@@ -566,7 +596,7 @@ export class SessionReplayRenderer {
     if (mode === 'yolo') {
       this.host.appendTranscriptEntry(
         replayEntry(context, 'status', 'YOLO mode: ON', 'notice', {
-          detail: 'All actions will be approved automatically. Use with caution.',
+          detail: 'Tool actions auto-approved; the agent may still ask you questions.',
         }),
       );
       return;

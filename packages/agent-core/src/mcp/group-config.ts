@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises';
 
+import { z } from 'zod';
+
 import { McpServerConfigSchema } from '#/config/schema';
 import { ErrorCodes, KimiError } from '#/errors';
-import { z } from 'zod';
 
 import { resolveMcpJsonPaths } from './config-loader';
 
@@ -36,9 +37,7 @@ export interface LoadMcpGroupsInput {
  * but servers are present, default security-research groups are auto-generated
  * to match the legacy Python kimi-cli behavior.
  */
-export async function loadMcpGroups(
-  input: LoadMcpGroupsInput,
-): Promise<Record<string, McpGroup>> {
+export async function loadMcpGroups(input: LoadMcpGroupsInput): Promise<Record<string, McpGroup>> {
   const paths = await resolveMcpJsonPaths({ cwd: input.cwd, homeDir: input.homeDir });
 
   const userFile = await readMcpGroupsFile(paths.user);
@@ -73,9 +72,13 @@ async function readMcpGroupsFile(filePath: string): Promise<McpGroupsFile> {
     if (code === 'ENOENT' || code === 'ENOTDIR') {
       return { mcpServers: {}, mcpGroups: {} };
     }
-    throw new KimiError(ErrorCodes.CONFIG_INVALID, `Failed to read ${filePath}: ${describeError(error)}`, {
-      cause: error,
-    });
+    throw new KimiError(
+      ErrorCodes.CONFIG_INVALID,
+      `Failed to read ${filePath}: ${describeError(error)}`,
+      {
+        cause: error,
+      },
+    );
   }
 
   if (text.trim().length === 0) {
@@ -86,17 +89,25 @@ async function readMcpGroupsFile(filePath: string): Promise<McpGroupsFile> {
   try {
     data = JSON.parse(text);
   } catch (error: unknown) {
-    throw new KimiError(ErrorCodes.CONFIG_INVALID, `Invalid JSON in ${filePath}: ${describeError(error)}`, {
-      cause: error,
-    });
+    throw new KimiError(
+      ErrorCodes.CONFIG_INVALID,
+      `Invalid JSON in ${filePath}: ${describeError(error)}`,
+      {
+        cause: error,
+      },
+    );
   }
 
   try {
     return McpGroupsFileSchema.parse(data);
   } catch (error: unknown) {
-    throw new KimiError(ErrorCodes.CONFIG_INVALID, `Invalid MCP group config in ${filePath}: ${describeError(error)}`, {
-      cause: error,
-    });
+    throw new KimiError(
+      ErrorCodes.CONFIG_INVALID,
+      `Invalid MCP group config in ${filePath}: ${describeError(error)}`,
+      {
+        cause: error,
+      },
+    );
   }
 }
 
@@ -112,7 +123,10 @@ function describeError(error: unknown): string {
 export function generateDefaultMcpGroups(serverNames: readonly string[]): Record<string, McpGroup> {
   if (serverNames.length === 0) return {};
   const names = new Set(serverNames);
-  const predefined: Record<string, { description: string; servers: string[]; skillPrefixes: string[] }> = {
+  const predefined: Record<
+    string,
+    { description: string; servers: string[]; skillPrefixes: string[] }
+  > = {
     android: {
       description: '移动安全组：APK反编译 + 二进制逆向 + WebView调试 + ADB设备控制 + Frida动态插桩',
       servers: ['ida', 'jadx', 'jshook', 'adb', 'frida'],

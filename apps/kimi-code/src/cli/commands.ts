@@ -8,6 +8,8 @@ import { registerDoctorCommand } from './sub/doctor';
 import { registerExportCommand } from './sub/export';
 import { registerLoginCommand } from './sub/login';
 import { registerProviderCommand } from './sub/provider';
+import { registerServerCommand } from './sub/server';
+import { registerVisCommand } from './sub/vis';
 
 export type MainCommandHandler = (opts: CLIOptions) => void;
 export type MigrateCommandHandler = () => void;
@@ -42,9 +44,10 @@ export function createProgram(
         .hideHelp()
         .argParser((val: string | boolean) => (val === true ? '' : (val as string))),
     )
-    .option('-C, --continue', 'Continue the previous session for the working directory.', false)
-    .option('-y, --yolo', 'Automatically approve all actions.', false)
-    .option('--auto', 'Start in auto permission mode.', false)
+    .option('-c, --continue', 'Continue the previous session for the working directory.', false)
+    .addOption(new Option('-C').hideHelp().default(false))
+    .option('-y, --yolo', 'Auto-approve regular tool calls; the agent may still ask questions.', false)
+    .option('--auto', 'Start in auto permission mode: fully autonomous, the agent will not ask questions.', false)
     .addOption(
       new Option(
         '-m, --model <model>',
@@ -71,6 +74,14 @@ export function createProgram(
         .argParser((value: string, previous: string[] | undefined) => [...(previous ?? []), value])
         .default([]),
     )
+    .addOption(
+      new Option(
+        '--add-dir <dir>',
+        'Add an additional workspace directory for this session. Can be repeated.',
+      )
+        .argParser((value: string, previous: string[] | undefined) => [...(previous ?? []), value])
+        .default([]),
+    )
     .addOption(new Option('--yes').hideHelp().default(false))
     .addOption(new Option('--auto-approve').hideHelp().default(false))
     .option('--plan', 'Start in plan mode.', false);
@@ -78,11 +89,14 @@ export function createProgram(
   registerExportCommand(program);
   registerProviderCommand(program);
   registerAcpCommand(program);
+  registerServerCommand(program);
   registerLoginCommand(program);
   registerDoctorCommand(program);
+  registerVisCommand(program);
   registerMigrateCommand(program, onMigrate);
   program
     .command('upgrade')
+    .alias('update')
     .description('Upgrade Kimi Code to the latest version.')
     .action(async () => {
       await onUpgrade();
@@ -111,7 +125,7 @@ export function createProgram(
 
     const opts: CLIOptions = {
       session: sessionValue,
-      continue: raw['continue'] as boolean,
+      continue: raw['continue'] === true || raw['C'] === true,
       yolo: yoloValue,
       auto: autoValue,
       plan: raw['plan'] as boolean,
@@ -119,6 +133,7 @@ export function createProgram(
       outputFormat: raw['outputFormat'] as CLIOptions['outputFormat'],
       prompt: raw['prompt'] as string | undefined,
       skillsDirs: raw['skillsDir'] as string[],
+      addDirs: raw['addDir'] as string[],
     };
 
     onMain(opts);

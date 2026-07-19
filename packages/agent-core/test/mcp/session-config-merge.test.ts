@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { mergeCallerMcpServers, type SessionMcpConfig } from '../../src/mcp/session-config';
-import { McpGroupRegistry } from '../../src/mcp/group-registry';
 import type { McpServerConfig } from '../../src/config/schema';
+import { McpGroupRegistry } from '../../src/mcp/group-registry';
+import { mergeCallerMcpServers, type SessionMcpConfig } from '../../src/mcp/session-config';
 
 const stdio = (command: string): McpServerConfig => ({
   transport: 'stdio',
@@ -43,7 +43,7 @@ describe('mergeCallerMcpServers', () => {
     const result = mergeCallerMcpServers(undefined, callerServers);
     expect(result?.servers).toEqual({ docs: http('https://mcp.example.com') });
     expect(result?.groups).toEqual({});
-    expect(result?.groupRegistry.list()).toEqual([]);
+    expect(result?.groupRegistry?.list()).toEqual([]);
   });
 
   it('layers caller on top of base with caller winning on key collision', () => {
@@ -53,10 +53,13 @@ describe('mergeCallerMcpServers', () => {
         diskOnly: stdio('disk-only'),
       },
       groups: {},
-      groupRegistry: new McpGroupRegistry({}, {
-        shared: stdio('disk-version'),
-        diskOnly: stdio('disk-only'),
-      }),
+      groupRegistry: new McpGroupRegistry(
+        {},
+        {
+          shared: stdio('disk-version'),
+          diskOnly: stdio('disk-only'),
+        },
+      ),
     };
     const callerServers = {
       shared: stdio('caller-version'),
@@ -68,7 +71,7 @@ describe('mergeCallerMcpServers', () => {
       diskOnly: stdio('disk-only'),
       callerOnly: http('https://caller.example.com'),
     });
-    expect(result?.groupRegistry.list()).toEqual([]);
+    expect(result?.groupRegistry?.list()).toEqual([]);
   });
 
   it('keeps base groups and exposes caller servers through the updated registry', () => {
@@ -83,8 +86,8 @@ describe('mergeCallerMcpServers', () => {
     const callerServers = { docs: http('https://mcp.example.com') };
     const result = mergeCallerMcpServers(base, callerServers);
     expect(result?.groups).toEqual({ reverse: { servers: ['fs'], skillPrefixes: ['fs-'] } });
-    expect(result?.groupRegistry.get('reverse')?.servers).toEqual(['fs']);
-    expect(result?.groupRegistry.resolveServers('reverse')).toEqual({
+    expect(result?.groupRegistry?.get('reverse')?.servers).toEqual(['fs']);
+    expect(result?.groupRegistry?.resolveServers('reverse')).toEqual({
       fs: stdio('fs'),
     });
     expect(result?.servers).toEqual({

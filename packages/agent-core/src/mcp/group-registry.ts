@@ -18,10 +18,7 @@ export class McpGroupRegistry {
   private readonly groups = new Map<string, McpGroupEntry>();
   private readonly servers: Readonly<Record<string, McpServerConfig>>;
 
-  constructor(
-    groups: Record<string, McpGroup>,
-    servers: Record<string, McpServerConfig>,
-  ) {
+  constructor(groups: Record<string, McpGroup>, servers: Record<string, McpServerConfig>) {
     this.servers = servers;
     for (const [name, group] of Object.entries(groups)) {
       this.groups.set(name, {

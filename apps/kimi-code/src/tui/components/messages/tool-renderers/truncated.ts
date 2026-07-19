@@ -1,7 +1,7 @@
-import type { Component } from '@earendil-works/pi-tui';
-import { Text } from '@earendil-works/pi-tui';
+import { Text, truncateToWidth, type Component } from '@moonshot-ai/pi-tui';
 
 import { currentTheme } from '#/tui/theme';
+import type { ColorPalette } from '#/tui/theme/colors';
 
 import type { ResultRenderer } from './types';
 import { PREVIEW_LINES } from './types';
@@ -45,6 +45,10 @@ export class TruncatedOutputComponent implements Component {
       // When true, collapsed rendering keeps the latest visual rows instead of
       // the first rows. This is useful for live output from a running command.
       tail?: boolean;
+      // Foreground colour for successful (non-error) output. Defaults to
+      // `textDim`; Bash passes `textMuted` so its result sits one shade below
+      // the `textDim` command. Error output always uses `error`.
+      color?: keyof ColorPalette;
     },
   ) {
     this.expanded = options.expanded;
@@ -53,8 +57,9 @@ export class TruncatedOutputComponent implements Component {
     this.expandHint = options.expandHint ?? true;
     this.tail = options.tail ?? false;
     const cleaned = trimTrailingEmptyLines(output.split('\n')).join('\n');
+    const successColor = options.color ?? 'textDim';
     this.textComponent = new Text(
-      options.isError ? currentTheme.fg('error', cleaned) : currentTheme.dim(cleaned),
+      options.isError ? currentTheme.fg('error', cleaned) : currentTheme.fg(successColor, cleaned),
       this.indent,
       0,
     );
@@ -63,6 +68,12 @@ export class TruncatedOutputComponent implements Component {
   invalidate(): void {
     // Text component caches wrapped lines; invalidate on terminal resize.
     this.textComponent.invalidate();
+  }
+
+  private renderHint(width: number, hint: string): string {
+    const indentWidth = Math.min(this.indent, Math.max(0, width));
+    const hintWidth = Math.max(0, width - indentWidth);
+    return ' '.repeat(indentWidth) + currentTheme.dim(truncateToWidth(hint, hintWidth, '…'));
   }
 
   render(width: number): string[] {
@@ -76,7 +87,7 @@ export class TruncatedOutputComponent implements Component {
     if (this.tail) {
       const shown = contentLines.slice(contentLines.length - this.maxLines);
       return [
-        ' '.repeat(this.indent) + currentTheme.dim(`... (${String(remaining)} earlier lines)`),
+        this.renderHint(width, `... (${String(remaining)} earlier lines)`),
         ...shown,
       ];
     }
@@ -85,7 +96,7 @@ export class TruncatedOutputComponent implements Component {
     const hint = this.expandHint
       ? `... (${String(remaining)} more lines, ctrl+o to expand)`
       : `... (${String(remaining)} more lines)`;
-    return [...shown, ' '.repeat(this.indent) + currentTheme.dim(hint)];
+    return [...shown, this.renderHint(width, hint)];
   }
 }
 

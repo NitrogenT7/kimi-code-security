@@ -1,7 +1,6 @@
 ---
 name: write-tui
 description: Use when writing or modifying the kimi-code terminal UI in apps/kimi-code/src/tui — components, dialogs/selectors, slash commands, themes, streaming render, or the KimiTUI controllers. Covers the architecture, where new features go, test placement, the theme system mechanics, and the dialog interaction/visual spec (DESIGN.md).
-mcpGroups: ['*']
 ---
 
 # Write TUI (apps/kimi-code)

@@ -1,4 +1,5 @@
 export * from './connection-manager';
+export * from './global-config';
 export * from './group-config';
 export * from './group-registry';
 export * from './oauth';

@@ -1,24 +1,23 @@
 /**
- * InvestigationBoard — live-updating panel showing active questions and
- * resolved findings, rendered between the activity pane and the input area.
+ * InvestigationBoard — live-updating panel showing active investigation
+ * questions and resolved findings, rendered between the activity pane and
+ * the input area.
  *
- * Replaces the old TodoPanelComponent to support the new QuestionItem format
- * with evidence chains, confidence/depth badges, parent-child tree layout,
- * and a collapsible resolved findings section.
- *
- * Mounted via `InvestigationBoardContainer` in the TUI layout. The
- * streaming UI controller calls {@link setQuestions} and {@link setFindings}
- * whenever the LLM writes the TodoList.
+ * Replaces the old TodoPanelComponent to support the question-driven
+ * TodoList format: evidence chains, confidence/depth badges, blockers, and a
+ * resolved-findings section. Mounted as a dedicated `Container` slot; the
+ * streaming UI controller calls {@link setQuestions} / {@link setFindings}
+ * whenever the LLM writes the TodoList (or replay hydrates the tool store).
+ * State survives across turns so the board stays visible until explicitly
+ * cleared (`todos: []`), a new session starts, or `/clear` is issued.
  */
 
-import type { Component } from '@earendil-works/pi-tui';
-import { truncateToWidth } from '@earendil-works/pi-tui';
+import type { Component } from '@moonshot-ai/pi-tui';
+import { truncateToWidth } from '@moonshot-ai/pi-tui';
 import chalk from 'chalk';
 
 import { currentTheme } from '#/tui/theme';
 import type { ColorPalette } from '#/tui/theme/colors';
-
-// ── Types ─────────────────────────────────────────────────────────────
 
 export type QuestionStatus = 'pending' | 'investigating' | 'resolved' | 'inconclusive';
 export type EvidenceStatus = 'confirmed' | 'refuted' | 'checking';
@@ -49,103 +48,120 @@ export interface UiFindingItem {
   readonly status: 'resolved' | 'inconclusive';
 }
 
-// ── Constants ─────────────────────────────────────────────────────────
-
 const MAX_ACTIVE_QUESTIONS = 5;
 const MAX_EVIDENCE_PER_QUESTION = 3;
 const MAX_RESOLVED = 3;
 
-// ── Component ─────────────────────────────────────────────────────────
-
 export class InvestigationBoardComponent implements Component {
   private questions: readonly UiQuestionItem[] = [];
   private findings: readonly UiFindingItem[] = [];
-  private hasContent = false;
+  private expanded = false;
 
   setQuestions(questions: readonly UiQuestionItem[]): void {
-    this.questions = questions;
-    this.hasContent = questions.length > 0 || this.findings.length > 0;
-    if (questions.length === 0 && this.findings.length === 0) {
-      this.hasContent = false;
-    }
+    this.questions = questions.map((q) => ({ ...q }));
+  }
+
+  getQuestions(): readonly UiQuestionItem[] {
+    return this.questions;
   }
 
   setFindings(findings: readonly UiFindingItem[]): void {
-    this.findings = findings;
-    this.hasContent = this.questions.length > 0 || findings.length > 0;
+    this.findings = findings.map((f) => ({ ...f }));
+  }
+
+  getFindings(): readonly UiFindingItem[] {
+    return this.findings;
   }
 
   clear(): void {
     this.questions = [];
     this.findings = [];
-    this.hasContent = false;
+    this.expanded = false;
   }
 
   isEmpty(): boolean {
-    return !this.hasContent;
+    return this.questions.length === 0 && this.findings.length === 0;
+  }
+
+  /** True when the collapsed caps hide content, i.e. there is something to expand. */
+  hasOverflow(): boolean {
+    return this.questions.length > MAX_ACTIVE_QUESTIONS || this.findings.length > MAX_RESOLVED;
+  }
+
+  setExpanded(expanded: boolean): void {
+    this.expanded = expanded;
+  }
+
+  toggleExpanded(): void {
+    this.expanded = !this.expanded;
   }
 
   invalidate(): void {}
 
   render(width: number): string[] {
-    if (!this.hasContent) return [];
+    if (this.isEmpty()) return [];
 
     const c = currentTheme.palette;
     const lines: string[] = [];
     const innerW = Math.max(20, width - 4);
 
-    // ── Top border + title ──────────────────────────────────────────
     lines.push(chalk.hex(c.border)('─'.repeat(width)));
     lines.push(chalk.hex(c.primary).bold(' Investigation'));
 
-    // ── Active questions ────────────────────────────────────────────
     if (this.questions.length > 0) {
-      const visible = this.questions.slice(0, MAX_ACTIVE_QUESTIONS);
+      const visible = this.expanded
+        ? this.questions
+        : this.questions.slice(0, MAX_ACTIVE_QUESTIONS);
       for (const q of visible) {
         lines.push(...renderQuestion(q, c, innerW));
       }
-      if (this.questions.length > MAX_ACTIVE_QUESTIONS) {
+      if (!this.expanded && this.questions.length > MAX_ACTIVE_QUESTIONS) {
         const hidden = this.questions.length - MAX_ACTIVE_QUESTIONS;
         lines.push(chalk.hex(c.textDim)(`  … +${hidden} more questions`));
       }
     }
 
-    // ── Resolved findings ───────────────────────────────────────────
     if (this.findings.length > 0) {
       const resolvedCount = this.findings.filter((f) => f.status === 'resolved').length;
       const inconclusiveCount = this.findings.length - resolvedCount;
       const parts: string[] = [];
       if (resolvedCount > 0) parts.push(`${resolvedCount} resolved`);
       if (inconclusiveCount > 0) parts.push(`${inconclusiveCount} inconclusive`);
+      const label = parts.join(' / ');
       lines.push(
-        chalk.hex(c.border)(`  ── ${parts.join(' / ')} ──${'─'.repeat(Math.max(0, innerW - 7 - parts.join(' / ').length))}`),
+        chalk.hex(c.border)(
+          `  ── ${label} ──${'─'.repeat(Math.max(0, innerW - 7 - label.length))}`,
+        ),
       );
 
-      const visible = this.findings.slice(0, MAX_RESOLVED);
+      const visible = this.expanded ? this.findings : this.findings.slice(0, MAX_RESOLVED);
       for (const f of visible) {
         lines.push(...renderFinding(f, c, innerW));
       }
-      if (this.findings.length > MAX_RESOLVED) {
+      if (!this.expanded && this.findings.length > MAX_RESOLVED) {
         const hidden = this.findings.length - MAX_RESOLVED;
         lines.push(chalk.hex(c.textDim)(`  … +${hidden} more`));
       }
+    }
+
+    if (this.hasOverflow()) {
+      lines.push(
+        chalk.hex(c.textDim)(
+          this.expanded ? '  ctrl+t to collapse' : '  ctrl+t to expand',
+        ),
+      );
     }
 
     return lines.map((line) => truncateToWidth(line, width));
   }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────
-
 function confidenceBadge(confidence: string, depth: string, colors: ColorPalette): string {
   const confMap: Record<string, string> = { low: '低', medium: '中', high: '高' };
   const depthMap: Record<string, string> = { quick: 'quick', deep: 'deep' };
   const label = `${confMap[confidence] ?? confidence} ${depthMap[depth] ?? depth}`;
-  const color = confidence === 'high'
-    ? colors.primary
-    : confidence === 'low'
-      ? colors.textDim
-      : colors.text;
+  const color =
+    confidence === 'high' ? colors.primary : confidence === 'low' ? colors.textDim : colors.text;
   return chalk.hex(color)(`[${label}]`);
 }
 
@@ -177,30 +193,30 @@ function renderQuestion(q: UiQuestionItem, colors: ColorPalette, width: number):
   const badge = confidenceBadge(q.confidence, q.depth, colors);
   const title = questionTitle(q.status, q.question, colors);
 
-  // First line: marker + question + badge
   const firstLine = `  ${marker} ${truncateToWidth(title, width - 20)} ${badge}`;
   lines.push(firstLine);
 
-  // Evidence lines (tree-style). Defensive `?? []` in case a question slips
-  // through without the field (older sessions / malformed LLM output).
   const evidence = q.evidence ?? [];
   if (evidence.length > 0) {
     const showEvidence = evidence.slice(0, MAX_EVIDENCE_PER_QUESTION);
     for (const ev of showEvidence) {
       const em = evidenceMarker(ev.status, colors);
-      lines.push(`    ${em} ${chalk.hex(colors.textDim)(truncateToWidth(ev.description, width - 10))}`);
+      lines.push(
+        `    ${em} ${chalk.hex(colors.textDim)(truncateToWidth(ev.description, width - 10))}`,
+      );
     }
     if (evidence.length > MAX_EVIDENCE_PER_QUESTION) {
       lines.push(`    ${chalk.hex(colors.textDim)('…')}`);
     }
   }
 
-  // Blockers
   const blockers = q.blockers ?? [];
   if (blockers.length > 0) {
     const blockerText = blockers.slice(0, 2).join('; ');
     const more = blockers.length > 2 ? ` …+${blockers.length - 2}` : '';
-    lines.push(`    ${chalk.hex(colors.warning)(`⚡ ${truncateToWidth(blockerText + more, width - 10)}`)}`);
+    lines.push(
+      `    ${chalk.hex(colors.warning)(`⚡ ${truncateToWidth(blockerText + more, width - 10)}`)}`,
+    );
   }
 
   return lines;
@@ -211,7 +227,6 @@ function renderFinding(f: UiFindingItem, colors: ColorPalette, width: number): s
   const badge = confidenceBadge(f.confidence, f.depth, colors);
   const conclusion = chalk.hex(colors.success).dim(truncateToWidth(f.conclusion, width - 25));
 
-  // Collapse: question → conclusion on one concise line
   const shortQuestion = truncateToWidth(f.question, Math.max(10, width - 35));
   return [`  ${marker} ${chalk.hex(colors.text)(shortQuestion)} → ${conclusion} ${badge}`];
 }

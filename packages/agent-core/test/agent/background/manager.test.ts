@@ -4,7 +4,7 @@
 
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import type { Writable } from 'node:stream';
 import { join } from 'pathe';
 
@@ -12,15 +12,19 @@ import type { KaosProcess } from '@moonshot-ai/kaos';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  AgentBackgroundTask,
   BackgroundTaskPersistence,
+  ProcessBackgroundTask,
   type BackgroundManager,
+  type BackgroundTaskInfo,
 } from '../../../src/agent/background';
 import {
+  agentTask,
   createBackgroundManager,
   registerProcess,
   waitForOutput,
+  waitForTerminal,
 } from './helpers';
+import { isUserCancellation, userCancellationReason } from '../../../src/utils/abort';
 
 function immediateProcess(exitCode: number, stdoutText = ''): KaosProcess {
   return {
@@ -31,6 +35,7 @@ function immediateProcess(exitCode: number, stdoutText = ''): KaosProcess {
     exitCode,
     wait: vi.fn().mockResolvedValue(exitCode) as KaosProcess['wait'],
     kill: vi.fn().mockResolvedValue(undefined) as KaosProcess['kill'],
+    dispose: vi.fn().mockResolvedValue(undefined) as KaosProcess['dispose'],
   };
 }
 
@@ -43,6 +48,58 @@ function rejectedProcess(error: Error): KaosProcess {
     exitCode: null,
     wait: vi.fn().mockRejectedValue(error) as KaosProcess['wait'],
     kill: vi.fn().mockResolvedValue(undefined) as KaosProcess['kill'],
+    dispose: vi.fn().mockResolvedValue(undefined) as KaosProcess['dispose'],
+  };
+}
+
+function processWithStdoutError(message = 'stdout read failed'): KaosProcess {
+  const stdout = new PassThrough();
+  return {
+    stdin: { write: vi.fn(), end: vi.fn() } as unknown as Writable,
+    stdout,
+    stderr: Readable.from([]),
+    pid: 99998,
+    exitCode: 0,
+    wait: vi.fn(async () => {
+      stdout.destroy(new Error(message));
+      return 0;
+    }) as KaosProcess['wait'],
+    kill: vi.fn().mockResolvedValue(undefined) as KaosProcess['kill'],
+    dispose: vi.fn().mockResolvedValue(undefined) as KaosProcess['dispose'],
+  };
+}
+
+function processWithStdoutErrorBeforeWait(message = 'stdout read failed'): {
+  proc: KaosProcess;
+  failStdout: () => void;
+  resolveWait: (exitCode: number) => void;
+} {
+  const stdout = new PassThrough();
+  let currentExitCode: number | null = null;
+  let resolveWait: (n: number) => void = () => {};
+  const waitPromise = new Promise<number>((resolve) => {
+    resolveWait = resolve;
+  });
+  return {
+    proc: {
+      stdin: { write: vi.fn(), end: vi.fn() } as unknown as Writable,
+      stdout,
+      stderr: Readable.from([]),
+      pid: 99997,
+      get exitCode(): number | null {
+        return currentExitCode;
+      },
+      wait: vi.fn(() => waitPromise) as KaosProcess['wait'],
+      kill: vi.fn().mockResolvedValue(undefined) as KaosProcess['kill'],
+      dispose: vi.fn().mockResolvedValue(undefined) as KaosProcess['dispose'],
+    },
+    failStdout: () => {
+      stdout.destroy(new Error(message));
+    },
+    resolveWait: (exitCode) => {
+      currentExitCode = exitCode;
+      resolveWait(exitCode);
+    },
   };
 }
 
@@ -70,6 +127,7 @@ function pendingProcess(exitOnKill = 143): {
     },
     wait: () => waitPromise,
     kill: killSpy as unknown as KaosProcess['kill'],
+    dispose: vi.fn().mockResolvedValue(undefined) as KaosProcess['dispose'],
   };
   return { proc, killSpy };
 }
@@ -95,6 +153,7 @@ function manuallyResolvedProcess(): {
     },
     wait: () => waitPromise,
     kill: killSpy as unknown as KaosProcess['kill'],
+    dispose: vi.fn().mockResolvedValue(undefined) as KaosProcess['dispose'],
   };
   return {
     proc,
@@ -122,6 +181,7 @@ function processWithVisibleExitCodeBeforeWait(exitCode = 143): {
     },
     wait: () => new Promise<number>(() => {}),
     kill: vi.fn().mockResolvedValue(undefined) as KaosProcess['kill'],
+    dispose: vi.fn().mockResolvedValue(undefined) as KaosProcess['dispose'],
   };
   return {
     proc,
@@ -129,15 +189,6 @@ function processWithVisibleExitCodeBeforeWait(exitCode = 143): {
       currentExitCode = exitCode;
     },
   };
-}
-
-function waiterCount(manager: BackgroundManager, taskId: string): number {
-  const tasks = (
-    manager as unknown as {
-      tasks: Map<string, { waiters: Array<() => void> }>;
-    }
-  ).tasks;
-  return tasks.get(taskId)?.waiters.length ?? 0;
 }
 
 describe('BackgroundManager', () => {
@@ -166,7 +217,7 @@ describe('BackgroundManager', () => {
     const { manager } = createBackgroundManager();
 
     const taskId = manager.registerTask(
-      new AgentBackgroundTask(new Promise(() => {}), 'investigate bug', {
+      agentTask(new Promise(() => {}), 'investigate bug', {
         agentId: 'agent-child',
         subagentType: 'coder',
       }),
@@ -181,6 +232,125 @@ describe('BackgroundManager', () => {
       subagentType: 'coder',
       status: 'running',
     });
+  });
+
+  it('tracks foreground tasks and releases their waiter when detached', async () => {
+    const { manager } = createBackgroundManager();
+    const taskId = manager.registerTask(
+      agentTask(new Promise(() => {}), 'foreground agent'),
+      { detached: false },
+    );
+
+    expect(manager.getTask(taskId)).toMatchObject({
+      detached: false,
+    });
+
+    const waiting = manager.waitForForegroundRelease(taskId);
+    await Promise.resolve();
+
+    expect(manager.detach(taskId)).toMatchObject({
+      taskId,
+      detached: true,
+    });
+    await expect(waiting).resolves.toBe('detached');
+  });
+
+  it('releases foreground waiters when a foreground task completes', async () => {
+    const { agent, manager } = createBackgroundManager();
+    const taskId = manager.registerTask(
+      agentTask(Promise.resolve({ result: 'done' }), 'foreground agent'),
+      { detached: false },
+    );
+
+    await expect(manager.waitForForegroundRelease(taskId)).resolves.toBe('terminal');
+    expect(manager.getTask(taskId)).toMatchObject({
+      detached: false,
+      status: 'completed',
+    });
+    expect(agent.turn.steer).not.toHaveBeenCalled();
+  });
+
+  it('stops foreground tasks from their register-time signal', async () => {
+    const { manager } = createBackgroundManager();
+    const { proc, killSpy } = pendingProcess();
+    const controller = new AbortController();
+    const taskId = manager.registerTask(
+      new ProcessBackgroundTask(proc, 'sleep 10', 'foreground process'),
+      {
+        detached: false,
+        signal: controller.signal,
+      },
+    );
+
+    const waiting = manager.waitForForegroundRelease(taskId);
+    controller.abort();
+
+    await expect(waiting).resolves.toBe('terminal');
+    expect(killSpy).toHaveBeenCalledWith('SIGTERM');
+    expect(manager.getTask(taskId)).toMatchObject({
+      status: 'killed',
+      stopReason: 'Interrupted by user',
+    });
+  });
+
+  it('forwards foreground signal abort reasons to agent task controllers', async () => {
+    const { manager } = createBackgroundManager();
+    const foregroundController = new AbortController();
+    const subagentController = new AbortController();
+    const completion = new Promise<{ result: string }>((_resolve, reject) => {
+      subagentController.signal.addEventListener(
+        'abort',
+        () => {
+          reject(subagentController.signal.reason);
+        },
+        { once: true },
+      );
+    });
+    const taskId = manager.registerTask(
+      agentTask(completion, 'foreground agent', { abortController: subagentController }),
+      {
+        detached: false,
+        signal: foregroundController.signal,
+      },
+    );
+
+    foregroundController.abort(userCancellationReason());
+
+    const info = await manager.wait(taskId);
+    expect(info).toMatchObject({
+      status: 'killed',
+      stopReason: 'Interrupted by user',
+    });
+    expect(isUserCancellation(subagentController.signal.reason)).toBe(true);
+  });
+
+  it('does not count foreground tasks against the detached task limit', () => {
+    const { manager } = createBackgroundManager({ maxRunningTasks: 1 });
+    manager.registerTask(agentTask(new Promise(() => {}), 'foreground agent'), {
+      detached: false,
+    });
+
+    manager.registerTask(agentTask(new Promise(() => {}), 'background agent'));
+
+    expect(() => {
+      manager.registerTask(agentTask(new Promise(() => {}), 'second background'));
+    }).toThrow('Too many background tasks are already running.');
+  });
+
+  it('does not count foreground tasks detached later against the background task limit', () => {
+    const { manager } = createBackgroundManager({ maxRunningTasks: 1 });
+    const taskId = manager.registerTask(
+      agentTask(new Promise(() => {}), 'foreground agent'),
+      { detached: false },
+    );
+
+    manager.detach(taskId);
+
+    manager.registerTask(agentTask(new Promise(() => {}), 'background agent'));
+
+    expect(() => {
+      manager.registerTask(agentTask(new Promise(() => {}), 'second background'));
+    }).toThrow('Too many background tasks are already running.');
   });
 
   it('lists active tasks by default', () => {
@@ -200,7 +370,7 @@ describe('BackgroundManager', () => {
       registerProcess(manager, pendingProcess().proc, 'sleep 60', 'second task');
     }).toThrow('Too many background tasks are already running.');
     expect(() => {
-      manager.registerTask(new AgentBackgroundTask(new Promise(() => {}), 'agent task'));
+      manager.registerTask(agentTask(new Promise(() => {}), 'agent task'));
     }).toThrow('Too many background tasks are already running.');
   });
 
@@ -216,6 +386,69 @@ describe('BackgroundManager', () => {
     await waitForOutput(manager, taskId, 'captured output');
 
     expect(await manager.readOutput(taskId)).toContain('captured output');
+  });
+
+  it('fails process tasks when output capture errors after successful exit', async () => {
+    const { manager } = createBackgroundManager();
+    const taskId = registerProcess(
+      manager,
+      processWithStdoutError(),
+      'ssh example.test',
+      'stream error test',
+    );
+
+    await expect(manager.wait(taskId)).resolves.toMatchObject({
+      kind: 'process',
+      status: 'failed',
+      exitCode: 0,
+      stopReason: 'stdout read failed',
+    });
+  });
+
+  it('handles process stream errors before process wait settles', async () => {
+    const { manager } = createBackgroundManager();
+    const { proc, failStdout, resolveWait } = processWithStdoutErrorBeforeWait();
+    const taskId = registerProcess(
+      manager,
+      proc,
+      'ssh example.test',
+      'stream error before wait test',
+    );
+
+    await Promise.resolve();
+    failStdout();
+    await Promise.resolve();
+
+    expect(await manager.wait(taskId, 0)).toMatchObject({
+      kind: 'process',
+      status: 'running',
+      exitCode: null,
+    });
+
+    resolveWait(0);
+
+    await expect(manager.wait(taskId)).resolves.toMatchObject({
+      kind: 'process',
+      status: 'failed',
+      exitCode: 0,
+      stopReason: 'stdout read failed',
+    });
+  });
+
+  it('disposes process resources after a process task completes', async () => {
+    const { manager } = createBackgroundManager();
+    const dispose = vi.fn();
+    const proc = {
+      ...immediateProcess(0, 'hello'),
+      dispose,
+    } as unknown as KaosProcess;
+    const taskId = registerProcess(manager, proc, 'echo hello', 'test echo');
+
+    await waitForTerminal(manager, taskId);
+
+    await vi.waitFor(() => {
+      expect(dispose).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('transitions process status from exit code', async () => {
@@ -288,6 +521,22 @@ describe('BackgroundManager', () => {
     expect(killSpy).toHaveBeenCalledWith('SIGTERM');
   });
 
+  it('disposes process resources after a stopped process task settles', async () => {
+    const { manager } = createBackgroundManager();
+    const { proc, killSpy } = pendingProcess(143);
+    const dispose = vi.fn();
+    const disposableProc = {
+      ...proc,
+      dispose,
+    } as unknown as KaosProcess;
+    const taskId = registerProcess(manager, disposableProc, 'sleep 60', 'kill test');
+
+    await manager.stop(taskId, 'user requested');
+
+    expect(killSpy).toHaveBeenCalledWith('SIGTERM');
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
   it('stop normalizes blank reasons', async () => {
     const { manager } = createBackgroundManager();
     const { proc, resolve } = manuallyResolvedProcess();
@@ -350,9 +599,10 @@ describe('BackgroundManager', () => {
     const completion = new Promise<{ result: string }>((resolve) => {
       resolveCompletion = resolve;
     });
-    const abort = vi.fn();
+    const controller = new AbortController();
+    const abort = vi.spyOn(controller, 'abort');
     const taskId = manager.registerTask(
-      new AgentBackgroundTask(completion, 'agent race test', { abort }),
+      agentTask(completion, 'agent race test', { abortController: controller }),
     );
 
     const stopPromise = manager.stop(taskId, 'user requested');
@@ -371,9 +621,10 @@ describe('BackgroundManager', () => {
     const completion = new Promise<{ result: string }>((_resolve, reject) => {
       rejectCompletion = reject;
     });
-    const abort = vi.fn();
+    const controller = new AbortController();
+    const abort = vi.spyOn(controller, 'abort');
     const taskId = manager.registerTask(
-      new AgentBackgroundTask(completion, 'agent failure race test', { abort }),
+      agentTask(completion, 'agent failure race test', { abortController: controller }),
     );
 
     const stopPromise = manager.stop(taskId, 'user requested');
@@ -395,11 +646,13 @@ describe('BackgroundManager', () => {
     });
     const abortError = new Error('The operation was aborted.');
     abortError.name = 'AbortError';
-    const abort = vi.fn(() => {
+    const controller = new AbortController();
+    const abort = vi.spyOn(controller, 'abort').mockImplementation((reason?: unknown) => {
+      AbortController.prototype.abort.call(controller, reason);
       rejectCompletion(abortError);
     });
     const taskId = manager.registerTask(
-      new AgentBackgroundTask(completion, 'agent abort test', { abort }),
+      agentTask(completion, 'agent abort test', { abortController: controller }),
     );
 
     const result = await manager.stop(taskId, 'user requested');
@@ -414,9 +667,10 @@ describe('BackgroundManager', () => {
   it('stop finalizes a never-settling agent task after the grace window', async () => {
     vi.useFakeTimers();
     const { manager } = createBackgroundManager();
-    const abort = vi.fn();
+    const controller = new AbortController();
+    const abort = vi.spyOn(controller, 'abort');
     const taskId = manager.registerTask(
-      new AgentBackgroundTask(new Promise(() => {}), 'hung agent task', { abort }),
+      agentTask(new Promise(() => {}), 'hung agent task', { abortController: controller }),
     );
 
     const stopPromise = manager.stop(taskId, 'user requested');
@@ -431,7 +685,7 @@ describe('BackgroundManager', () => {
     expect(abort).toHaveBeenCalled();
   });
 
-  it('wait resolves on completion and removes timed-out waiters', async () => {
+  it('wait resolves on completion and returns the current snapshot on timeout', async () => {
     const { manager } = createBackgroundManager();
     const completedId = registerProcess(manager, immediateProcess(0), 'echo fast', 'wait test');
 
@@ -439,7 +693,104 @@ describe('BackgroundManager', () => {
 
     const runningId = registerProcess(manager, pendingProcess().proc, 'sleep 60', 'timeout');
     expect(await manager.wait(runningId, 0)).toMatchObject({ status: 'running' });
-    expect(waiterCount(manager, runningId)).toBe(0);
+  });
+
+  it('clears task deadline timers when completion wins the race', async () => {
+    vi.useFakeTimers();
+    const { manager } = createBackgroundManager();
+    const taskId = manager.registerTask(
+      agentTask(Promise.resolve({ result: 'done' }), 'fast deadline task'),
+      { timeoutMs: 60_000 },
+    );
+
+    await expect(manager.wait(taskId, 60_000)).resolves.toMatchObject({ status: 'completed' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('resets the deadline to detachTimeoutMs when a foreground task is detached', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { manager } = createBackgroundManager();
+      const { proc } = pendingProcess();
+      const taskId = manager.registerTask(new ProcessBackgroundTask(proc, 'sleep 60', 'detach timeout'), {
+        detached: false,
+        timeoutMs: 1_000,
+        detachTimeoutMs: 5_000,
+      });
+
+      // Let the lifecycle arm its foreground timer, then detach at 500ms.
+      await vi.advanceTimersByTimeAsync(500);
+      expect(manager.detach(taskId)?.detached).toBe(true);
+
+      // Past the original 1s deadline; the task is still running because detach
+      // reset the timer to 5s counted from the detach moment.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(manager.getTask(taskId)?.status).toBe('running');
+
+      // Past the 5s detach deadline (500 + 5000 = 5500ms).
+      await vi.advanceTimersByTimeAsync(4_500);
+      expect(manager.getTask(taskId)?.status).toBe('timed_out');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('auto-backgrounds a foreground task instead of killing it when its deadline fires', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { manager } = createBackgroundManager();
+      const { proc, killSpy } = pendingProcess();
+      const taskId = manager.registerTask(
+        new ProcessBackgroundTask(proc, 'sleep 60', 'auto background'),
+        {
+          detached: false,
+          timeoutMs: 1_000,
+          detachTimeoutMs: 5_000,
+          autoBackgroundOnTimeout: true,
+        },
+      );
+      const waiting = manager.waitForForegroundRelease(taskId);
+
+      // The 1s foreground deadline detaches the task instead of killing it.
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(waiting).resolves.toBe('timeout_detached');
+      expect(killSpy).not.toHaveBeenCalled();
+      expect(manager.getTask(taskId)).toMatchObject({ status: 'running', detached: true });
+
+      // The task keeps running past the original deadline; the re-armed 5s
+      // detach deadline still applies (1000 + 5000 = 6000ms).
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(manager.getTask(taskId)?.status).toBe('running');
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(manager.getTask(taskId)?.status).toBe('timed_out');
+      expect(killSpy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('kills a foreground task on timeout when auto-background is not enabled', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { manager } = createBackgroundManager();
+      const { proc, killSpy } = pendingProcess();
+      const taskId = manager.registerTask(
+        new ProcessBackgroundTask(proc, 'sleep 60', 'plain timeout'),
+        {
+          detached: false,
+          timeoutMs: 1_000,
+          detachTimeoutMs: 5_000,
+        },
+      );
+      const waiting = manager.waitForForegroundRelease(taskId);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(waiting).resolves.toBe('terminal');
+      expect(killSpy).toHaveBeenCalled();
+      expect(manager.getTask(taskId)?.status).toBe('timed_out');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('returns undefined or empty output for unknown task ids', async () => {
@@ -496,10 +847,15 @@ describe('BackgroundManager', () => {
           child.on('exit', (code) => {
             resolve(code ?? 0);
           });
-        }),
+      }),
       kill: vi.fn(async (signal?: NodeJS.Signals) => {
         child.kill(signal ?? 'SIGTERM');
       }) as unknown as KaosProcess['kill'],
+      dispose: vi.fn(async () => {
+        child.stdin?.destroy();
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+      }) as KaosProcess['dispose'],
     };
 
     const taskId = registerProcess(manager, proc, 'node -e <stdout bg-ok>', 'real worker');
@@ -508,4 +864,97 @@ describe('BackgroundManager', () => {
     expect(info).toMatchObject({ kind: 'process', status: 'completed', exitCode: 0 });
     expect(await manager.readOutput(taskId)).toContain('bg-ok');
   }, 15_000);
+});
+
+
+describe('waitForActiveTasks', () => {
+  function deferred<T>(): {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+    reject: (reason?: unknown) => void;
+  } {
+    let resolve!: (value: T) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  const isAgent = (info: BackgroundTaskInfo): boolean => info.kind === 'agent';
+
+  it('resolves immediately when no task matches the predicate', async () => {
+    const { manager } = createBackgroundManager();
+    // A process task does not match the agent predicate.
+    registerProcess(manager, immediateProcess(0), 'noop', 'proc');
+    await expect(manager.waitForActiveTasks(isAgent)).resolves.toBeUndefined();
+  });
+
+  it('waits until a matching agent task reaches a terminal state', async () => {
+    const { manager } = createBackgroundManager();
+    const done = deferred<{ result: string }>();
+    manager.registerTask(agentTask(done.promise, 'agent'));
+
+    let settled = false;
+    const wait = manager.waitForActiveTasks(isAgent).then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    done.resolve({ result: 'ok' });
+    await wait;
+    expect(settled).toBe(true);
+  });
+
+  it('re-enumerates tasks registered during the wait (fan-out)', async () => {
+    const { manager } = createBackgroundManager();
+    const first = deferred<{ result: string }>();
+    manager.registerTask(agentTask(first.promise, 'first'));
+
+    let settled = false;
+    const wait = manager.waitForActiveTasks(isAgent).then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Fan out a second agent task after the wait started.
+    const second = deferred<{ result: string }>();
+    manager.registerTask(agentTask(second.promise, 'second'));
+
+    // Completing only the first must not settle the wait.
+    first.resolve({ result: '1' });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    second.resolve({ result: '2' });
+    await wait;
+    expect(settled).toBe(true);
+  });
+
+  it('returns when the timeout elapses even if a matching task is still running', async () => {
+    const { manager } = createBackgroundManager();
+    const done = deferred<{ result: string }>();
+    const taskId = manager.registerTask(agentTask(done.promise, 'stuck'));
+
+    await manager.waitForActiveTasks(isAgent, { timeoutMs: 20 });
+
+    // Task is still running (never resolved), but the wait returned on the deadline.
+    expect(manager.getTask(taskId)?.status).toBe('running');
+    done.resolve({ result: 'late' });
+  });
+
+  it('rejects when the signal is aborted', async () => {
+    const { manager } = createBackgroundManager();
+    const done = deferred<{ result: string }>();
+    manager.registerTask(agentTask(done.promise, 'agent'));
+    const controller = new AbortController();
+
+    const wait = manager.waitForActiveTasks(isAgent, { signal: controller.signal });
+    controller.abort(new Error('stop'));
+
+    await expect(wait).rejects.toThrow('stop');
+    done.resolve({ result: 'late' });
+  });
 });

@@ -1,3 +1,4 @@
+import { visibleWidth } from '@moonshot-ai/pi-tui';
 import { describe, expect, it } from 'vitest';
 
 import { TruncatedOutputComponent } from '#/tui/components/messages/tool-renderers/truncated';
@@ -58,5 +59,32 @@ describe('TruncatedOutputComponent', () => {
     const out = strip(component.render(80).join('\n'));
     expect(out).toContain('d');
     expect(out).not.toContain('more lines, ctrl+o');
+  });
+
+  it('keeps the truncation footer within the requested render width', () => {
+    const output = Array.from({ length: 20 }, (_, i) => `line ${String(i)}`).join('\n');
+    const component = new TruncatedOutputComponent(output, {
+      expanded: false,
+      isError: false,
+      maxLines: 3,
+      indent: 2,
+    });
+
+    for (const line of component.render(37)) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(37);
+    }
+  });
+
+  it('renders output verbatim, including literal <system> text in file content', () => {
+    // Tool metadata no longer travels inside `output` (it rides the result's
+    // `note` side channel), so the renderer must not eat user data that
+    // merely contains the literal tag.
+    const component = new TruncatedOutputComponent(
+      '<system>literal text from a user file</system>\n<image path="/tmp/x.png">',
+      { expanded: true, isError: false },
+    );
+    const out = strip(component.render(80).join('\n'));
+    expect(out).toContain('<system>literal text from a user file</system>');
+    expect(out).toContain('<image path="/tmp/x.png">');
   });
 });

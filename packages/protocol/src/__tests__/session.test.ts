@@ -5,24 +5,10 @@ import {
   permissionRuleSchema,
   sessionCreateSchema,
   sessionSchema,
-  sessionStatusSchema,
   sessionUpdateSchema,
   sessionUsageSchema,
   type Session,
 } from '../session';
-
-describe('sessionStatusSchema', () => {
-  it.each(['idle', 'running', 'awaiting_approval', 'awaiting_question', 'aborted'] as const)(
-    'accepts %s',
-    (status) => {
-      expect(sessionStatusSchema.parse(status)).toBe(status);
-    },
-  );
-
-  it('rejects unknown status', () => {
-    expect(sessionStatusSchema.safeParse('chilling').success).toBe(false);
-  });
-});
 
 describe('sessionUsageSchema + emptySessionUsage', () => {
   it('emptySessionUsage is parseable as zero usage', () => {
@@ -65,7 +51,10 @@ describe('sessionSchema', () => {
     title: 'Test session',
     created_at: '2026-06-04T10:30:00.000Z',
     updated_at: '2026-06-04T10:35:00.000Z',
-    status: 'idle',
+    busy: true,
+    main_turn_active: true,
+    pending_interaction: 'approval',
+    archived: false,
     metadata: { cwd: '/tmp/test' },
     agent_config: { model: 'moonshot-v1-128k' },
     usage: emptySessionUsage(),
@@ -110,6 +99,20 @@ describe('sessionSchema', () => {
     const offsetForm = { ...fullSession, created_at: '2026-06-04T18:30:00+08:00' };
     const parsed = sessionSchema.parse(offsetForm);
     expect(parsed.created_at).toBe('2026-06-04T10:30:00.000Z');
+  });
+
+  it('accepts a session without the optional archived flag', () => {
+    const { archived: _drop, ...withoutArchived } = fullSession;
+    const parsed = sessionSchema.parse(withoutArchived);
+    expect(parsed.archived).toBeUndefined();
+  });
+
+  it('accepts the optional last_prompt field', () => {
+    const withPrompt = { ...fullSession, last_prompt: 'hello world' };
+    expect(sessionSchema.parse(withPrompt).last_prompt).toBe('hello world');
+
+    const parsed = sessionSchema.parse(fullSession);
+    expect(parsed.last_prompt).toBeUndefined();
   });
 });
 
@@ -196,12 +199,12 @@ describe('sessionUpdateSchema', () => {
     });
   });
 
-  it('rejects an unknown thinking level in agent_config', () => {
+  it('accepts any non-empty thinking effort in agent_config', () => {
     expect(
       sessionUpdateSchema.safeParse({
         agent_config: { thinking: 'mega' as unknown },
       }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('rejects an unknown permission_mode in agent_config', () => {

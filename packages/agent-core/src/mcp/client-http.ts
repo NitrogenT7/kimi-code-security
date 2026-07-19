@@ -1,8 +1,6 @@
-import { ErrorCodes, KimiError } from '#/errors';
 import type { McpServerHttpConfig } from '#/config/schema';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import {
@@ -14,6 +12,7 @@ import {
   type UnexpectedCloseListener,
   type UnexpectedCloseReason,
 } from './client-shared';
+import { buildMcpRemoteHeaders } from './client-remote';
 import type { MCPClient, MCPToolDefinition, MCPToolResult } from './types';
 
 export interface HttpMcpClientOptions {
@@ -45,7 +44,7 @@ export interface HttpMcpClientOptions {
  */
 export class HttpMcpClient implements MCPClient {
   private readonly client: Client;
-  private readonly transport: StreamableHTTPClientTransport | SSEClientTransport;
+  private readonly transport: StreamableHTTPClientTransport;
   private readonly toolCallTimeoutMs?: number;
   private started = false;
   private closed = false;
@@ -68,19 +67,11 @@ export class HttpMcpClient implements MCPClient {
     const envLookup = options.envLookup ?? ((name) => process.env[name]);
     const headers = buildMcpHttpHeaders(config, envLookup);
 
-    if (config.transport === 'sse') {
-      this.transport = new SSEClientTransport(new URL(config.url), {
-        requestInit: headers !== undefined ? { headers } : undefined,
-        fetch: options.fetch,
-        authProvider: options.oauthProvider,
-      });
-    } else {
-      this.transport = new StreamableHTTPClientTransport(new URL(config.url), {
-        requestInit: headers !== undefined ? { headers } : undefined,
-        fetch: options.fetch,
-        authProvider: options.oauthProvider,
-      });
-    }
+    this.transport = new StreamableHTTPClientTransport(new URL(config.url), {
+      requestInit: headers !== undefined ? { headers } : undefined,
+      fetch: options.fetch,
+      authProvider: options.oauthProvider,
+    });
     this.client = new Client({
       name: options.clientName ?? KIMI_MCP_CLIENT_NAME,
       version: options.clientVersion ?? KIMI_MCP_CLIENT_VERSION,
@@ -220,21 +211,5 @@ export function buildMcpHttpHeaders(
   config: McpServerHttpConfig,
   envLookup: (name: string) => string | undefined,
 ): Record<string, string> | undefined {
-  const headers: Record<string, string> = { ...config.headers };
-  if (config.bearerTokenEnvVar !== undefined) {
-    const token = envLookup(config.bearerTokenEnvVar);
-    if (token === undefined || token.length === 0) {
-      throw new KimiError(ErrorCodes.CONFIG_INVALID, `MCP HTTP bearer token env var "${config.bearerTokenEnvVar}" is not set or is empty`);
-    }
-    // Strip any case-variant 'authorization' static header before injecting the
-    // bearer; Fetch Headers folds duplicate keys into a comma-joined value,
-    // which produces an invalid auth header rather than letting the bearer win.
-    for (const key of Object.keys(headers)) {
-      if (key.toLowerCase() === 'authorization') {
-        delete headers[key];
-      }
-    }
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  return Object.keys(headers).length > 0 ? headers : undefined;
+  return buildMcpRemoteHeaders(config, envLookup);
 }

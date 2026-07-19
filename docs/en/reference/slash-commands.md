@@ -38,6 +38,8 @@ Some commands are only available in the idle state. Executing these commands whi
 | `/init` | — | Analyze the current codebase and generate `AGENTS.md` | No |
 | `/export-md [<path>]` | `/export` | Export the current session as a Markdown file | No |
 | `/export-debug-zip` | — | Export the current session as a debug ZIP archive (same behavior as [`kimi export`](./kimi-command.md#kimi-export)) | No |
+| `/copy` | — | Copy the last assistant message to the clipboard | No |
+| `/add-dir [<path>]` | — | Add an extra workspace directory to the current session. Run without a path (or with `list`) to list configured directories. When adding, choose whether to remember the directory for the project in `.kimi-code/local.toml` | No |
 
 ## Modes & Run Control
 
@@ -104,7 +106,7 @@ Prompt mode exits with code `0` when the goal completes, `3` when it blocks, and
 | `/mcp` | — | List MCP servers and their connection status in the current session | Yes |
 | `/plugins` | — | Open the interactive plugin manager | Yes |
 | `/version` | — | Display the Kimi Code CLI version number | Yes |
-| `/feedback` | — | Submit feedback to help improve Kimi Code CLI | Yes |
+| `/feedback` | — | Submit feedback with optional diagnostic logs and codebase context | Yes |
 
 ## Exit
 
@@ -121,6 +123,7 @@ Kimi Code CLI ships with a set of built-in Skills that appear directly as `/<nam
 | `/mcp-config` | Configure MCP servers and handle MCP OAuth login. See [MCP](../customization/mcp.md) |
 | `/custom-theme [<text>]` | Create or edit a custom TUI color theme. See [Themes](../customization/themes.md) |
 | `/update-config` | Inspect or edit `config.toml` (model, provider, permission, hooks) and `tui.toml` (theme, editor, notifications, auto-update) |
+| `/check-kimi-code-docs` | Answer Kimi Code product questions (CLI usage, configuration, membership, error codes) against the official docs |
 | `/import-from-cc-codex` | Import Claude Code and Codex instructions, skills, and MCP settings into Kimi Code |
 | `/sub-skill` | Discover and reorganize the local skill inventory into hierarchical sub-skill bundles. Includes `/sub-skill.review` (read-only proposal) and `/sub-skill.consolidate` (apply the reorganization) |
 

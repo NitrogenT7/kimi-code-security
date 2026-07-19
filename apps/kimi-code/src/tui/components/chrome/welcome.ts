@@ -3,9 +3,11 @@
  * Renders a round-bordered box with the logo, session, model, and version.
  */
 
-import type { Component } from '@earendil-works/pi-tui';
-import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import type { Component } from '@moonshot-ai/pi-tui';
+import { truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
 import chalk from 'chalk';
+
+import { effectiveModelAlias } from '@moonshot-ai/kimi-code-sdk';
 
 import { isRainbowDancing, renderDanceWelcomeHeader } from '#/tui/easter-eggs/dance';
 import type { AppState } from '#/tui/types';
@@ -21,8 +23,26 @@ export class WelcomeComponent implements Component {
   invalidate(): void {}
 
   render(width: number): string[] {
+    const safeWidth = Math.max(0, width);
     const primary = (s: string): string => chalk.hex(currentTheme.palette.primary)(s);
-    const innerWidth = Math.max(10, width - 4);
+    const isLoggedOut = !this.state.model;
+    const activeModel = this.state.availableModels[this.state.model];
+    const effectiveActiveModel = activeModel === undefined ? undefined : effectiveModelAlias(activeModel);
+
+    if (safeWidth < 24) {
+      const title = chalk.bold.hex(currentTheme.palette.primary)('Welcome to Kimi Code!');
+      const prompt = isLoggedOut
+        ? chalk.hex(currentTheme.palette.warning)('Run /login or /provider to get started.')
+        : chalk.hex(currentTheme.palette.textDim)('Send /help for help information.');
+      const model = isLoggedOut
+        ? chalk.hex(currentTheme.palette.warning)('not set, run /login or /provider')
+        : (effectiveActiveModel?.displayName ?? effectiveActiveModel?.model ?? this.state.model);
+      return ['', title, prompt, `Model: ${model}`].map((line) =>
+        truncateToWidth(line, safeWidth, '…'),
+      );
+    }
+
+    const innerWidth = Math.max(1, safeWidth - 4);
     const pad = '  ';
 
     // Logo + side-by-side text.
@@ -36,7 +56,6 @@ export class WelcomeComponent implements Component {
       textWidth,
       '…',
     );
-    const isLoggedOut = !this.state.model;
     const dim = chalk.hex(currentTheme.palette.textDim);
     const labelStyle = chalk.bold.hex(currentTheme.palette.textDim);
     const rightRow1 = truncateToWidth(
@@ -53,10 +72,9 @@ export class WelcomeComponent implements Component {
       renderedHeaderLines = renderDanceWelcomeHeader(logo, textWidth, rightRow1);
     }
 
-    const activeModel = this.state.availableModels[this.state.model];
     const modelValue = isLoggedOut
       ? chalk.hex(currentTheme.palette.warning)('not set, run /login or /provider')
-      : (activeModel?.displayName ?? activeModel?.model ?? this.state.model);
+      : (effectiveActiveModel?.displayName ?? effectiveActiveModel?.model ?? this.state.model);
 
     const infoLines = [
       labelStyle('Directory: ') + this.state.workDir,
@@ -73,8 +91,8 @@ export class WelcomeComponent implements Component {
 
     const lines: string[] = [
       '',
-      primary('╭' + '─'.repeat(width - 2) + '╮'),
-      primary('│') + ' '.repeat(width - 2) + primary('│'),
+      primary('╭' + '─'.repeat(safeWidth - 2) + '╮'),
+      primary('│') + ' '.repeat(safeWidth - 2) + primary('│'),
     ];
 
     for (const content of contentLines) {
@@ -84,10 +102,10 @@ export class WelcomeComponent implements Component {
       lines.push(primary('│') + pad + truncated + ' '.repeat(rightPad) + primary('│'));
     }
 
-    lines.push(primary('│') + ' '.repeat(width - 2) + primary('│'));
-    lines.push(primary('╰' + '─'.repeat(width - 2) + '╯'));
+    lines.push(primary('│') + ' '.repeat(safeWidth - 2) + primary('│'));
+    lines.push(primary('╰' + '─'.repeat(safeWidth - 2) + '╯'));
     lines.push('');
 
-    return lines;
+    return lines.map((line) => truncateToWidth(line, safeWidth, '…'));
   }
 }

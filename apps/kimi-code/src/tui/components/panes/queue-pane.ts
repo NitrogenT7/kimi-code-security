@@ -1,4 +1,4 @@
-import { Container, truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import { Container, truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
 
 import { SELECT_POINTER } from '../../constant/symbols';
 import type { QueuedMessage } from '../../types';
@@ -39,7 +39,7 @@ export class QueuePaneComponent extends Container {
     const accent = (text: string) => currentTheme.fg('accent', text);
     const shell = (text: string) => currentTheme.fg('shellMode', text);
     const dim = (text: string) => currentTheme.fg('textDim', text);
-    const lines: string[] = [];
+    const lines: string[] = [currentTheme.fg('border', '─'.repeat(width))];
 
     for (const item of this.messages) {
       const singleLine = item.text.replaceAll(/\s+/g, ' ').trim();

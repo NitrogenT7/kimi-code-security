@@ -6,8 +6,8 @@ import { McpGroupRegistry } from './group-registry';
 
 export interface SessionMcpConfig {
   readonly servers: Record<string, McpServerConfig>;
-  readonly groups: Record<string, McpGroup>;
-  readonly groupRegistry: McpGroupRegistry;
+  readonly groups?: Record<string, McpGroup>;
+  readonly groupRegistry?: McpGroupRegistry;
 }
 
 export interface ResolveSessionMcpConfigInput {

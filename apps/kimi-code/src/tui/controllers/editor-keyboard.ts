@@ -1,4 +1,5 @@
-import type { Session } from '@moonshot-ai/kimi-code-sdk';
+import type { KimiHarness, Session } from '@moonshot-ai/kimi-code-sdk';
+import { compressImageForModel, persistOriginalImage, sessionMediaOriginalsDir } from '@moonshot-ai/kimi-code-sdk';
 
 import { ClipboardMediaError, readClipboardMedia } from '#/utils/clipboard/clipboard-image';
 import { parseImageMeta } from '#/utils/image/image-mime';
@@ -7,13 +8,15 @@ import { editInExternalEditor, resolveEditorCommand } from '#/utils/process/exte
 import {
   CTRL_C_HINT,
   CTRL_D_HINT,
+  DOUBLE_ESC_WINDOW_MS,
   EXIT_CONFIRM_WINDOW_MS,
   LLM_NOT_SET_MESSAGE,
   NO_ACTIVE_SESSION_MESSAGE,
 } from '../constant/kimi-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
-import type { PendingExit, QueuedMessage } from '../types';
+import { extractMediaAttachments } from '../utils/image-placeholder';
+import type { PendingExit, QueuedMessage, SteerInputItem } from '../types';
 import type { TUIState } from '../tui-state';
 import type { BtwPanelController } from './btw-panel';
 
@@ -21,19 +24,32 @@ export interface EditorKeyboardHost {
   state: TUIState;
   session: Session | undefined;
   cancelInFlight: (() => void) | undefined;
+  /**
+   * The host's harness (KimiTUI always has one). Its `imageLimits` drives
+   * paste-time image compression; hosts without one fall back to the
+   * env/built-in default.
+   */
+  harness?: KimiHarness | undefined;
 
   handleUserInput(text: string): void;
   readonly btwPanelController: BtwPanelController;
-  steerMessage(session: Session, input: string[]): void;
+  steerMessage(session: Session, input: readonly SteerInputItem[]): void;
+  validateMediaCapabilities(extraction: {
+    hasMedia: boolean;
+    imageAttachmentIds: readonly number[];
+    videoAttachmentIds: readonly number[];
+  }): boolean;
   recallLastQueued(): QueuedMessage | undefined;
   showError(msg: string): void;
   track(event: string, props?: Record<string, unknown>): void;
   updateEditorBorderHighlight(text?: string): void;
   updateQueueDisplay(): void;
   toggleToolOutputExpansion(): void;
-  detachCurrentForegroundTask(): Promise<void>;
+  toggleInvestigationBoardExpansion(): void;
+  detachCurrentForegroundTask(): void;
   cancelRunningShellCommand(): void;
   hideSessionPicker(): void;
+  openUndoSelector(): void;
   stop(exitCode?: number): Promise<void>;
   handlePlanToggle(next: boolean): void;
   handleInputModeChange(mode: 'prompt' | 'bash'): void;
@@ -43,6 +59,7 @@ export interface EditorKeyboardHost {
 
 export class EditorKeyboardController {
   private pendingExit: PendingExit | null = null;
+  private pendingUndoEsc: { readonly timer: ReturnType<typeof setTimeout> } | null = null;
 
   constructor(
     private readonly host: EditorKeyboardHost,
@@ -62,6 +79,47 @@ export class EditorKeyboardController {
       host.updateEditorBorderHighlight(text);
     };
 
+    // bash mode recalls only shell (`!`-prefixed) history entries; prompt mode
+    // recalls everything. The filter is locked to the mode captured when the
+    // user first enters history browsing (see onHistoryDraftSave), so landing on
+    // a shell entry mid-browse doesn't switch the filter to shell-only.
+    let browseMode: 'prompt' | 'bash' | null = null;
+    editor.setHistoryFilter((entry: string) => {
+      const mode = browseMode ?? editor.inputMode;
+      return mode === 'bash' ? entry.startsWith('!') : true;
+    });
+
+    // Recalling a `!`-prefixed entry strips the marker and returns to bash
+    // mode; recalling a plain entry returns to prompt mode. The filter above
+    // guarantees bash mode only ever lands on `!` entries, so this never
+    // misfires on commands typed in bash mode.
+    editor.onRecall = (entry: string) => {
+      if (entry.startsWith('!')) {
+        editor.setInputMode('bash');
+        return entry.slice(1);
+      }
+      editor.setInputMode('prompt');
+      return undefined;
+    };
+
+    // Save/restore the input mode alongside pi-tui's history draft. Without
+    // this, recalling a shell entry and then pressing Down back to an empty
+    // draft would leave the editor stuck in bash mode, so the next typed
+    // message would be submitted as a shell command. Also locks the history
+    // filter (browseMode) for the duration of the browse session.
+    editor.onHistoryDraftSave = () => {
+      browseMode = editor.inputMode;
+      return editor.inputMode;
+    };
+    editor.onHistoryDraftRestore = (state: unknown) => {
+      editor.setInputMode(state as 'prompt' | 'bash');
+      browseMode = null;
+    };
+
+    editor.onNonEscapeInput = () => {
+      this.clearPendingUndoEsc();
+    };
+
     editor.onCtrlC = () => {
       if (host.cancelInFlight !== undefined) {
         const cancel = host.cancelInFlight;
@@ -71,12 +129,8 @@ export class EditorKeyboardController {
         return;
       }
 
-      if (host.state.appState.isCompacting) {
-        this.clearPendingExit();
-        this.cancelCurrentCompaction();
-        return;
-      }
-
+      // The btw panel stacks above the transcript, so Ctrl+C cancels/closes it
+      // before touching an in-flight compaction or stream.
       if (host.btwPanelController.cancelRunning()) {
         this.clearPendingExit();
         return;
@@ -86,8 +140,20 @@ export class EditorKeyboardController {
         return;
       }
 
+      if (host.state.appState.isCompacting) {
+        this.clearPendingExit();
+
+        if (this.clearEditorTextIfPresent()) return;
+
+        this.cancelCurrentCompaction();
+        return;
+      }
+
       if (host.state.appState.streamingPhase !== 'idle') {
         this.clearPendingExit();
+
+        if (this.clearEditorTextIfPresent()) return;
+
         this.cancelCurrentStream();
         return;
       }
@@ -117,18 +183,32 @@ export class EditorKeyboardController {
       if (this.pendingExit) this.clearPendingExit();
       if (host.state.activeDialog === 'session-picker') {
         host.hideSessionPicker();
+        this.clearPendingUndoEsc();
+        return;
+      }
+      // The btw panel stacks above the transcript, so Esc dismisses it before
+      // touching an in-flight compaction or stream.
+      if (host.btwPanelController.closeOrCancel()) {
+        this.clearPendingUndoEsc();
         return;
       }
       if (host.state.appState.isCompacting) {
         this.cancelCurrentCompaction();
-        return;
-      }
-      if (host.btwPanelController.closeOrCancel()) {
+        this.clearPendingUndoEsc();
         return;
       }
       if (host.state.appState.streamingPhase !== 'idle') {
         this.cancelCurrentStream();
+        this.clearPendingUndoEsc();
+        return;
       }
+      // Idle: a second Esc within the double-tap window opens the undo selector.
+      if (this.pendingUndoEsc !== null) {
+        this.clearPendingUndoEsc();
+        host.openUndoSelector();
+        return;
+      }
+      this.armPendingUndoEsc();
     };
 
     editor.onShiftTab = () => {
@@ -146,16 +226,6 @@ export class EditorKeyboardController {
       host.handleInputModeChange(mode);
     };
 
-    editor.onCtrlB = () => {
-      // Shell command execution is treated as a streaming phase ('shell'), so
-      // this gate already covers it; only idle + not-compacting falls through.
-      if (host.state.appState.streamingPhase === 'idle' || host.state.appState.isCompacting) {
-        return false;
-      }
-      void host.detachCurrentForegroundTask();
-      return true;
-    };
-
     editor.onOpenExternalEditor = () => {
       host.track('shortcut_editor');
       void this.openExternalEditor();
@@ -164,6 +234,16 @@ export class EditorKeyboardController {
     editor.onToggleToolExpand = () => {
       host.track('shortcut_expand');
       host.toggleToolOutputExpansion();
+    };
+
+    editor.onToggleTodoExpand = (): boolean => {
+      if (!host.state.investigationBoard.hasOverflow()) return false;
+      // Disarm a pending double-press exit confirmation so expanding the
+      // todo list in between two Ctrl-C presses does not accidentally exit.
+      this.clearPendingExit();
+      host.track('shortcut_todo_expand');
+      host.toggleInvestigationBoardExpansion();
+      return true;
     };
 
     editor.onCtrlS = () => {
@@ -180,34 +260,72 @@ export class EditorKeyboardController {
       // after the current task instead of being injected into the turn as text.
       const queued = host.state.queuedMessages;
       const steerable = queued.filter((m) => m.mode !== 'bash');
-      host.state.queuedMessages = queued.filter((m) => m.mode === 'bash');
 
-      const parts: string[] = [];
+      const items: SteerInputItem[] = [];
       for (const m of steerable) {
         const trimmed = m.text.trim();
-        if (trimmed.length > 0) parts.push(trimmed);
+        if (trimmed.length > 0) {
+          // Queued items carry the parts extracted when they were submitted
+          // (and were already capability-validated then).
+          items.push({ text: trimmed, parts: m.parts, imageAttachmentIds: m.imageAttachmentIds });
+        }
       }
-      if (!editorIsBash && text.length > 0) parts.push(text);
+      let editorExtraction: ReturnType<typeof extractMediaAttachments> | undefined;
+      if (!editorIsBash && text.length > 0) {
+        try {
+          editorExtraction = extractMediaAttachments(text, this.imageStore);
+        } catch (error) {
+          // Cache copy failed (e.g. the pasted video's source vanished) —
+          // leave the queue and the editor draft untouched.
+          host.showError(`Failed to prepare media attachment: ${formatErrorMessage(error)}`);
+          return;
+        }
+        items.push({
+          text,
+          parts: editorExtraction.hasMedia ? editorExtraction.parts : undefined,
+          imageAttachmentIds:
+            editorExtraction.imageAttachmentIds.length > 0
+              ? editorExtraction.imageAttachmentIds
+              : undefined,
+        });
+      }
 
-      if (parts.length > 0) {
+      if (items.length > 0) {
+        // The editor draft is fresh input: gate it on the model's media
+        // capabilities before splicing the queue, so a rejection leaves the
+        // queue and the draft untouched.
+        if (
+          editorExtraction !== undefined &&
+          !host.validateMediaCapabilities(editorExtraction)
+        ) {
+          return;
+        }
+        host.state.queuedMessages = queued.filter((m) => m.mode === 'bash');
         if (!editorIsBash) editor.setText('');
         const session = host.session;
         if (host.state.appState.model.trim().length === 0 || session === undefined) {
           host.showError(LLM_NOT_SET_MESSAGE);
         } else {
-          host.steerMessage(session, parts);
+          host.steerMessage(session, items);
         }
       }
       host.updateQueueDisplay();
       host.state.ui.requestRender();
     };
 
-    editor.onUndo = () => {
-      host.track('undo');
+    editor.onCtrlB = (): boolean => {
+      // Shell command execution is treated as a streaming phase ('shell'), so
+      // this gate already covers it; only idle + not-compacting falls through.
+      if (host.state.appState.streamingPhase === 'idle' || host.state.appState.isCompacting) {
+        return false;
+      }
+      host.track('shortcut_background_task');
+      host.detachCurrentForegroundTask();
+      return true;
     };
 
-    editor.onInsertNewline = () => {
-      host.track('shortcut_newline');
+    editor.onUndo = () => {
+      host.track('undo');
     };
 
     editor.onTextPaste = () => {
@@ -246,6 +364,27 @@ export class EditorKeyboardController {
     this.pendingExit = null;
   }
 
+  dispose(): void {
+    this.clearPendingExit();
+    this.clearPendingUndoEsc();
+  }
+
+  private armPendingUndoEsc(): void {
+    this.clearPendingUndoEsc();
+    const timer = setTimeout(() => {
+      if (this.pendingUndoEsc?.timer === timer) {
+        this.pendingUndoEsc = null;
+      }
+    }, DOUBLE_ESC_WINDOW_MS);
+    this.pendingUndoEsc = { timer };
+  }
+
+  private clearPendingUndoEsc(): void {
+    if (!this.pendingUndoEsc) return;
+    clearTimeout(this.pendingUndoEsc.timer);
+    this.pendingUndoEsc = null;
+  }
+
   private armPendingExit(kind: 'ctrl-c' | 'ctrl-d', hint: string): void {
     this.clearPendingExit();
     this.host.state.footer.setTransientHint(hint);
@@ -259,6 +398,13 @@ export class EditorKeyboardController {
 
     this.pendingExit = { kind, timer };
     this.host.state.ui.requestRender();
+  }
+
+  private clearEditorTextIfPresent(): boolean {
+    const editor = this.host.state.editor;
+    if (editor.getText().length === 0) return false;
+    editor.setText('');
+    return true;
   }
 
   private cancelCurrentStream(): void {
@@ -300,7 +446,56 @@ export class EditorKeyboardController {
 
     const meta = parseImageMeta(media.bytes);
     if (meta === null) return false;
-    const attachment = this.imageStore.addImage(media.bytes, meta.mime, meta.width, meta.height);
+    // Compress at ingestion — a pure data step while building the attachment, so
+    // the stored bytes, the inline thumbnail, the `[image #N (W×H)]` placeholder,
+    // and the submitted image all agree, and the agent core only ever sees an
+    // already-compressed image. Best effort: originals pass through on failure.
+    // When compression changed the bytes, the original is persisted (into the
+    // session's media-originals dir when known, else the temp-dir fallback)
+    // and recorded on the attachment, so submit-time expansion can announce
+    // the compression and point the model at the full-fidelity copy.
+    // The edge cap comes from the host harness's [image] config (resolved per
+    // paste so a config reload applies immediately); hosts without a harness
+    // use the env/built-in default.
+    const compressed = await compressImageForModel(media.bytes, meta.mime, {
+      maxEdge: this.host.harness?.imageLimits?.maxEdgePx(),
+      telemetry: {
+        client: {
+          track: (event, properties) =>
+            this.host.track(event, properties === undefined ? undefined : { ...properties }),
+        },
+        source: 'tui_paste',
+      },
+    });
+    const sessionDir = this.host.session?.summary?.sessionDir;
+    // Dimensions come from the compression result, not parseImageMeta: the
+    // compressor reports display space (EXIF orientation applied) — the space
+    // the sent image, the caption, and ReadMediaFile region readback share —
+    // while parseImageMeta reads the raw pre-rotation header.
+    const attachment = compressed.changed
+      ? this.imageStore.addImage(
+          compressed.data,
+          compressed.mimeType,
+          compressed.width,
+          compressed.height,
+          {
+            path: await persistOriginalImage(
+              media.bytes,
+              meta.mime,
+              sessionDir === undefined ? {} : { dir: sessionMediaOriginalsDir(sessionDir) },
+            ),
+            width: compressed.originalWidth,
+            height: compressed.originalHeight,
+            byteLength: media.bytes.length,
+            mime: meta.mime,
+          },
+        )
+      : this.imageStore.addImage(
+          media.bytes,
+          meta.mime,
+          compressed.width || meta.width,
+          compressed.height || meta.height,
+        );
     this.host.state.editor.insertTextAtCursor?.(`${attachment.placeholder} `);
     this.host.state.ui.requestRender();
     this.host.track('shortcut_paste', { kind: 'image' });

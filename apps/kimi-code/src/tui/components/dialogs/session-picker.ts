@@ -9,7 +9,7 @@ import {
   truncateToWidth,
   visibleWidth,
   type Focusable,
-} from '@earendil-works/pi-tui';
+} from '@moonshot-ai/pi-tui';
 import { formatSessionLabel } from '#/migration/index';
 import { CURRENT_MARK, SELECT_POINTER } from '#/tui/constant/symbols';
 import { currentTheme } from '#/tui/theme';
@@ -75,17 +75,21 @@ function singleLine(text: string): string {
 }
 
 function sessionSearchText(session: SessionRow): string {
-  return [session.title, session.last_prompt].filter((s) => s !== undefined && s !== null && s.length > 0).join(' ');
+  return singleLine((session.title ?? session.id).trim() || session.id);
 }
 
 export class SessionPickerComponent extends Container implements Focusable {
   private sessions: SessionRow[];
   private currentSessionId: string;
-  private onSelect: (sessionId: string) => void;
+  private onSelect: (session: SessionRow) => void;
   private onCancel: () => void;
+  private onToggleScope?: (selectedSessionId: string) => void;
   private maxVisibleSessions: number;
+  private pageSize: number;
+  private visibleCount: number;
+  private scope: 'cwd' | 'all';
   private loading: boolean;
-  private searchableList: SearchableList<SessionRow>;
+  private list: SearchableList<SessionRow>;
 
   focused = false;
 
@@ -93,32 +97,69 @@ export class SessionPickerComponent extends Container implements Focusable {
     sessions: SessionRow[];
     loading: boolean;
     currentSessionId: string;
-    onSelect: (sessionId: string) => void;
+    scope?: 'cwd' | 'all';
+    initialSelectedSessionId?: string;
+    pageSize?: number;
+    onSelect: (session: SessionRow) => void;
     onCancel: () => void;
     onCtrlC?: () => void;
     onCtrlD?: () => void;
+    onToggleScope?: (selectedSessionId: string) => void;
     maxVisibleSessions?: number;
   }) {
     super();
     this.sessions = opts.sessions;
     this.loading = opts.loading;
     this.currentSessionId = opts.currentSessionId;
+    this.scope = opts.scope ?? 'cwd';
     this.onSelect = opts.onSelect;
     this.onCancel = opts.onCancel;
+    this.onToggleScope = opts.onToggleScope;
     this.maxVisibleSessions = opts.maxVisibleSessions ?? 4;
+    this.pageSize = Math.max(1, opts.pageSize ?? 50);
+    const initialIndex = this.resolveInitialSelectedIndex(opts.initialSelectedSessionId);
+    this.list = new SearchableList({
+      items: this.sessions,
+      toSearchText: sessionSearchText,
+      pageSize: this.pageSize,
+      initialIndex,
+      searchable: true,
+    });
+    const initialLoadedPages = Math.ceil((initialIndex + 1) / this.pageSize);
+    this.visibleCount = Math.min(this.sessions.length, initialLoadedPages * this.pageSize);
     this.onCtrlC = opts.onCtrlC;
     this.onCtrlD = opts.onCtrlD;
-    this.searchableList = new SearchableList({
-      items: opts.sessions,
-      toSearchText: sessionSearchText,
-      searchable: true,
-      pageSize: this.maxVisibleSessions,
-      initialIndex: 0,
-    });
   }
 
   private readonly onCtrlC?: () => void;
   private readonly onCtrlD?: () => void;
+
+  private resolveInitialSelectedIndex(initialSelectedSessionId: string | undefined): number {
+    if (initialSelectedSessionId === undefined) return 0;
+    const index = this.sessions.findIndex((session) => session.id === initialSelectedSessionId);
+    return Math.max(index, 0);
+  }
+
+  private filteredSessions(): readonly SessionRow[] {
+    return this.list.view().items;
+  }
+
+  private loadedSessions(sessions: readonly SessionRow[] = this.filteredSessions()): SessionRow[] {
+    return sessions.slice(0, Math.min(sessions.length, this.visibleCount));
+  }
+
+  private syncVisibleCount(previousQuery: string): void {
+    const view = this.list.view();
+    if (view.query !== previousQuery) {
+      this.visibleCount = Math.min(view.items.length, this.pageSize);
+      return;
+    }
+
+    const loadedCount = Math.min(view.items.length, this.visibleCount);
+    if (view.selectedIndex >= loadedCount - 1 && loadedCount < view.items.length) {
+      this.visibleCount = Math.min(view.items.length, this.visibleCount + this.pageSize);
+    }
+  }
 
   handleInput(data: string): void {
     if (matchesKey(data, Key.ctrl('c'))) {
@@ -129,20 +170,27 @@ export class SessionPickerComponent extends Container implements Focusable {
       this.onCtrlD?.();
       return;
     }
+    if (matchesKey(data, Key.ctrl('a'))) {
+      this.onToggleScope?.(this.list.selected()?.id ?? this.currentSessionId);
+      return;
+    }
     if (matchesKey(data, Key.escape)) {
-      // If a search query is active, clear it first; otherwise cancel the picker.
-      if (this.searchableList.clearQuery()) return;
+      if (this.list.clearQuery()) {
+        this.visibleCount = Math.min(this.filteredSessions().length, this.pageSize);
+        return;
+      }
       this.onCancel();
       return;
     }
-    // Let the shared searchable list handle navigation, paging, and search editing.
-    if (this.searchableList.handleKey(data)) return;
     if (matchesKey(data, Key.enter)) {
-      const selected = this.searchableList.selected();
-      if (selected !== undefined) {
-        this.onSelect(selected.id);
-      }
+      const session = this.list.selected();
+      if (session) this.onSelect(session);
       return;
+    }
+
+    const previousQuery = this.list.view().query;
+    if (this.list.handleKey(data)) {
+      this.syncVisibleCount(previousQuery);
     }
   }
 
@@ -158,9 +206,16 @@ export class SessionPickerComponent extends Container implements Focusable {
   // prevents the "Rendered line exceeds terminal width" crash (issue #240).
   private renderLines(width: number): string[] {
     const lines: string[] = [currentTheme.fg('primary', '─'.repeat(width))];
+    const title = this.scope === 'all' ? 'All sessions' : 'Sessions';
+    const scopeHint =
+      this.onToggleScope === undefined
+        ? undefined
+        : this.scope === 'all'
+          ? 'Ctrl+A current cwd'
+          : 'Ctrl+A all';
 
     if (this.loading) {
-      lines.push(currentTheme.boldFg('primary', truncateToWidth('Sessions', width, ELLIPSIS)));
+      lines.push(currentTheme.boldFg('primary', truncateToWidth(title, width, ELLIPSIS)));
       lines.push(
         currentTheme.fg('textMuted', truncateToWidth('Loading sessions...', width, ELLIPSIS)),
       );
@@ -169,53 +224,61 @@ export class SessionPickerComponent extends Container implements Focusable {
     }
 
     if (this.sessions.length === 0) {
-      lines.push(currentTheme.boldFg('primary', truncateToWidth('Sessions', width, ELLIPSIS)));
+      const hintParts = [scopeHint, 'Esc cancel'].filter(
+        (item): item is string => item !== undefined,
+      );
+      lines.push(currentTheme.boldFg('primary', truncateToWidth(title, width, ELLIPSIS)));
       lines.push(
-        currentTheme.fg(
-          'textMuted',
-          truncateToWidth('No sessions found. Press Escape to close.', width, ELLIPSIS),
-        ),
+        currentTheme.fg('textMuted', truncateToWidth(hintParts.join(' · '), width, ELLIPSIS)),
+      );
+      lines.push('');
+      lines.push(
+        currentTheme.fg('textMuted', truncateToWidth('No sessions found.', width, ELLIPSIS)),
       );
       lines.push(currentTheme.fg('primary', '─'.repeat(width)));
       return lines;
     }
 
-    const view = this.searchableList.view();
-    const filteredSessions = view.items;
+    const view = this.list.view();
+    const titleSuffix =
+      view.query.length === 0 ? currentTheme.fg('textMuted', '  (type to search)') : '';
+    const hintParts = [
+      ...(view.query.length > 0 ? ['Backspace clear'] : []),
+      '↑↓ navigate',
+      scopeHint,
+      'Enter select',
+      'Esc cancel',
+    ].filter((item): item is string => item !== undefined);
 
-    const headerLabel = 'Sessions ';
-    const headerHint = '↑↓ navigate · Enter select · Esc cancel · type to search';
-    const labelWidth = visibleWidth(headerLabel);
-    const hintBudget = Math.max(0, width - labelWidth);
-    const shownHint = truncateToWidth(headerHint, hintBudget, ELLIPSIS);
-    lines.push(
-      currentTheme.boldFg('primary', headerLabel) + currentTheme.fg('textMuted', shownHint),
-    );
-
-    // Show the active search query (if any) and the filtered count.
-    const query = view.query;
-    if (query.length > 0) {
-      const searchLine = `search: ${query}`;
-      lines.push(currentTheme.fg('textDim', truncateToWidth(searchLine, width, ELLIPSIS)));
-    }
+    lines.push(currentTheme.boldFg('primary', title) + titleSuffix);
+    lines.push(currentTheme.fg('textMuted', hintParts.join(' · ')));
     lines.push('');
 
-    if (filteredSessions.length === 0) {
-      lines.push(
-        currentTheme.fg(
-          'textMuted',
-          truncateToWidth('No matching sessions.', width, ELLIPSIS),
-        ),
-      );
+    if (view.query.length > 0) {
+      lines.push(currentTheme.fg('primary', 'Search: ') + currentTheme.fg('text', view.query));
+    }
+
+    const loadedSessions = this.loadedSessions(view.items);
+    if (loadedSessions.length === 0) {
+      lines.push(currentTheme.fg('textMuted', truncateToWidth('No matches', width, ELLIPSIS)));
       lines.push(currentTheme.fg('primary', '─'.repeat(width)));
       return lines;
     }
-
-    const { page, selectedIndex } = view;
-    const visibleSessions = filteredSessions.slice(page.start, page.end);
+    const selectedIndex = view.selectedIndex;
+    const visibleStart = Math.max(
+      0,
+      Math.min(
+        selectedIndex - Math.floor(this.maxVisibleSessions / 2),
+        Math.max(0, loadedSessions.length - this.maxVisibleSessions),
+      ),
+    );
+    const visibleSessions = loadedSessions.slice(
+      visibleStart,
+      visibleStart + this.maxVisibleSessions,
+    );
 
     for (const [vi, session] of visibleSessions.entries()) {
-      const index = page.start + vi;
+      const index = visibleStart + vi;
       const isSelected = index === selectedIndex;
       const isCurrent = session.id === this.currentSessionId;
       const card = this.renderSessionCard(width, session, isSelected, isCurrent);
@@ -223,9 +286,16 @@ export class SessionPickerComponent extends Container implements Focusable {
       if (vi < visibleSessions.length - 1) lines.push('');
     }
 
-    if (filteredSessions.length > visibleSessions.length) {
+    const filteredCount = view.items.length;
+    if (loadedSessions.length > visibleSessions.length || view.query.length > 0) {
       lines.push('');
-      const footer = `Showing ${String(page.start + 1)}-${String(page.end)} of ${String(filteredSessions.length)} sessions`;
+      const totalSuffix =
+        view.query.length > 0
+          ? `${String(loadedSessions.length)} loaded / ${String(filteredCount)} matches`
+          : loadedSessions.length === this.sessions.length
+            ? `${String(loadedSessions.length)} sessions`
+            : `${String(loadedSessions.length)} loaded / ${String(this.sessions.length)} sessions`;
+      const footer = `Showing ${String(visibleStart + 1)}-${String(visibleStart + visibleSessions.length)} of ${totalSuffix}`;
       lines.push(currentTheme.fg('textMuted', truncateToWidth(footer, width, ELLIPSIS)));
     }
 

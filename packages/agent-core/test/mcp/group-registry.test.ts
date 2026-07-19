@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { McpGroupRegistry } from '../../src/mcp/group-registry';
 import type { McpServerConfig } from '../../src/config/schema';
+import { McpGroupRegistry } from '../../src/mcp/group-registry';
 
 const stdio = (command: string): McpServerConfig => ({
   transport: 'stdio',
@@ -28,7 +28,10 @@ describe('McpGroupRegistry', () => {
       },
       servers,
     );
-    const names = registry.list().map((g) => g.name).sort();
+    const names = registry
+      .list()
+      .map((g) => g.name)
+      .toSorted();
     expect(names).toEqual(['android', 'audit']);
   });
 
@@ -39,13 +42,10 @@ describe('McpGroupRegistry', () => {
   });
 
   it('resolves concrete server references', () => {
-    const registry = new McpGroupRegistry(
-      { android: { servers: ['ida', 'jadx'] } },
-      servers,
-    );
+    const registry = new McpGroupRegistry({ android: { servers: ['ida', 'jadx'] } }, servers);
     expect(registry.resolveServers('android')).toEqual({
-      ida: servers.ida,
-      jadx: servers.jadx,
+      ida: servers['ida']!,
+      jadx: servers['jadx']!,
     });
   });
 
@@ -58,11 +58,8 @@ describe('McpGroupRegistry', () => {
   });
 
   it('silently drops unknown server references', () => {
-    const registry = new McpGroupRegistry(
-      { mixed: { servers: ['ida', 'missing'] } },
-      servers,
-    );
-    expect(registry.resolveServers('mixed')).toEqual({ ida: servers.ida });
+    const registry = new McpGroupRegistry({ mixed: { servers: ['ida', 'missing'] } }, servers);
+    expect(registry.resolveServers('mixed')).toEqual({ ida: servers['ida']! });
   });
 
   it('returns skill prefixes for a group', () => {
@@ -74,10 +71,7 @@ describe('McpGroupRegistry', () => {
   });
 
   it('returns empty skill prefixes when none are defined', () => {
-    const registry = new McpGroupRegistry(
-      { android: { servers: ['ida'] } },
-      servers,
-    );
+    const registry = new McpGroupRegistry({ android: { servers: ['ida'] } }, servers);
     expect(registry.skillPrefixes('android')).toEqual([]);
   });
 });

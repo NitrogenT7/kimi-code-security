@@ -1,5 +1,10 @@
-import type { AutocompleteItem } from '@earendil-works/pi-tui';
+import { readdirSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, dirname, join, relative, resolve } from 'pathe';
 
+import type { AutocompleteItem } from '@moonshot-ai/pi-tui';
+
+import { listGoalTemplateNames } from '../../utils/goal-templates';
 import { completeLeadingArg, type ArgCompletionSpec } from './complete-args';
 import type { KimiSlashCommand, SlashCommandAvailability } from './types';
 
@@ -10,8 +15,8 @@ const GOAL_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'resume', description: 'Resume a paused goal' },
   { value: 'cancel', description: 'Cancel and remove the current goal' },
   { value: 'replace', description: 'Replace the current goal with a new objective' },
-  { value: 'set', description: 'Create a goal with the four-element editor' },
   { value: 'next', description: 'Queue an upcoming goal' },
+  { value: 'set', description: 'Start a goal from a template' },
 ];
 
 const GOAL_NEXT_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
@@ -22,6 +27,24 @@ const SWARM_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'on', description: 'Turn swarm mode on' },
   { value: 'off', description: 'Turn swarm mode off' },
 ];
+
+const ADD_DIR_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'list', description: 'Show configured additional workspace directories' },
+];
+
+const MCP_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'web', description: 'Load web penetration MCP group' },
+  { value: 'android', description: 'Load Android reverse-engineering MCP group' },
+  { value: 'audit', description: 'Load code audit MCP group' },
+  { value: 'binary', description: 'Load binary reverse-engineering MCP group' },
+  { value: 'full', description: 'Load all MCP servers' },
+  { value: 'off', description: 'Clear MCP group mode and skill restrictions' },
+];
+
+/** Argument autocompletion for the `/mcp` command (group names). */
+export function mcpArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  return completeLeadingArg(MCP_ARG_COMPLETIONS, argumentPrefix);
+}
 
 /** Argument autocompletion for the `/goal` command (subcommands). */
 export function goalArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
@@ -34,7 +57,23 @@ export function goalArgumentCompletions(argumentPrefix: string): AutocompleteIte
       })) ?? null
     );
   }
+  const setMatch = argumentPrefix.match(/^set\s+(.*)$/i);
+  if (setMatch !== null) {
+    return completeGoalTemplateArg(setMatch[1] ?? '');
+  }
   return completeLeadingArg(GOAL_ARG_COMPLETIONS, argumentPrefix);
+}
+
+/** Template-name autocompletion for `/goal set <name>`. */
+function completeGoalTemplateArg(argumentPrefix: string): AutocompleteItem[] | null {
+  const items = listGoalTemplateNames(process.cwd())
+    .filter((name) => name.toLowerCase().startsWith(argumentPrefix.toLowerCase()))
+    .map((name) => ({
+      value: `set ${name}`,
+      label: name,
+      description: 'Goal template',
+    }));
+  return items.length > 0 ? items : null;
 }
 
 /** Argument autocompletion for the `/swarm` command (subcommands). */
@@ -42,32 +81,102 @@ export function swarmArgumentCompletions(argumentPrefix: string): AutocompleteIt
   return completeLeadingArg(SWARM_ARG_COMPLETIONS, argumentPrefix);
 }
 
-/** Argument autocompletion for the `/mcp` command (group names). */
-export function mcpArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
-  const MCP_GROUP_COMPLETIONS: readonly ArgCompletionSpec[] = [
-    { value: 'web', description: 'Load web penetration MCP group' },
-    { value: 'android', description: 'Load Android reverse-engineering MCP group' },
-    { value: 'audit', description: 'Load code audit MCP group' },
-    { value: 'binary', description: 'Load binary reverse-engineering MCP group' },
-    { value: 'full', description: 'Load all MCP servers' },
-    { value: 'off', description: 'Clear MCP group mode and skill restrictions' },
-  ];
-  return completeLeadingArg(MCP_GROUP_COMPLETIONS, argumentPrefix);
+/** Argument autocompletion for the `/add-dir` command. */
+export function addDirArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  if (isPathLikeAddDirArgument(argumentPrefix)) {
+    return completeAddDirPath(argumentPrefix);
+  }
+  return completeLeadingArg(ADD_DIR_ARG_COMPLETIONS, argumentPrefix);
+}
+
+function isPathLikeAddDirArgument(argumentPrefix: string): boolean {
+  return argumentPrefix === '.' || argumentPrefix === '..' || argumentPrefix.startsWith('./') || argumentPrefix.startsWith('../') || argumentPrefix.startsWith('/') || argumentPrefix.startsWith('~');
+}
+
+function completeAddDirPath(argumentPrefix: string): AutocompleteItem[] | null {
+  const normalizedPrefix = argumentPrefix === '~' ? '~/' : argumentPrefix;
+  const expandedPrefix = expandHomePrefix(normalizedPrefix);
+  const parentInput = getDirectoryCompletionParentInput(normalizedPrefix, expandedPrefix);
+  const partialName = normalizedPrefix.endsWith('/') ? '' : basename(expandedPrefix);
+  const parentDir = resolveDirectoryCompletionParent(parentInput);
+  let entries;
+  try {
+    entries = readdirSync(parentDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  const items: AutocompleteItem[] = [];
+  for (const entry of entries) {
+    if (entry.name === '.' || entry.name === '..' || entry.name.startsWith('.')) continue;
+    if (partialName.length > 0 && !entry.name.toLowerCase().startsWith(partialName.toLowerCase())) continue;
+    const absolutePath = join(parentDir, entry.name);
+    if (!isDirectoryPath(absolutePath, entry.isDirectory(), entry.isSymbolicLink())) continue;
+    const value = formatDirectoryCompletionValue(normalizedPrefix, parentInput, entry.name);
+    items.push({
+      value,
+      label: `${entry.name}/`,
+      description: absolutePath,
+    });
+  }
+
+  return items.length > 0 ? items : null;
+}
+
+function expandHomePrefix(argumentPrefix: string): string {
+  if (argumentPrefix === '~') return homedir();
+  if (argumentPrefix.startsWith('~/')) return join(homedir(), argumentPrefix.slice(2));
+  return argumentPrefix;
+}
+
+function getDirectoryCompletionParentInput(argumentPrefix: string, expandedPrefix: string): string {
+  if (argumentPrefix === '/') return '/';
+  if (argumentPrefix === '~/') return homedir();
+  if (argumentPrefix.endsWith('/')) return expandedPrefix.slice(0, -1);
+  return dirname(expandedPrefix);
+}
+
+function resolveDirectoryCompletionParent(parentInput: string): string {
+  if (parentInput === '~') return homedir();
+  if (parentInput.startsWith('~/')) return join(homedir(), parentInput.slice(2));
+  return resolve(parentInput);
+}
+
+function isDirectoryPath(path: string, isDirectory: boolean, isSymlink: boolean): boolean {
+  if (isDirectory) return true;
+  if (!isSymlink) return false;
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function formatDirectoryCompletionValue(argumentPrefix: string, parentInput: string, entryName: string): string {
+  if (argumentPrefix.startsWith('~/')) {
+    const home = homedir();
+    const homeRelative = relative(home, parentInput);
+    return `~${homeRelative.length > 0 ? `/${homeRelative}` : ''}/${entryName}/`;
+  }
+  if (argumentPrefix.startsWith('/')) {
+    return `${join(parentInput, entryName)}/`;
+  }
+  return `${join(parentInput, entryName)}/`;
 }
 
 export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'yolo',
     aliases: ['yes'],
-    description: 'Toggle auto-approve mode',
-    priority: 100,
+    description: 'Toggle YOLO mode: auto-approve tool actions, but the agent may still ask questions.',
+    priority: 101,
     availability: 'always',
   },
   {
     name: 'auto',
     aliases: [],
-    description: 'Toggle auto permission mode',
-    priority: 100,
+    description: 'Toggle Auto mode: fully autonomous, agent decides everything without asking.',
+    priority: 99,
     availability: 'always',
   },
   {
@@ -96,6 +205,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     aliases: [],
     description: 'Toggle swarm mode or run one task in swarm mode',
     priority: 100,
+    argumentHint: '[on|off] | <task>',
     completeArgs: swarmArgumentCompletions,
     availability: 'idle-only',
   },
@@ -104,6 +214,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     aliases: [],
     description: 'Switch LLM model',
     priority: 100,
+    availability: 'always',
+  },
+  {
+    name: 'effort',
+    aliases: ['thinking'],
+    description: 'Switch thinking effort',
+    priority: 95,
     availability: 'always',
   },
   {
@@ -162,6 +279,15 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'add-dir',
+    aliases: [],
+    description: 'Add or list an additional workspace directory',
+    priority: 60,
+    availability: 'idle-only',
+    argumentHint: '[list] | <path>',
+    completeArgs: addDirArgumentCompletions,
+  },
+  {
     name: 'experiments',
     aliases: ['experimental'],
     description: 'Manage experimental features',
@@ -187,16 +313,14 @@ export const BUILTIN_SLASH_COMMANDS = [
     aliases: [],
     description: 'Compact the conversation context',
     priority: 80,
+    argumentHint: '<instruction>',
   },
   {
     name: 'goal',
     aliases: [],
     description: 'Start or manage an autonomous goal',
     priority: 80,
-    // No argumentHint: the menu description stays as short as every other
-    // command's. The subcommands (status/pause/resume/cancel/replace) surface in
-    // the argument autocomplete list once the user types `/goal ` (see
-    // completeArgs), so they don't need to be spelled out inline.
+    argumentHint: '[status|pause|resume|cancel|replace|next] | <objective>',
     completeArgs: goalArgumentCompletions,
     // status / pause / cancel are always available; creation, replacement, and
     // resume start (or restart) a turn and so are idle-only.
@@ -224,6 +348,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     aliases: ['rename'],
     description: 'Set or show session title',
     priority: 60,
+    argumentHint: '<title>',
     availability: 'always',
   },
   {
@@ -293,6 +418,19 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 40,
   },
   {
+    name: 'copy',
+    aliases: [],
+    description: 'Copy the last assistant message to the clipboard',
+    priority: 40,
+  },
+  {
+    name: 'web',
+    aliases: [],
+    description: 'Open the current session in the Web UI and exit the terminal',
+    priority: 40,
+    availability: 'always',
+  },
+  {
     name: 'exit',
     aliases: ['quit', 'q'],
     description: 'Exit the application',
@@ -302,13 +440,6 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'version',
     aliases: [],
     description: 'Show version information',
-    priority: 20,
-    availability: 'always',
-  },
-  {
-    name: 'changelog',
-    aliases: [],
-    description: 'Show recent changelog entries',
     priority: 20,
     availability: 'always',
   },

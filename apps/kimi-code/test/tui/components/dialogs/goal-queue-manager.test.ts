@@ -1,4 +1,4 @@
-import { visibleWidth } from '@earendil-works/pi-tui';
+import { visibleWidth } from '@moonshot-ai/pi-tui';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -242,6 +242,19 @@ describe('GoalQueueEditDialogComponent', () => {
     expect(out).toContain('  Second line');
     for (const line of dialog.render(36)) {
       expect(visibleWidth(line)).toBeLessThanOrEqual(36);
+    }
+  });
+
+  it('keeps the edit dialog within narrow widths', () => {
+    const dialog = new GoalQueueEditDialogComponent({
+      goal: goal('g1', 'A very long queued objective for width testing'),
+      onDone: vi.fn(),
+    });
+
+    for (const width of [24, 20, 10]) {
+      for (const line of dialog.render(width)) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
     }
   });
 

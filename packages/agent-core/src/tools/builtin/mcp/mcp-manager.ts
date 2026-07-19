@@ -20,11 +20,11 @@
 import { z } from 'zod';
 
 import { McpServerConfigSchema } from '#/config/schema';
-import type { McpServerEntry } from '../../../mcp/connection-manager';
 
-import type { BuiltinTool } from '../../../agent/tool';
 import type { Agent } from '../../../agent';
+import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
+import type { McpServerEntry } from '../../../mcp/connection-manager';
 import { toInputJsonSchema } from '../../support/input-schema';
 
 export const MCPManagerInputSchema = z.object({
@@ -39,10 +39,7 @@ export const MCPManagerInputSchema = z.object({
       'remove_server',
     ])
     .describe('Management action to perform.'),
-  group_name: z
-    .string()
-    .optional()
-    .describe('Required when action is load_group.'),
+  group_name: z.string().optional().describe('Required when action is load_group.'),
   server_name: z
     .string()
     .optional()
@@ -51,7 +48,9 @@ export const MCPManagerInputSchema = z.object({
     .object({})
     .passthrough()
     .optional()
-    .describe('Required when action is add_or_update_server. Must be a valid McpServerConfig object.'),
+    .describe(
+      'Required when action is add_or_update_server. Must be a valid McpServerConfig object.',
+    ),
 });
 
 export type MCPManagerInput = z.infer<typeof MCPManagerInputSchema>;
@@ -117,7 +116,8 @@ export class MCPManagerTool implements BuiltinTool<MCPManagerInput> {
         }
         const lines = groups.map((group) => {
           const serverNames = group.servers.join(', ');
-          const prefixes = group.skillPrefixes.length > 0 ? ` [${group.skillPrefixes.join(', ')}]` : '';
+          const prefixes =
+            group.skillPrefixes.length > 0 ? ` [${group.skillPrefixes.join(', ')}]` : '';
           return `- ${group.name}: ${group.description ?? 'no description'}\n  servers: ${serverNames}${prefixes}`;
         });
         return { output: `Available MCP groups:\n${lines.join('\n')}` };
@@ -141,7 +141,8 @@ export class MCPManagerTool implements BuiltinTool<MCPManagerInput> {
           const group = registry.get(groupName);
           if (group !== undefined) {
             this.agent.mcpGroupMode = groupName;
-            this.agent.allowedSkillPrefixes = group.skillPrefixes.length > 0 ? [...group.skillPrefixes] : null;
+            this.agent.allowedSkillPrefixes =
+              group.skillPrefixes.length > 0 ? [...group.skillPrefixes] : null;
           }
           return { output: `MCP group "${groupName}" loaded successfully.` };
         } catch (error: unknown) {
@@ -220,7 +221,10 @@ export class MCPManagerTool implements BuiltinTool<MCPManagerInput> {
           return { output: `MCP server "${serverName}" added/updated and connected successfully.` };
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);
-          return { output: `Failed to connect MCP server "${serverName}": ${message}`, isError: true };
+          return {
+            output: `Failed to connect MCP server "${serverName}": ${message}`,
+            isError: true,
+          };
         }
       }
 

@@ -1,9 +1,9 @@
 /**
- * Declared capabilities for a specific model exposed by a {@link ChatProvider}.
+ * Declared capabilities for a specific model.
  *
- * Providers return one of these from {@link ChatProvider.getCapability} so
- * callers can gate requests against modalities the model does not accept
- * without dispatching the request and watching it fail upstream.
+ * `getModelCapability(wire, model)` returns one of these so callers can gate
+ * requests against modalities the model does not accept without dispatching
+ * the request and watching it fail upstream.
  *
  * `max_context_tokens: 0` means "unknown"; callers that do not gate on
  * context length can ignore the field.
@@ -15,6 +15,14 @@ export interface ModelCapability {
   readonly thinking: boolean;
   readonly tool_use: boolean;
   readonly max_context_tokens: number;
+  /**
+   * Model accepts message-level tool declarations (`messages[].tools`) — the
+   * "dynamically loaded tools" wire feature that clients can drive with
+   * progressive tool disclosure. Absent means unsupported: only models
+   * explicitly catalogued or declared with this capability may ever receive a
+   * message carrying `tools`.
+   */
+  readonly dynamically_loaded_tools?: boolean;
 }
 
 const UNKNOWN_CAPABILITY_MARKER = Symbol.for('moonshot-ai.kosong.UNKNOWN_CAPABILITY');
@@ -33,6 +41,7 @@ export const UNKNOWN_CAPABILITY: ModelCapability = Object.freeze(
       thinking: false,
       tool_use: false,
       max_context_tokens: 0,
+      dynamically_loaded_tools: false,
     },
     UNKNOWN_CAPABILITY_MARKER,
     { value: true },
@@ -50,6 +59,7 @@ export function isUnknownCapability(capability: ModelCapability): boolean {
     !capability.audio_in &&
     !capability.thinking &&
     !capability.tool_use &&
+    capability.dynamically_loaded_tools !== true &&
     capability.max_context_tokens === 0
   );
 }

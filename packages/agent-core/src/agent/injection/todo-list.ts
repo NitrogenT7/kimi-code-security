@@ -11,7 +11,6 @@ import { DynamicInjector } from './injector';
 const TODO_LIST_REMINDER_VARIANT = 'todo_list_reminder';
 const TODO_LIST_REMINDER_TURNS_SINCE_WRITE = 10;
 const TODO_LIST_REMINDER_TURNS_BETWEEN_REMINDERS = 10;
-const INVESTIGATING_STALL_TURNS = 8;
 
 interface TodoListReminderTurnCounts {
   readonly turnsSinceLastWrite: number;
@@ -30,7 +29,11 @@ function isQuestionStatus(value: unknown): value is QuestionStatus {
 function isTodoItem(value: unknown): value is TodoItem {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
-  return record['type'] === 'question' && typeof record['question'] === 'string' && isQuestionStatus(record['status']);
+  return (
+    record['type'] === 'question' &&
+    typeof record['question'] === 'string' &&
+    isQuestionStatus(record['status'])
+  );
 }
 
 /** Check if a value is an old-style { title, status } record. */
@@ -67,12 +70,14 @@ export class TodoListReminderInjector extends DynamicInjector {
     const raw = this.agent.tools.storeData()[TODO_STORE_KEY];
     if (!Array.isArray(raw)) return [];
     // Migrate old-format items on the fly
-    return raw.map((item) => {
-      if (isOldFormatRecord(item)) {
-        return migrateOldRecord(item);
-      }
-      return item;
-    }).filter(isTodoItem);
+    return raw
+      .map((item) => {
+        if (isOldFormatRecord(item)) {
+          return migrateOldRecord(item);
+        }
+        return item;
+      })
+      .filter(isTodoItem);
   }
 }
 
@@ -85,8 +90,8 @@ function migrateOldRecord(old: Record<string, unknown>): TodoItem {
   const oldStatus = typeof old['status'] === 'string' ? old['status'] : 'pending';
   return {
     type: 'question',
-    id: old['id'] as string ?? crypto.randomUUID(),
-    question: old['title'] as string ?? '(migrated question)',
+    id: (old['id'] as string) ?? crypto.randomUUID(),
+    question: (old['title'] as string) ?? '(migrated question)',
     status: statusMap[oldStatus] ?? 'pending',
     evidence: [],
     blockers: [],
@@ -193,28 +198,26 @@ function renderTodoListReminder(todos: readonly TodoItem[]): string {
   if (!hasStalled && !hasUnresolvedParent) {
     lines.push(
       'The TodoList tool has not been updated recently. If you are working on questions that benefit from tracking, ' +
-      'consider using TodoList to update question status. Also consider clearing or rewriting the list if it has become ' +
-      'stale. This is a gentle reminder; ignore it if not applicable. Make sure that you NEVER mention this reminder to the user.',
+        'consider using TodoList to update question status. Also consider clearing or rewriting the list if it has become ' +
+        'stale. This is a gentle reminder; ignore it if not applicable. Make sure that you NEVER mention this reminder to the user.',
     );
   } else {
     if (hasStalled) {
       lines.push(
         'Some questions remain in "investigating" status without recorded evidence. ' +
-        'Review each: if you have collected evidence, update the evidence list. ' +
-        'If you are stuck, consider breaking the question into sub-questions, or mark it as "inconclusive". ' +
-        'If you can answer it, set a conclusion and mark it "resolved".',
+          'Review each: if you have collected evidence, update the evidence list. ' +
+          'If you are stuck, consider breaking the question into sub-questions, or mark it as "inconclusive". ' +
+          'If you can answer it, set a conclusion and mark it "resolved".',
       );
     }
     if (hasUnresolvedParent) {
       lines.push(
         'All sub-questions of a parent question have been resolved, but the parent question is still "investigating". ' +
-        'Review the sub-question conclusions and update the parent question accordingly ' +
-        '(add evidence, set conclusion, and mark resolved if appropriate).',
+          'Review the sub-question conclusions and update the parent question accordingly ' +
+          '(add evidence, set conclusion, and mark resolved if appropriate).',
       );
     }
-    lines.push(
-      'Make sure that you NEVER mention this reminder to the user.',
-    );
+    lines.push('Make sure that you NEVER mention this reminder to the user.');
   }
 
   const items = renderTodoItems(todos);
@@ -247,9 +250,10 @@ function renderTodoItems(todos: readonly TodoItem[]): string {
     let childIndex = 1;
     for (const child of children) {
       const prefix = `  ${index}.${childIndex}`;
-      const evidenceHint = Array.isArray(child.evidence) && child.evidence.length > 0
-        ? ` (${child.evidence.length} evidence items)`
-        : '';
+      const evidenceHint =
+        Array.isArray(child.evidence) && child.evidence.length > 0
+          ? ` (${child.evidence.length} evidence items)`
+          : '';
       lines.push(`  ${prefix}. [${child.status}] ${child.question}${evidenceHint}`);
       childIndex += 1;
     }
@@ -259,11 +263,13 @@ function renderTodoItems(todos: readonly TodoItem[]): string {
 }
 
 function formatIndexedItem(index: number, item: TodoItem): string {
-  const evidenceHint = Array.isArray(item.evidence) && item.evidence.length > 0
-    ? ` (${item.evidence.length} evidence items)`
-    : '';
-  const subHint = Array.isArray(item.subQuestions) && item.subQuestions.length > 0
-    ? ` (${item.subQuestions.length} sub-questions)`
-    : '';
+  const evidenceHint =
+    Array.isArray(item.evidence) && item.evidence.length > 0
+      ? ` (${item.evidence.length} evidence items)`
+      : '';
+  const subHint =
+    Array.isArray(item.subQuestions) && item.subQuestions.length > 0
+      ? ` (${item.subQuestions.length} sub-questions)`
+      : '';
   return `${index}. [${item.status}] ${item.question}${subHint}${evidenceHint}`;
 }

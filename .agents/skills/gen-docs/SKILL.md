@@ -1,7 +1,6 @@
 ---
 name: gen-docs
 description: Update Kimi Code CLI user documentation after meaningful code changes that affect product behavior or user experience.
-mcpGroups: ['*']
 ---
 
 # Gen Docs

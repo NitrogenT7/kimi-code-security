@@ -1,5 +1,5 @@
-import type { GoalTemplate, GoalTemplateSummary } from './types';
 import { discoverGoalTemplates, type DiscoverGoalTemplatesOptions } from './scanner';
+import type { GoalTemplate, GoalTemplateSummary } from './types';
 
 export interface GoalTemplateRegistryOptions {
   readonly discover?: typeof discoverGoalTemplates;
@@ -16,7 +16,10 @@ export class GoalTemplateRegistry {
     this.onWarning = options.onWarning ?? (() => {});
   }
 
-  async loadRoots(paths: DiscoverGoalTemplatesOptions['paths'], extraDirs?: readonly string[]): Promise<void> {
+  async loadRoots(
+    paths: DiscoverGoalTemplatesOptions['paths'],
+    extraDirs?: readonly string[],
+  ): Promise<void> {
     const templates = await this.discoverImpl({
       paths,
       extraDirs,

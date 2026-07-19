@@ -1,16 +1,21 @@
 # Security Policy
 
-> This is an unofficial security-research fork of [MoonshotAI/kimi-code](https://github.com/MoonshotAI/kimi-code).
-> For vulnerabilities in the **upstream** project, please report them to Moonshot AI via
-> <https://github.com/MoonshotAI/kimi-code/security/advisories/new>.
+## Supported Versions
 
-## Reporting a Vulnerability in This Fork
+Currently, Kimi Code only provides security support for the latest released version.
 
-Please do not open a public issue for security vulnerabilities in this fork.
+## Reporting a Vulnerability
+
+We take security seriously. **Please do not open a public issue for security vulnerabilities.**
 
 Preferred channel:
 
-- Email: <NitrogenT7@163.com> (please include "[security]" in the subject)
+- GitHub Security Advisories — https://github.com/MoonshotAI/kimi-code/security/advisories/new
+  (private disclosure, tracked with the codebase)
+
+Alternative channel:
+
+- Email: code@moonshot.ai (please include "[security]" in the subject)
 
 ## What to Include
 
@@ -19,8 +24,10 @@ Preferred channel:
 - Impact assessment
 - Any suggested mitigation
 
-## Responsible Use
+## Our Response
 
-Some forks of this project ship offensive security skills. They are provided strictly
-for authorized testing and educational purposes only — do not use them against systems
-you do not own or have explicit permission to test.
+We will acknowledge your report and provide an initial assessment as soon as we can.
+
+## Public Disclosure
+
+We will coordinate with you on disclosure timing once a fix is ready.

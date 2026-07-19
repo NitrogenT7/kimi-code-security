@@ -45,6 +45,37 @@ vi.mock('#/tui/goal-queue-store', () => ({
   })),
 }));
 
+const SAMPLE_TEMPLATE = {
+  name: 'refactor',
+  description: 'Refactor without behavior changes',
+  path: '/workspace/.goal/refactor.md',
+  source: 'project' as const,
+  purpose: 'Improve maintainability',
+  keyTasks: '- Read the code\n- Refactor in small steps',
+  endState: 'Tests pass',
+  constraints: 'No new features',
+  body: 'Extra guidance.',
+};
+
+vi.mock('#/utils/goal-templates', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('#/utils/goal-templates')>();
+  return {
+    ...actual,
+    listGoalTemplates: vi.fn(async () => [
+      {
+        name: SAMPLE_TEMPLATE.name,
+        description: SAMPLE_TEMPLATE.description,
+        path: SAMPLE_TEMPLATE.path,
+        source: SAMPLE_TEMPLATE.source,
+      },
+    ]),
+    findGoalTemplate: vi.fn(async (_workDir: string, name: string) =>
+      name === SAMPLE_TEMPLATE.name ? SAMPLE_TEMPLATE : undefined,
+    ),
+    listGoalTemplateNames: vi.fn(() => [SAMPLE_TEMPLATE.name]),
+  };
+});
+
 const ENTER = '\r';
 const ESCAPE = '\u001B';
 const UP = '\u001B[A';
@@ -95,29 +126,6 @@ function makeHost(
     resumeGoal: vi.fn(async () => fakeSnapshot()),
     cancelGoal: vi.fn(async () => fakeSnapshot()),
     cancel: vi.fn(async () => {}),
-    getGoalTemplate: vi.fn(async (name: string) => {
-      if (name === 'refactor') {
-        return {
-          name: 'refactor',
-          description: 'Refactor without changing behavior',
-          path: '/tmp/refactor.md',
-          source: 'project' as const,
-          purpose: 'Improve maintainability',
-          keyTasks: 'Refactor in small steps',
-          endState: 'Tests pass',
-          constraints: 'No new features',
-        };
-      }
-      throw new KimiError(ErrorCodes.GOAL_TEMPLATE_NOT_FOUND, `Goal template "${name}" not found`);
-    }),
-    listGoalTemplates: vi.fn(async () => [
-      {
-        name: 'refactor',
-        description: 'Refactor without changing behavior',
-        path: '/tmp/refactor.md',
-        source: 'project' as const,
-      },
-    ]),
   };
   const hasSession = overrides.hasSession ?? true;
   const transcriptContainer = { addChild: vi.fn() };
@@ -182,22 +190,6 @@ describe('parseGoalCommand', () => {
     expect(parseGoalCommand('clear')).toMatchObject({ kind: 'create', objective: 'clear' });
   });
 
-  it('parses /goal set with an optional template name', () => {
-    expect(parseGoalCommand('set')).toEqual({ kind: 'set-manual' });
-    expect(parseGoalCommand('set refactor')).toEqual({
-      kind: 'set-manual',
-      templateName: 'refactor',
-    });
-    expect(parseGoalCommand('set my template')).toEqual({
-      kind: 'set-manual',
-      templateName: 'my template',
-    });
-  });
-
-  it('parses /goal templates', () => {
-    expect(parseGoalCommand('templates')).toEqual({ kind: 'templates' });
-  });
-
   it('parses a plain objective', () => {
     expect(parseGoalCommand('Ship feature X')).toMatchObject({
       kind: 'create',
@@ -241,6 +233,12 @@ describe('parseGoalCommand', () => {
       kind: 'next-add',
       objective: 'manage release notes',
     });
+  });
+
+  it('parses set as a template application command', () => {
+    expect(parseGoalCommand('set')).toEqual({ kind: 'set', templateName: undefined });
+    expect(parseGoalCommand('set refactor')).toEqual({ kind: 'set', templateName: 'refactor' });
+    expect(parseGoalCommand('set my template')).toEqual({ kind: 'set', templateName: 'my template' });
   });
 
   it('shows a hint for /goal next without an objective', () => {
@@ -290,7 +288,6 @@ describe('handleGoalCommand', () => {
     expect(session.createGoal).toHaveBeenCalledWith(
       expect.objectContaining({ objective: 'Ship feature X', replace: false }),
     );
-    expect(host.track).toHaveBeenCalledWith('goal_create', { replace: false });
     expect(host.sendNormalUserInput).toHaveBeenCalledWith('Ship feature X');
     expect(host.sendNormalUserInput).not.toHaveBeenCalledWith('/goal Ship feature X');
   });
@@ -304,6 +301,36 @@ describe('handleGoalCommand', () => {
     await handleGoalCommand(host, 'Ship feature X');
 
     expect(calls).toEqual([{ receiver: host, text: 'Ship feature X' }]);
+  });
+
+  it('/goal set lists available templates when no name is given', async () => {
+    await handleGoalCommand(host, 'set');
+
+    expect(host.showStatus).toHaveBeenCalledOnce();
+    const message = vi.mocked(host.showStatus).mock.calls[0]?.[0] as string;
+    expect(message).toContain('refactor (project): Refactor without behavior changes');
+    expect(session.createGoal).not.toHaveBeenCalled();
+  });
+
+  it('/goal set <name> applies the template and starts the goal', async () => {
+    await handleGoalCommand(host, 'set refactor');
+
+    expect(session.createGoal).toHaveBeenCalledOnce();
+    const input = vi.mocked(session.createGoal).mock.calls[0]?.[0] as { objective: string };
+    expect(input.objective).toContain('[Purpose]\nImprove maintainability');
+    expect(input.objective).toContain('[Key Tasks]\n- Read the code');
+    expect(input.objective).toContain('[End State]\nTests pass');
+    expect(input.objective).toContain('[Constraints]\nNo new features');
+    expect(input.objective).toContain('Extra guidance.');
+    expect(host.sendNormalUserInput).toHaveBeenCalledWith('Start working toward this goal.');
+  });
+
+  it('/goal set <name> reports an unknown template', async () => {
+    await handleGoalCommand(host, 'set missing');
+
+    expect(host.showError).toHaveBeenCalledOnce();
+    expect(vi.mocked(host.showError).mock.calls[0]?.[0]).toContain('"missing" not found');
+    expect(session.createGoal).not.toHaveBeenCalled();
   });
 
   it('asks before starting a goal in Manual mode', async () => {
@@ -368,6 +395,25 @@ describe('handleGoalCommand', () => {
     });
     expect(s.setPermission).toHaveBeenCalledWith('yolo');
     expect(manualHost.setAppState).toHaveBeenCalledWith({ permissionMode: 'yolo' });
+  });
+
+  it('restores the previous permission mode when the goal fails to start', async () => {
+    const { host: manualHost, session: s } = makeHost({ permissionMode: 'manual' });
+    s.createGoal = vi.fn(async () => {
+      throw new KimiError(ErrorCodes.GOAL_ALREADY_EXISTS, 'A goal already exists');
+    });
+
+    await handleGoalCommand(manualHost, 'Ship feature X');
+    const picker = mountedPicker(manualHost);
+    picker.handleInput(DOWN);
+    picker.handleInput(ENTER);
+
+    await vi.waitFor(() => {
+      // Switched to YOLO to run the goal, then restored to Manual on failure.
+      expect(s.setPermission).toHaveBeenLastCalledWith('manual');
+    });
+    expect(s.setPermission).toHaveBeenCalledWith('yolo');
+    expect(manualHost.setAppState).toHaveBeenLastCalledWith({ permissionMode: 'manual' });
   });
 
   it('returns the command to the input box when a Manual-mode goal start is cancelled', async () => {
@@ -724,98 +770,6 @@ describe('handleGoalCommand', () => {
     expect(noSessionHost.showError).toHaveBeenCalled();
     expect(s.createGoal).not.toHaveBeenCalled();
   });
-
-  it('/goal set opens the structured goal dialog', async () => {
-    void handleGoalCommand(host, 'set');
-    await vi.waitFor(() => {
-      expect(host.mountEditorReplacement).toHaveBeenCalledOnce();
-    });
-    const dialog = mountedPicker(host);
-    expect(dialog).toBeInstanceOf(
-      await import('#/tui/components/dialogs/goal-set-dialog').then(
-        (m) => m.GoalSetDialogComponent,
-      ),
-    );
-  });
-
-  it('/goal set creates a goal and immediately starts a turn', async () => {
-    const mockMount = host.mountEditorReplacement as ReturnType<typeof vi.fn>;
-    mockMount.mockImplementationOnce((dialog: { handleInput(data: string): void }) => {
-      // Simulate filling the dialog and confirming.
-      dialog.handleInput('Purpose');
-      dialog.handleInput('\t');
-      dialog.handleInput('Tasks');
-      dialog.handleInput('\t');
-      dialog.handleInput('Done');
-      dialog.handleInput('\t');
-      dialog.handleInput('None');
-      dialog.handleInput('\t');
-      dialog.handleInput('\r');
-    });
-
-    await handleGoalCommand(host, 'set');
-
-    expect(session.createGoal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        objective: expect.stringContaining('[Purpose]\nPurpose'),
-        purpose: 'Purpose',
-        completionCriterion: 'Done',
-      }),
-    );
-    expect(host.sendNormalUserInput).toHaveBeenCalledWith('Start working toward this goal.');
-  });
-
-  it('/goal set <template> pre-fills the dialog from the template', async () => {
-    const mockMount = host.mountEditorReplacement as ReturnType<typeof vi.fn>;
-    mockMount.mockImplementationOnce((dialog: { handleInput(data: string): void }) => {
-      // The template should already be pre-filled; just tab to submit and confirm.
-      dialog.handleInput('\t'); // Key Tasks
-      dialog.handleInput('\t'); // End State
-      dialog.handleInput('\t'); // Constraints
-      dialog.handleInput('\t'); // Submit
-      dialog.handleInput('\r'); // Create goal
-    });
-
-    await handleGoalCommand(host, 'set refactor');
-
-    expect(session.createGoal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        objective: expect.stringContaining('[Purpose]\nImprove maintainability'),
-        purpose: 'Improve maintainability',
-        completionCriterion: 'Tests pass',
-      }),
-    );
-  });
-
-  it('/goal set <missing-template> shows an error and opens a blank dialog', async () => {
-    const mockMount = host.mountEditorReplacement as ReturnType<typeof vi.fn>;
-    mockMount.mockImplementationOnce((dialog: { handleInput(data: string): void }) => {
-      dialog.handleInput('Fallback');
-      dialog.handleInput('\t');
-      dialog.handleInput('\t');
-      dialog.handleInput('\t');
-      dialog.handleInput('\t');
-      dialog.handleInput('\r');
-    });
-
-    await handleGoalCommand(host, 'set does-not-exist');
-
-    expect(host.showError).toHaveBeenCalledWith(
-      expect.stringContaining('Goal template "does-not-exist" not found'),
-    );
-    expect(session.createGoal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        objective: expect.stringContaining('[Purpose]\nFallback'),
-      }),
-    );
-  });
-
-  it('/goal templates lists available templates', async () => {
-    await handleGoalCommand(host, 'templates');
-    expect(host.showStatus).toHaveBeenCalledWith(
-      expect.stringContaining('refactor (project): Refactor without changing behavior'),
-    );
-  });
 });
 
 describe('dispatchInput /goal integration', () => {
@@ -850,7 +804,13 @@ describe('goalArgumentCompletions', () => {
   }
 
   it('offers every subcommand for an empty prefix', () => {
-    expect(values('')).toEqual(['status', 'pause', 'resume', 'cancel', 'replace', 'set', 'next']);
+    expect(values('')).toEqual(['status', 'pause', 'resume', 'cancel', 'replace', 'next', 'set']);
+  });
+
+  it('completes template names after /goal set', () => {
+    expect(values('set ref')).toEqual(['set refactor']);
+    expect(labels('set ref')).toEqual(['refactor']);
+    expect(values('set missing')).toBeNull();
   });
 
   it('prefix-filters subcommands case-insensitively', () => {

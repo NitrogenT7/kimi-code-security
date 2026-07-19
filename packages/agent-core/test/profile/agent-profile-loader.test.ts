@@ -11,7 +11,7 @@ import {
   resolveAgentProfiles,
   type SystemPromptContext,
 } from '../../src/profile';
-import { SkillRegistry, type SkillDefinition } from '../../src/skill';
+import { SessionSkillRegistry, type SkillDefinition } from '../../src/skill';
 
 let workDir: string;
 
@@ -82,6 +82,7 @@ promptVars:
   roleAdditional: child-role
 tools:
   - Bash
+  - Skill
 `,
     );
     await write(
@@ -103,7 +104,7 @@ tools:
     const coderPrompt = profiles['coder']?.systemPrompt(promptContext);
 
     expect(profiles['coder']?.description).toBe('Coder child subagent');
-    expect(profiles['coder']?.tools).toEqual(['Bash']);
+    expect(profiles['coder']?.tools).toEqual(['Bash', 'Skill']);
     expect(profiles['agent']?.subagents?.['shared']).toBe(profiles['shared']);
     expect(profiles['agent']?.subagents?.['coder']).toBe(profiles['coder']);
     expect(profiles['coder']?.subagents).toBeUndefined();
@@ -178,15 +179,36 @@ describe('default agent profiles', () => {
         'TaskStop',
       ]),
     );
-    expect(DEFAULT_AGENT_PROFILES['coder']?.tools).toEqual(
-      expect.arrayContaining(['Read', 'Write', 'Edit', 'Bash']),
-    );
+    expect(DEFAULT_AGENT_PROFILES['coder']?.tools).toEqual([
+      'Agent',
+      'AgentSwarm',
+      'Bash',
+      'CronCreate',
+      'CronDelete',
+      'CronList',
+      'Edit',
+      'EnterPlanMode',
+      'ExitPlanMode',
+      'Glob',
+      'Grep',
+      'Read',
+      'ReadMediaFile',
+      'Skill',
+      'TaskList',
+      'TaskOutput',
+      'TaskStop',
+      'TodoList',
+      'WebSearch',
+      'FetchURL',
+      'Write',
+      'mcp__*',
+    ]);
     expect(DEFAULT_AGENT_PROFILES['explore']?.tools).not.toContain('Write');
     expect(DEFAULT_AGENT_PROFILES['plan']?.tools).not.toContain('Bash');
   });
 
   it('renders the model-invocable skill listing for bundled prompts', () => {
-    const skills = new SkillRegistry();
+    const skills = new SessionSkillRegistry();
     skills.register(skill('review', { whenToUse: 'When code review is requested.' }));
     skills.register({
       ...skill('nested-review', {
@@ -211,7 +233,7 @@ describe('default agent profiles', () => {
     expect(prompt).not.toContain('- nested-review:');
     expect(prompt).not.toContain('Path: /skills/parent/nested-review/SKILL.md');
     expect(prompt).not.toContain('When to use: When nested review is requested.');
-    expect(prompt).not.toContain('private');
+    expect(prompt).not.toContain('- private:');
     expect(prompt).not.toContain('flow-only');
     expect(prompt).not.toContain('body of review');
     expect(prompt).not.toContain('Nested review body must not enter system prompt.');

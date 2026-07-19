@@ -1,8 +1,6 @@
-import { readFile } from 'node:fs/promises';
 import { release as osRelease, type as osType } from 'node:os';
-import { join } from 'pathe';
 
-import type { McpServerInfo, SessionStatus, SessionUsage } from '@moonshot-ai/kimi-code-sdk';
+import type { McpGroupInfo, McpServerInfo, SessionStatus, SessionUsage } from '@moonshot-ai/kimi-code-sdk';
 
 import { buildMcpStatusReportLines } from '../components/messages/mcp-status-panel';
 import { buildStatusReportLines } from '../components/messages/status-panel';
@@ -11,18 +9,21 @@ import {
   FEEDBACK_ISSUE_URL,
   FEEDBACK_STATUS_CANCELLED,
   FEEDBACK_STATUS_FALLBACK,
+  FEEDBACK_STATUS_NETWORK_ERROR,
   FEEDBACK_STATUS_NOT_SIGNED_IN,
   FEEDBACK_STATUS_SUBMITTING,
   FEEDBACK_STATUS_SUCCESS,
+  FEEDBACK_STATUS_UPLOAD_FAILED,
   FEEDBACK_TELEMETRY_EVENT,
+  feedbackIdLine,
   feedbackSessionLine,
   withFeedbackVersionPrefix,
 } from '../constant/feedback';
 import { isManagedUsageProvider } from '../constant/kimi-tui';
+import { submitFeedbackWithAttachments } from '../../feedback/feedback-attachments';
 import { formatErrorMessage } from '../utils/event-payload';
 import { openUrl } from '#/utils/open-url';
-import { CHANGELOG_URL } from '../../cli/update/prompt';
-import { promptFeedbackInput } from './prompts';
+import { promptFeedbackAttachment, promptFeedbackInput } from './prompts';
 import type { SlashCommandHost } from './dispatch';
 
 // ---------------------------------------------------------------------------
@@ -42,55 +43,60 @@ export async function handleFeedbackCommand(host: SlashCommandHost): Promise<voi
     return;
   }
 
-  const content = await promptFeedbackInput(host);
-  if (content === undefined) {
+  // Stage 1: collect the free-form feedback text.
+  const input = await promptFeedbackInput(host);
+  if (input === undefined) {
     host.showStatus(FEEDBACK_STATUS_CANCELLED);
     return;
   }
 
+  // Stage 2: ask whether to attach diagnostics (logs / codebase).
+  const level = await promptFeedbackAttachment(host);
+  if (level === undefined) {
+    host.showStatus(FEEDBACK_STATUS_CANCELLED);
+    return;
+  }
+
+  const version = withFeedbackVersionPrefix(host.state.appState.version);
   const spinner = host.showLoginProgressSpinner(FEEDBACK_STATUS_SUBMITTING);
-  const res = await host.harness.auth.submitFeedback({
-    content,
-    sessionId: host.state.appState.sessionId,
-    version: withFeedbackVersionPrefix(host.state.appState.version),
-    os: `${osType()} ${osRelease()}`,
-    model: host.state.appState.model.length > 0 ? host.state.appState.model : null,
-  });
-
-  if (res.kind === 'ok') {
-    spinner.stop({ ok: true, label: FEEDBACK_STATUS_SUCCESS });
-    host.showStatus(feedbackSessionLine(host.state.appState.sessionId));
-    host.track(FEEDBACK_TELEMETRY_EVENT);
-    return;
-  }
-
-  spinner.stop({ ok: false, label: res.message });
-  fallback(FEEDBACK_STATUS_FALLBACK);
-}
-
-const CHANGELOG_PREVIEW_LINES = 40;
-
-export async function handleChangelogCommand(host: SlashCommandHost): Promise<void> {
-  let localChangelog: string | undefined;
+  // Guarantee the spinner's underlying setInterval is always cleared, even when
+  // submitFeedback or submitFeedbackWithAttachments throws — otherwise the
+  // interval (and its per-frame requestRender) leaks for the rest of the session.
+  let stopped = false;
+  const stopSpinner = (opts: { ok: boolean; label: string }): void => {
+    if (stopped) return;
+    stopped = true;
+    spinner.stop(opts);
+  };
   try {
-    localChangelog = await readFile(join(process.cwd(), 'CHANGELOG.md'), 'utf-8');
-  } catch {
-    localChangelog = undefined;
-  }
+    const res = await host.harness.auth.submitFeedback({
+      content: input.value,
+      sessionId: host.state.appState.sessionId,
+      version,
+      os: `${osType()} ${osRelease()}`,
+      model: host.state.appState.model.length > 0 ? host.state.appState.model : null,
+    });
 
-  if (localChangelog !== undefined && localChangelog.trim().length > 0) {
-    const lines = localChangelog.split('\n');
-    const preview = lines.slice(0, CHANGELOG_PREVIEW_LINES).join('\n');
-    const truncated = lines.length > CHANGELOG_PREVIEW_LINES;
-    host.showNotice(
-      'Changelog',
-      `${preview}${truncated ? '\n\n... (truncated)' : ''}\n\nFull changelog: ${CHANGELOG_URL}`,
-    );
-    return;
-  }
+    if (res.kind !== 'ok') {
+      stopSpinner({ ok: false, label: res.message });
+      fallback(FEEDBACK_STATUS_FALLBACK);
+      return;
+    }
 
-  host.showNotice('Changelog', CHANGELOG_URL);
-  openUrl(CHANGELOG_URL);
+    // Stage 3: prepare and upload each requested attachment independently.
+    const attachmentFailed = await submitFeedbackWithAttachments(host, res.feedbackId, level);
+
+    stopSpinner({ ok: true, label: FEEDBACK_STATUS_SUCCESS });
+    host.showStatus(feedbackSessionLine(host.state.appState.sessionId));
+    host.showStatus(feedbackIdLine(res.feedbackId));
+    host.track(FEEDBACK_TELEMETRY_EVENT);
+    if (attachmentFailed) {
+      host.showStatus(FEEDBACK_STATUS_UPLOAD_FAILED);
+    }
+  } catch (error) {
+    stopSpinner({ ok: false, label: FEEDBACK_STATUS_NETWORK_ERROR });
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +147,7 @@ export async function showStatusReport(host: SlashCommandHost): Promise<void> {
     workDir: appState.workDir,
     sessionId: appState.sessionId,
     sessionTitle: appState.sessionTitle,
-    thinking: appState.thinking,
+    thinkingEffort: appState.thinkingEffort,
     permissionMode: appState.permissionMode,
     planMode: appState.planMode,
     contextUsage: appState.contextUsage,
@@ -158,12 +164,40 @@ export async function showStatusReport(host: SlashCommandHost): Promise<void> {
   host.state.ui.requestRender();
 }
 
+export async function showMcpServers(host: SlashCommandHost): Promise<void> {
+  const session = host.requireSession();
+  let servers: readonly McpServerInfo[];
+  try {
+    servers = await session.listMcpServers();
+  } catch (error) {
+    host.showError(`Failed to load MCP servers: ${formatErrorMessage(error)}`);
+    return;
+  }
+
+  // Group status is only available on engines that implement MCP groups
+  // (agent-core-v2); on other engines the call rejects and we show servers only.
+  let groups: readonly McpGroupInfo[] | undefined;
+  try {
+    groups = await session.listMcpGroups();
+  } catch {
+    groups = undefined;
+  }
+
+  const title = servers.length > 0 ? ` MCP (${servers.length}) ` : ' MCP ';
+  const panel = new UsagePanelComponent(
+    () => buildMcpStatusReportLines({ servers, groups }),
+    'primary',
+    title,
+  );
+  host.state.transcriptContainer.addChild(panel);
+  host.state.ui.requestRender();
+}
+
 export async function handleLoadMcpGroupCommand(host: SlashCommandHost, groupName: string): Promise<void> {
   const session = host.requireSession();
   const spinner = host.showProgressSpinner(`Loading MCP group: ${groupName}`);
   try {
     await session.loadMcpGroup(groupName);
-    await session.setMcpGroupMode(groupName);
     spinner.stop({ ok: true, label: `MCP group "${groupName}" loaded` });
     await showMcpServers(host);
   } catch (error) {
@@ -198,25 +232,6 @@ export async function handleMcpCommand(host: SlashCommandHost, args: string): Pr
   await handleLoadMcpGroupCommand(host, groupName);
 }
 
-export async function showMcpServers(host: SlashCommandHost): Promise<void> {
-  let servers: readonly McpServerInfo[];
-  try {
-    servers = await host.requireSession().listMcpServers();
-  } catch (error) {
-    host.showError(`Failed to load MCP servers: ${formatErrorMessage(error)}`);
-    return;
-  }
-
-  const title = servers.length > 0 ? ` MCP (${servers.length}) ` : ' MCP ';
-  const panel = new UsagePanelComponent(
-    () => buildMcpStatusReportLines({ servers }),
-    'primary',
-    title,
-  );
-  host.state.transcriptContainer.addChild(panel);
-  host.state.ui.requestRender();
-}
-
 async function loadSessionUsageReport(host: SlashCommandHost): Promise<SessionUsageResult> {
   try {
     return { usage: await host.requireSession().getUsage() };
@@ -247,5 +262,5 @@ async function loadManagedUsageReport(host: SlashCommandHost): Promise<ManagedUs
   if (res.kind === 'error') {
     return { error: res.message };
   }
-  return { usage: { summary: res.summary, limits: res.limits } };
+  return { usage: { summary: res.summary, limits: res.limits, extraUsage: res.extraUsage } };
 }

@@ -1,82 +1,127 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 
+import { KaosShellNotFoundError, LocalKaos, type Kaos } from '@moonshot-ai/kaos';
+import type { SessionWarning } from '@moonshot-ai/protocol';
+
 import { ErrorCodes, KimiError } from '#/errors';
+import type { GoalTemplateDetail, GoalTemplateSummary } from '#/goal-template';
 import { getRootLogger, log } from '#/logging/logger';
 import { PluginManager } from '#/plugin';
 import { LocalFetchURLProvider } from '#/tools/providers/local-fetch-url';
 import { MoonshotFetchURLProvider } from '#/tools/providers/moonshot-fetch-url';
 import { MoonshotWebSearchProvider } from '#/tools/providers/moonshot-web-search';
+import { ImageLimits } from '#/tools/support/image-limits';
 import type { PromisableMethods } from '#/utils/types';
 import { getCoreVersion } from '#/version';
-import { resolveThinkingLevel } from '../agent/config/thinking';
+
 import { Agent } from '../agent';
+import { resolveThinkingEffort } from '../agent/config/thinking';
 import {
+  applyPrintModeConfigDefaults,
   ensureKimiHome,
   loadRuntimeConfigSafe,
   mergeConfigPatch,
   readConfigFileForUpdate,
+  normalizeAdditionalDirs,
+  readWorkspaceAdditionalDirs,
+  resolveWorkspaceAdditionalDirs,
   resolveConfigPath,
   resolveKimiHome,
   writeConfigFile,
   type KimiConfig,
+  type McpRemoteServerConfig,
   type McpServerConfig,
   type MoonshotServiceConfig,
 } from '../config';
-import {
-  FLAG_DEFINITIONS,
-  FlagResolver,
-  type ExperimentalFeatureState,
-} from '../flags';
+import { FLAG_DEFINITIONS, FlagResolver, type ExperimentalFeatureState } from '../flags';
 import type { Logger } from '../logging/types';
 import {
+  AlreadyAuthorizedError,
+  GlobalMcpConfigStore,
+  McpConnectionManager,
   McpGroupRegistry,
+  McpOAuthService,
   resolveSessionMcpConfig,
   mergeCallerMcpServers,
+  type BeginAuthorizationResult,
   type SessionMcpConfig,
 } from '../mcp';
 import { Session, type SessionMeta, type SessionSkillConfig } from '../session';
 import { exportSessionDirectory } from '../session/export';
-import type { GoalTemplateDetail, GoalTemplateSummary } from '#/goal-template';
 import {
-  ProviderManager, type BearerTokenProvider,
-  type OAuthTokenProviderResolver
+  ProviderManager,
+  type BearerTokenProvider,
+  type OAuthTokenProviderResolver,
 } from '../session/provider-manager';
 import { SessionAPIImpl } from '../session/rpc';
 import { normalizeWorkDir, SessionStore } from '../session/store/index';
-import { noopTelemetryClient, withTelemetryContext, type TelemetryClient } from '../telemetry';
+import { touchWorkspaceRegistry } from '../session/store/workspace-registry-file';
+import {
+  registerBuiltinSkills,
+  SessionSkillRegistry,
+  resolveSkillRoots,
+  summarizeSkill,
+} from '../skill';
+import {
+  noopTelemetryClient,
+  withTelemetryContext,
+  withTelemetryProperties,
+  type TelemetryClient,
+  type TelemetryProperties,
+} from '../telemetry';
+import type { ToolServices } from '../tools/support/services';
 import type { CoreRPCClient } from './client';
 import type {
   ActivateSkillPayload,
+  ActivatePluginCommandPayload,
+  AddAdditionalDirPayload,
+  AddAdditionalDirResult,
+  ArchiveSessionPayload,
+  BeginGlobalMcpServerAuthResult,
   BeginCompactionPayload,
+  CancelGlobalMcpServerAuthPayload,
   CancelPayload,
   CancelPlanPayload,
+  CancelShellCommandPayload,
   CloseSessionPayload,
+  CompleteGlobalMcpServerAuthPayload,
   ConfigDiagnostics,
   CoreAPI,
   CoreInfo,
   CreateGoalPayload,
   CreateSessionPayload,
+  DeleteSessionPayload,
+  DetachBackgroundPayload,
+  ClientTelemetryInfo,
   EmptyPayload,
   EnterSwarmPayload,
   GoalSnapshot,
   GoalToolResult,
+  GlobalMcpServerConfig,
+  GlobalMcpServerNamePayload,
+  GlobalMcpServerTestResult,
   ExportSessionPayload,
   ExportSessionResult,
   ForkSessionPayload,
   GetBackgroundOutputPayload,
   GetBackgroundPayload,
+  GetCronTasksResult,
+  GetGoalTemplatePayload,
   GetKimiConfigPayload,
   GetPluginInfoPayload,
   InstallPluginPayload,
+  ImportContextPayload,
   ListSessionsPayload,
+  ListWorkspaceSkillsPayload,
   LoadMcpGroupPayload,
   McpServerInfo,
   McpStartupMetrics,
-  SetMcpGroupModePayload,
   PluginInfo,
   PluginSummary,
   PromptPayload,
+  PutGlobalMcpServerPayload,
+  RunShellCommandPayload,
   ReconnectMcpServerPayload,
   RegisterToolPayload,
   ReloadSessionPayload,
@@ -85,24 +130,21 @@ import type {
   RemovePluginPayload,
   RenameSessionPayload,
   ResumeSessionPayload,
-  RunShellCommandPayload,
-  RunShellCommandResult,
-  CancelShellCommandPayload,
-  DetachShellCommandPayload,
-  DetachShellCommandResult,
   SessionSummary,
   SetActiveToolsPayload,
   SetKimiConfigPayload,
+  SetMcpGroupModePayload,
   SetModelPayload,
   SetModelResult,
   SetPermissionPayload,
-  GetGoalTemplatePayload,
   SetPluginEnabledPayload,
   SetPluginMcpServerEnabledPayload,
   SetThinkingPayload,
   SkillSummary,
+  PluginCommandDef,
   SteerPayload,
   StopBackgroundPayload,
+  TestGlobalMcpServerPayload,
   UndoHistoryPayload,
   UnregisterToolPayload,
   UpdateSessionMetadataPayload,
@@ -110,18 +152,20 @@ import type {
 import type { ResumedAgentState, ResumeSessionResult } from './resumed';
 import type { SDKRPC } from './sdk-api';
 import { proxyWithExtraPayload } from './types';
-import { KaosShellNotFoundError, LocalKaos, type Kaos } from '@moonshot-ai/kaos';
-import type { ToolServices } from '../tools/support/services';
 
 const KIMI_CODE_PROVIDER_NAME = 'managed:kimi-code';
 const KIMI_CODE_BASE_URL_ENV = 'KIMI_CODE_BASE_URL';
 const KIMI_CODE_OAUTH_HOST_ENV = 'KIMI_CODE_OAUTH_HOST';
 const KIMI_OAUTH_HOST_ENV = 'KIMI_OAUTH_HOST';
+const DEFAULT_GLOBAL_MCP_AUTH_TIMEOUT_MS = 15 * 60 * 1000;
 type AgentScopedPayload<T> = T & { readonly agentId: string };
 type SessionScopedPayload<T> = T & { readonly sessionId: string };
 type SessionAgentPayload<T> = SessionScopedPayload<AgentScopedPayload<T>>;
 type RenameSessionRequest = SessionScopedPayload<RenameSessionPayload>;
 type UpdateSessionMetadataRequest = SessionScopedPayload<UpdateSessionMetadataPayload>;
+interface GlobalMcpOAuthFlow {
+  readonly flow: BeginAuthorizationResult;
+}
 
 export interface KimiCoreOptions {
   readonly homeDir?: string | undefined;
@@ -129,9 +173,24 @@ export interface KimiCoreOptions {
   readonly runtime?: ToolServices | undefined;
   readonly kimiRequestHeaders?: Record<string, string> | undefined;
   readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
+  /**
+   * Workspace-id resolver handed to the session store: the registered
+   * workspace id for the same physical root as a session's workDir (identity
+   * comparison folds case/slashes for Windows-shaped paths), so bucket
+   * derivation reuses the registered id instead of minting a split bucket.
+   * Wired by the services layer from the workspace registry; when omitted the
+   * store always mints (legacy behavior).
+   */
+  readonly resolveWorkspaceId?: (workDir: string) => Promise<string | undefined>;
   readonly skillDirs?: readonly string[];
   readonly telemetry?: TelemetryClient | undefined;
   readonly appVersion?: string;
+  /**
+   * Host UI mode (`'print'` for `kimi -p`, `'cli'` for the TUI, ...). When
+   * `'print'`, sessions are created with the print-mode config defaults from
+   * `applyPrintModeConfigDefaults` (user-set values still win).
+   */
+  readonly uiMode?: string | undefined;
 }
 
 export class KimiCore implements PromisableMethods<CoreAPI> {
@@ -151,11 +210,18 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   private readonly resolveOAuthTokenProvider: OAuthTokenProviderResolver | undefined;
   private readonly skillDirs: readonly string[];
   private readonly sessionStore: SessionStore;
+  private readonly globalMcpConfig: GlobalMcpConfigStore;
+  private readonly globalMcpOAuth: McpOAuthService;
+  private readonly globalMcpOAuthFlows = new Map<string, GlobalMcpOAuthFlow>();
   readonly plugins: PluginManager;
   private pluginsReady: Promise<void>;
   private pluginsLoadError: Error | undefined;
   private readonly appVersion: string | undefined;
   private readonly experimentalFlags: FlagResolver;
+  /** `true` when the host runs `kimi -p` (v1 print mode); see `withPrintModeDefaults`. */
+  private readonly printMode: boolean;
+  /** Owner-scoped [image] limits; reload pushes the new config via setConfig. */
+  readonly imageLimits: ImageLimits;
 
   constructor(
     protected readonly rpcClient: CoreRPCClient,
@@ -174,6 +240,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     this.skillDirs = options.skillDirs ?? [];
     this.telemetry = options.telemetry ?? noopTelemetryClient;
     this.appVersion = options.appVersion;
+    this.printMode = options.uiMode === 'print';
     ensureKimiHome(this.homeDir);
     // Schema errors degrade (invalid sections are dropped with warnings) so a
     // typo cannot prevent startup, but a file that cannot be used at all —
@@ -193,7 +260,12 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       FLAG_DEFINITIONS,
       this.config.experimental,
     );
-    this.sessionStore = new SessionStore(this.homeDir);
+    this.imageLimits = new ImageLimits(process.env, this.config.image);
+    this.sessionStore = new SessionStore(this.homeDir, {
+      resolveWorkspaceId: options.resolveWorkspaceId,
+    });
+    this.globalMcpConfig = new GlobalMcpConfigStore(this.homeDir);
+    this.globalMcpOAuth = new McpOAuthService({ kimiHomeDir: this.homeDir });
     this.plugins = new PluginManager({ kimiHomeDir: this.homeDir });
     // Capture the error rather than swallow it: mutators and explicit /plugins
     // reads rethrow so the user sees what's wrong; createSession/resumeSession
@@ -218,57 +290,103 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     const options = input;
     const workDir = requiredWorkDir('createSession', options.workDir);
     const config = this.reloadProviderManager();
+    const sessionConfig = this.withPrintModeDefaults(config);
     const id = options.id ?? createSessionId();
-    const thinkingLevel = resolveThinkingLevel(options.thinking, config);
+    const modelAlias = options.model ?? config.defaultModel;
+    const model = modelAlias !== undefined ? config.models?.[modelAlias] : undefined;
+    // Forward only an explicitly requested effort. With no explicit value the
+    // initial effort is left to ConfigState.update(), which resolves it from
+    // the resolved provider — that carries the provider-level protocol context
+    // a raw model alias lacks (e.g. provider type "anthropic" with a custom
+    // model name must default to the inferred profile effort, not "off").
+    const thinkingEffort =
+      options.thinking === undefined
+        ? undefined
+        : resolveThinkingEffort(options.thinking, config.thinking, model);
     const permissionMode = options.permission ?? config.defaultPermissionMode;
     const baseMcpConfig = await resolveSessionMcpConfig({
       cwd: workDir,
       homeDir: this.homeDir,
     });
     const withCallerMcp = mergeCallerMcpServers(baseMcpConfig, options.mcpServers);
+    const parentKaos = overrides.kaos ?? (await this.getKaos());
+    const persistenceKaos = overrides.persistenceKaos ?? parentKaos;
+    // Read the workspace local config (`.kimi-code/local.toml`) through the
+    // persistence (local) kaos, not the tool kaos. In ACP mode the tool kaos is
+    // the reverse-RPC bridge and the client does not know the session yet during
+    // `session/new`, so reading through it fails with "unknown session"
+    // (https://github.com/MoonshotAI/kimi-code/issues/988). The local config is
+    // a system file and must not depend on the tool bridge — same reason
+    // `Session.systemContextKaos` is backed by the persistence sink.
+    const localWorkspaceDirs = await readWorkspaceAdditionalDirs(persistenceKaos, workDir);
+    const callerAdditionalDirs = await resolveWorkspaceAdditionalDirs(
+      parentKaos,
+      workDir,
+      options.additionalDirs ?? [],
+    );
+    const additionalDirs = normalizeAdditionalDirs([
+      ...localWorkspaceDirs.additionalDirs,
+      ...callerAdditionalDirs,
+    ]);
     const summary = await this.sessionStore.create({
       id,
       workDir,
+    });
+    // Register the cwd in the shared workspaces catalog (`<homeDir>/workspaces.json`,
+    // also read by the agent-core-v2 server) so TUI-created sessions surface as
+    // workspaces. Best-effort: the catalog is a hint, never session state.
+    await touchWorkspaceRegistry(this.homeDir, workDir).catch((error: unknown) => {
+      log.warn('workspace registry touch failed', { workDir, error: String(error) });
     });
     const result: SessionSummary = {
       ...summary,
       metadata: options.metadata,
     };
+    const clientTelemetry = clientTelemetryProperties(options.client);
+    const sessionTelemetryBase = withTelemetryContext(this.telemetry, { sessionId: summary.id });
+    const sessionTelemetry =
+      Object.keys(clientTelemetry).length === 0
+        ? sessionTelemetryBase
+        : withTelemetryProperties(sessionTelemetryBase, clientTelemetry);
 
     await this.pluginsReady;
     const pluginSessionStarts = this.plugins.enabledSessionStarts();
+    const pluginCommands = await this.plugins.enabledCommands();
     const mcpConfig = this.mergePluginMcpConfig(withCallerMcp);
 
     // Session ctor attaches its own log sink. If anything in the setup-after-
     // ctor block throws, `session.close()` releases the sink (and mcp).
     const runtime = await this.resolveRuntime(config);
-    const parentKaos = overrides.kaos ?? (await this.getKaos());
-    const persistenceKaos = overrides.persistenceKaos ?? parentKaos;
     const session = new Session({
       kaos: parentKaos.withCwd(workDir),
       persistenceKaos,
       toolServices: runtime,
-      config,
+      config: sessionConfig,
       id,
       homedir: summary.sessionDir,
       kimiHomeDir: this.homeDir,
       rpc: proxyWithExtraPayload(await this.sdk, { sessionId: summary.id }),
       providerManager: this.resolveProviderManager(summary.id),
-      background: config.background,
-      hooks: config.hooks,
+      background: sessionConfig.background,
+      hooks: [...(config.hooks ?? []), ...this.plugins.enabledHooks()],
       permissionRules: config.permission?.rules,
       skills: this.resolveSessionSkillConfig(config),
       mcpConfig,
       experimentalFlags: this.experimentalFlags,
-      telemetry: withTelemetryContext(this.telemetry, { sessionId: summary.id }),
+      imageLimits: this.imageLimits,
+      telemetry: sessionTelemetry,
       pluginSessionStarts,
+      pluginCommands,
       appVersion: this.appVersion,
+      additionalDirs,
+      drainAgentTasksOnStop: options.drainAgentTasksOnStop,
     });
     try {
       session.metadata = {
         ...session.metadata,
         createdAt: new Date(summary.createdAt).toISOString(),
         updatedAt: new Date(summary.updatedAt).toISOString(),
+        workDir,
         ...(summary.title !== undefined
           ? {
               title: summary.title,
@@ -280,7 +398,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       const mainAgent = await session.createMain();
       mainAgent.config.update({
         modelAlias: options.model ?? config.defaultModel,
-        thinkingLevel,
+        thinkingEffort,
       });
       if (permissionMode !== undefined) {
         mainAgent.permission.setMode(permissionMode);
@@ -297,7 +415,10 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       throw error;
     }
     this.sessions.set(id, session);
-    return result;
+    if (Object.keys(clientTelemetry).length > 0) {
+      sessionTelemetry.track('session_started', { resumed: false });
+    }
+    return withAdditionalDirs(result, session);
   }
 
   getCoreInfo(): CoreInfo {
@@ -316,24 +437,59 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     }
   }
 
+  async archiveSession({ sessionId }: ArchiveSessionPayload): Promise<void> {
+    await this.closeSession({ sessionId });
+    await this.sessionStore.archive(sessionId);
+  }
+
+  async deleteSession({ sessionId }: DeleteSessionPayload): Promise<void> {
+    await this.closeSession({ sessionId });
+    await this.sessionStore.delete(sessionId);
+  }
+
   async resumeSession(input: ResumeSessionPayload): Promise<ResumeSessionResult> {
     return this.resumeSessionWithOverrides(input, {});
   }
 
   async resumeSessionWithOverrides(
     input: ResumeSessionPayload,
-    overrides: { kaos?: Kaos; persistenceKaos?: Kaos },
+    overrides: {
+      kaos?: Kaos;
+      persistenceKaos?: Kaos;
+      forcePluginSessionStartReminder?: boolean;
+    },
   ): Promise<ResumeSessionResult> {
     const summary = await this.sessionStore.get(input.sessionId);
+    const parentKaosForRead = overrides.kaos ?? (await this.getKaos());
+    // Read `.kimi-code/local.toml` through the persistence (local) kaos, not the
+    // tool kaos — see createSessionWithOverrides and issue #988.
+    const localWorkspaceDirs = await readWorkspaceAdditionalDirs(
+      overrides.persistenceKaos ?? parentKaosForRead,
+      summary.workDir,
+    );
+    const callerAdditionalDirs = await resolveWorkspaceAdditionalDirs(
+      parentKaosForRead,
+      summary.workDir,
+      input.additionalDirs ?? [],
+    );
+    const additionalDirs = normalizeAdditionalDirs([
+      ...localWorkspaceDirs.additionalDirs,
+      ...callerAdditionalDirs,
+    ]);
     const active = this.sessions.get(summary.id);
     if (active !== undefined) {
       if (overrides.kaos !== undefined) {
         active.setToolKaos(overrides.kaos.withCwd(summary.workDir));
       }
-      return resumeSessionResult(summary, active);
+      await active.setBaseAdditionalDirs(additionalDirs);
+      return withAdditionalDirs(
+        await resumeSessionResult(summary, active, undefined, input.includeSubagents),
+        active,
+      );
     }
 
     const config = this.reloadProviderManager();
+    const sessionConfig = this.withPrintModeDefaults(config);
     const baseMcpConfig = await resolveSessionMcpConfig({
       cwd: summary.workDir,
       homeDir: this.homeDir,
@@ -341,30 +497,34 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     const withCallerMcp = mergeCallerMcpServers(baseMcpConfig, input.mcpServers);
     await this.pluginsReady;
     const pluginSessionStarts = this.plugins.enabledSessionStarts();
+    const pluginCommands = await this.plugins.enabledCommands();
     const mcpConfig = this.mergePluginMcpConfig(withCallerMcp);
     const runtime = await this.resolveRuntime(config);
-    const parentKaos = overrides.kaos ?? (await this.getKaos());
+    const parentKaos = parentKaosForRead;
     const persistenceKaos = overrides.persistenceKaos ?? parentKaos;
     const session = new Session({
       kaos: parentKaos.withCwd(summary.workDir),
       persistenceKaos,
       toolServices: runtime,
-      config,
+      config: sessionConfig,
       id: summary.id,
       homedir: summary.sessionDir,
       kimiHomeDir: this.homeDir,
       rpc: proxyWithExtraPayload(await this.sdk, { sessionId: summary.id }),
       providerManager: this.resolveProviderManager(summary.id),
-      background: config.background,
-      hooks: config.hooks,
+      background: sessionConfig.background,
+      hooks: [...(config.hooks ?? []), ...this.plugins.enabledHooks()],
       permissionRules: config.permission?.rules,
       skills: this.resolveSessionSkillConfig(config),
       mcpConfig,
       experimentalFlags: this.experimentalFlags,
+      imageLimits: this.imageLimits,
       telemetry: withTelemetryContext(this.telemetry, { sessionId: summary.id }),
       initializeMainAgent: false,
       pluginSessionStarts,
+      pluginCommands,
       appVersion: this.appVersion,
+      additionalDirs,
     });
     let warning: string | undefined;
     try {
@@ -379,7 +539,12 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       throw error;
     }
     this.sessions.set(summary.id, session);
-    return resumeSessionResult(summary, session, warning);
+    if (overrides.forcePluginSessionStartReminder === true) {
+      // Append before constructing the result so the returned ResumeSessionResult
+      // (and any SDK caller's resumeState) reflects the refreshed plugin context.
+      await session.appendPluginSessionStartReminder();
+    }
+    return resumeSessionResult(summary, session, warning, input.includeSubagents);
   }
 
   async reloadSession(input: ReloadSessionPayload): Promise<ResumeSessionResult> {
@@ -401,7 +566,10 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       await active.closeForReload();
       this.sessions.delete(summary.id);
     }
-    return this.resumeSession({ sessionId: summary.id });
+    return this.resumeSessionWithOverrides(
+      { sessionId: summary.id },
+      { forcePluginSessionStartReminder: input.forcePluginSessionStartReminder },
+    );
   }
 
   async forkSession(input: ForkSessionPayload): Promise<ResumeSessionResult> {
@@ -425,6 +593,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       targetId: id,
       title: input.title,
       metadata: input.metadata,
+      turnIndex: input.turnIndex,
     });
     return this.resumeSession({ sessionId: id });
   }
@@ -447,8 +616,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     const active = this.sessions.get(input.sessionId);
     // Closed sessions have no `Session.log`; create an ad-hoc child bound to
     // their id so the entries still route to the session log file.
-    const exportLog =
-      active?.log ?? log.createChild({ sessionId: input.sessionId });
+    const exportLog = active?.log ?? log.createChild({ sessionId: input.sessionId });
     if (active !== undefined) {
       try {
         await active.flushMetadata();
@@ -521,8 +689,109 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return this.reloadRuntimeConfig();
   }
 
+  async listGlobalMcpServers(_input?: EmptyPayload): Promise<readonly GlobalMcpServerConfig[]> {
+    return this.globalMcpConfig.list();
+  }
+
+  async addGlobalMcpServer({
+    server,
+  }: PutGlobalMcpServerPayload): Promise<readonly GlobalMcpServerConfig[]> {
+    return this.globalMcpConfig.add(server);
+  }
+
+  async updateGlobalMcpServer({
+    server,
+  }: PutGlobalMcpServerPayload): Promise<readonly GlobalMcpServerConfig[]> {
+    return this.globalMcpConfig.update(server);
+  }
+
+  async removeGlobalMcpServer({
+    name,
+  }: GlobalMcpServerNamePayload): Promise<readonly GlobalMcpServerConfig[]> {
+    return this.globalMcpConfig.remove(name);
+  }
+
+  async beginGlobalMcpServerAuth({
+    name,
+  }: GlobalMcpServerNamePayload): Promise<BeginGlobalMcpServerAuthResult> {
+    const server = await this.globalMcpConfig.get(name);
+    const config = requireOAuthMcpServer(server);
+    try {
+      const flow = await this.globalMcpOAuth.beginAuthorization(server.name, config.url);
+      const flowId = randomUUID();
+      this.globalMcpOAuthFlows.set(flowId, { flow });
+      return {
+        status: 'authorization-required',
+        flowId,
+        authorizationUrl: flow.authorizationUrl.toString(),
+      };
+    } catch (error) {
+      if (error instanceof AlreadyAuthorizedError) {
+        return { status: 'already-authorized' };
+      }
+      throw error;
+    }
+  }
+
+  async completeGlobalMcpServerAuth(
+    { flowId, timeoutMs }: CompleteGlobalMcpServerAuthPayload,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<void> {
+    const active = this.globalMcpOAuthFlows.get(flowId);
+    if (active === undefined) {
+      throw new KimiError(ErrorCodes.REQUEST_INVALID, `Unknown MCP OAuth flow: ${flowId}`);
+    }
+    try {
+      await active.flow.complete({
+        signal: options.signal,
+        timeoutMs: timeoutMs ?? DEFAULT_GLOBAL_MCP_AUTH_TIMEOUT_MS,
+      });
+    } finally {
+      this.globalMcpOAuthFlows.delete(flowId);
+    }
+  }
+
+  async cancelGlobalMcpServerAuth({ flowId }: CancelGlobalMcpServerAuthPayload): Promise<void> {
+    const active = this.globalMcpOAuthFlows.get(flowId);
+    if (active === undefined) return;
+    this.globalMcpOAuthFlows.delete(flowId);
+    await active.flow.cancel();
+  }
+
+  async resetGlobalMcpServerAuth({ name }: GlobalMcpServerNamePayload): Promise<void> {
+    const server = await this.globalMcpConfig.get(name);
+    const config = requireRemoteMcpServer(server);
+    this.globalMcpOAuth.invalidate(server.name, config.url);
+  }
+
+  async testGlobalMcpServer({
+    name,
+    cwd,
+  }: TestGlobalMcpServerPayload): Promise<GlobalMcpServerTestResult> {
+    const server = await this.globalMcpConfig.get(name);
+    const config = mcpConfigWithoutName(server);
+    const manager = new McpConnectionManager({
+      stdioCwd: cwd,
+      oauthService: this.globalMcpOAuth,
+    });
+    try {
+      await manager.connectAll({ [server.name]: config });
+      return standaloneMcpTestResult(server.name, manager);
+    } finally {
+      await manager.shutdown();
+    }
+  }
+
   prompt({ sessionId, ...payload }: SessionAgentPayload<PromptPayload>) {
     return this.sessionApi(sessionId).prompt(payload);
+  }
+
+  runShellCommand({ sessionId, ...payload }: SessionAgentPayload<RunShellCommandPayload>) {
+    return this.sessionApi(sessionId).runShellCommand(payload);
+  }
+
+  cancelShellCommand({ sessionId, ...payload }: SessionAgentPayload<CancelShellCommandPayload>) {
+    return this.sessionApi(sessionId).cancelShellCommand(payload);
   }
 
   steer({ sessionId, ...payload }: SessionAgentPayload<SteerPayload>) {
@@ -605,8 +874,16 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).stopBackground(payload);
   }
 
+  detachBackground({ sessionId, ...payload }: SessionAgentPayload<DetachBackgroundPayload>) {
+    return this.sessionApi(sessionId).detachBackground(payload);
+  }
+
   clearContext({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
     return this.sessionApi(sessionId).clearContext(payload);
+  }
+
+  importContext({ sessionId, ...payload }: SessionAgentPayload<ImportContextPayload>) {
+    return this.sessionApi(sessionId).importContext(payload);
   }
 
   activateSkill({
@@ -614,6 +891,13 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     ...payload
   }: SessionAgentPayload<ActivateSkillPayload>): Promise<void> {
     return this.sessionApi(sessionId).activateSkill(payload);
+  }
+
+  activatePluginCommand({
+    sessionId,
+    ...payload
+  }: SessionAgentPayload<ActivatePluginCommandPayload>): Promise<void> {
+    return this.sessionApi(sessionId).activatePluginCommand(payload);
   }
 
   getBackgroundOutput({ sessionId, ...payload }: SessionAgentPayload<GetBackgroundOutputPayload>) {
@@ -648,24 +932,6 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).getBackground(payload);
   }
 
-  runShellCommand({
-    sessionId,
-    ...payload
-  }: SessionAgentPayload<RunShellCommandPayload>): Promise<RunShellCommandResult> {
-    return this.sessionApi(sessionId).runShellCommand(payload);
-  }
-
-  cancelShellCommand({ sessionId, ...payload }: SessionAgentPayload<CancelShellCommandPayload>) {
-    return this.sessionApi(sessionId).cancelShellCommand(payload);
-  }
-
-  detachShellCommand({
-    sessionId,
-    ...payload
-  }: SessionAgentPayload<DetachShellCommandPayload>): Promise<DetachShellCommandResult> {
-    return this.sessionApi(sessionId).detachShellCommand(payload);
-  }
-
   updateSessionMetadata({ sessionId, ...payload }: UpdateSessionMetadataRequest): Promise<void> {
     return this.sessionApi(sessionId).updateSessionMetadata(payload);
   }
@@ -693,6 +959,44 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     ...payload
   }: SessionScopedPayload<GetGoalTemplatePayload>): GoalTemplateDetail {
     return this.sessionApi(sessionId).getGoalTemplate(payload);
+  }
+
+  /**
+   * List the skills available for a workspace working directory without
+   * requiring a session. Mirrors `Session.loadSkills` exactly (same roots,
+   * same discovery order, same built-ins) so the result matches what a new
+   * session created in `workDir` would see. Used to populate the composer
+   * skill menu before a session exists.
+   */
+  async listWorkspaceSkills({
+    workDir,
+  }: ListWorkspaceSkillsPayload): Promise<readonly SkillSummary[]> {
+    const cwd = requiredWorkDir('listWorkspaceSkills', workDir);
+    await this.pluginsReady;
+    const skills = this.resolveSessionSkillConfig(this.reloadProviderManager());
+    const roots = await resolveSkillRoots({
+      paths: {
+        userHomeDir: skills.userHomeDir ?? this.userHomeDir,
+        brandHomeDir: skills.brandHomeDir ?? this.homeDir,
+        workDir: cwd,
+      },
+      explicitDirs: skills.explicitDirs,
+      extraDirs: skills.extraDirs,
+      pluginSkillRoots: skills.pluginSkillRoots,
+      mergeAllAvailableSkills: skills.mergeAllAvailableSkills,
+      builtinDir: skills.builtinDir,
+    });
+    const registry = new SessionSkillRegistry({});
+    await registry.loadRoots(roots);
+    registerBuiltinSkills(registry);
+    return registry.listSkills().map(summarizeSkill);
+  }
+
+  listPluginCommands({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<EmptyPayload>): readonly PluginCommandDef[] {
+    return this.sessionApi(sessionId).listPluginCommands(payload);
   }
 
   listMcpServers({
@@ -734,6 +1038,34 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).generateAgentsMd(payload);
   }
 
+  getSessionWarnings({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<EmptyPayload>): Promise<readonly SessionWarning[]> {
+    return this.sessionApi(sessionId).getSessionWarnings(payload);
+  }
+
+  waitForBackgroundTasksOnPrint({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<EmptyPayload>): Promise<void> {
+    return this.sessionApi(sessionId).waitForBackgroundTasksOnPrint(payload);
+  }
+
+  handlePrintMainTurnCompleted({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<EmptyPayload>): Promise<'finish' | 'continue'> {
+    return this.sessionApi(sessionId).handlePrintMainTurnCompleted(payload);
+  }
+
+  addAdditionalDir({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<AddAdditionalDirPayload>): Promise<AddAdditionalDirResult> {
+    return this.requireSession(sessionId).addAdditionalDir(payload.path, payload.persist);
+  }
+
   startBtw({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>): Promise<string> {
     return this.sessionApi(sessionId).startBtw(payload);
   }
@@ -749,25 +1081,23 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return Promise.resolve(this.sessionApi(sessionId).getGoal(payload));
   }
 
-  pauseGoal({
-    sessionId,
-    ...payload
-  }: SessionAgentPayload<EmptyPayload>): Promise<GoalSnapshot> {
+  pauseGoal({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>): Promise<GoalSnapshot> {
     return Promise.resolve(this.sessionApi(sessionId).pauseGoal(payload));
   }
 
-  resumeGoal({
-    sessionId,
-    ...payload
-  }: SessionAgentPayload<EmptyPayload>): Promise<GoalSnapshot> {
+  resumeGoal({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>): Promise<GoalSnapshot> {
     return Promise.resolve(this.sessionApi(sessionId).resumeGoal(payload));
   }
 
-  cancelGoal({
+  cancelGoal({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>): Promise<GoalSnapshot> {
+    return Promise.resolve(this.sessionApi(sessionId).cancelGoal(payload));
+  }
+
+  getCronTasks({
     sessionId,
     ...payload
-  }: SessionAgentPayload<EmptyPayload>): Promise<GoalSnapshot> {
-    return Promise.resolve(this.sessionApi(sessionId).cancelGoal(payload));
+  }: SessionAgentPayload<EmptyPayload>): Promise<GetCronTasksResult> {
+    return Promise.resolve(this.sessionApi(sessionId).getCronTasks(payload));
   }
 
   async installPlugin(payload: InstallPluginPayload): Promise<PluginSummary> {
@@ -825,11 +1155,9 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     this.assertPluginsLoaded();
     const info = this.plugins.info(id);
     if (info === undefined) {
-      throw new KimiError(
-        ErrorCodes.PLUGIN_NOT_FOUND,
-        `Plugin "${id}" is not installed`,
-        { details: { id } },
-      );
+      throw new KimiError(ErrorCodes.PLUGIN_NOT_FOUND, `Plugin "${id}" is not installed`, {
+        details: { id },
+      });
     }
     return info;
   }
@@ -921,8 +1249,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     const envBaseUrl = process.env[KIMI_CODE_BASE_URL_ENV];
     const envOAuthHost = process.env[KIMI_CODE_OAUTH_HOST_ENV] ?? process.env[KIMI_OAUTH_HOST_ENV];
     const hasEnvOverride = envBaseUrl !== undefined || envOAuthHost !== undefined;
-    const baseUrl =
-      envBaseUrl !== undefined ? envBaseUrl.replace(/\/+$/, '') : provider?.baseUrl;
+    const baseUrl = envBaseUrl !== undefined ? envBaseUrl.replace(/\/+$/, '') : provider?.baseUrl;
     const oauthHost = hasEnvOverride ? envOAuthHost : provider?.oauth?.oauthHost;
     const env: Record<string, string> = {};
     if (baseUrl !== undefined) env[KIMI_CODE_BASE_URL_ENV] = baseUrl;
@@ -930,14 +1257,18 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return env;
   }
 
-  private sessionApi(sessionId: string): SessionAPIImpl {
+  private requireSession(sessionId: string): Session {
     const session = this.sessions.get(sessionId);
     if (session === undefined) {
       throw new KimiError(ErrorCodes.SESSION_NOT_FOUND, `Session "${sessionId}" was not found`, {
         details: { sessionId },
       });
     }
-    return new SessionAPIImpl(session);
+    return session;
+  }
+
+  private sessionApi(sessionId: string): SessionAPIImpl {
+    return new SessionAPIImpl(this.requireSession(sessionId));
   }
 
   private reloadProviderManager(): KimiConfig {
@@ -970,7 +1301,18 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   private setRuntimeConfig(config: KimiConfig): KimiConfig {
     this.config = config;
     this.experimentalFlags.setConfigOverrides(config.experimental);
+    this.imageLimits.setConfig(config.image);
     return this.config;
+  }
+
+  /**
+   * Config bound to a newly created/resumed session. In print mode (`kimi -p`,
+   * v1) the print-mode defaults are merged in; explicit user config wins. The
+   * raw `this.config` is left untouched so `getKimiConfig` and config writes
+   * still round-trip the user's file values.
+   */
+  private withPrintModeDefaults(config: KimiConfig): KimiConfig {
+    return this.printMode ? applyPrintModeConfigDefaults(config) : config;
   }
 
   private clearRuntimeCache(): void {
@@ -978,10 +1320,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     this.runtime = undefined;
   }
 
-  private async refreshSessionRuntimeConfig(
-    session: Session,
-    config: KimiConfig,
-  ): Promise<void> {
+  private async refreshSessionRuntimeConfig(session: Session, config: KimiConfig): Promise<void> {
     const api = new SessionAPIImpl(session);
     // A session migrated from an external tool carries no model, and any
     // session may reference a model alias that no longer exists in config.toml.
@@ -1013,6 +1352,58 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       }
     }
   }
+}
+
+function requireRemoteMcpServer(server: GlobalMcpServerConfig): McpRemoteServerConfig {
+  const config = mcpConfigWithoutName(server);
+  if (config.transport !== 'stdio') return config;
+  throw new KimiError(
+    ErrorCodes.REQUEST_INVALID,
+    `MCP server "${server.name}" does not use a remote transport`,
+  );
+}
+
+function requireOAuthMcpServer(server: GlobalMcpServerConfig): McpRemoteServerConfig {
+  const config = requireRemoteMcpServer(server);
+  if (config.bearerTokenEnvVar !== undefined) {
+    throw new KimiError(
+      ErrorCodes.REQUEST_INVALID,
+      `MCP server "${server.name}" uses a static bearer token`,
+    );
+  }
+  if (config.headers !== undefined && config.auth !== 'oauth') {
+    throw new KimiError(
+      ErrorCodes.REQUEST_INVALID,
+      `MCP server "${server.name}" uses static headers and is not marked for OAuth`,
+    );
+  }
+  return config;
+}
+
+function mcpConfigWithoutName(server: GlobalMcpServerConfig): McpServerConfig {
+  const { name: _name, ...config } = server;
+  return config;
+}
+
+function standaloneMcpTestResult(
+  name: string,
+  manager: McpConnectionManager,
+): GlobalMcpServerTestResult {
+  const entry = manager.get(name);
+  if (entry?.status !== 'connected') {
+    return {
+      success: false,
+      output:
+        entry?.error ?? `MCP server "${name}" finished with status ${entry?.status ?? 'unknown'}`,
+    };
+  }
+  const tools = manager.resolved(name)?.rawTools ?? [];
+  const lines = [
+    `Connected to MCP server "${name}".`,
+    `Available tools: ${tools.length}`,
+    ...tools.map((tool) => `- ${tool.name}${tool.description ? `: ${tool.description}` : ''}`),
+  ];
+  return { success: true, output: lines.join('\n') };
 }
 
 async function createRuntimeConfig(input: {
@@ -1080,17 +1471,57 @@ function createSessionId(): string {
   return `session_${randomUUID()}`;
 }
 
+function withAdditionalDirs<T>(
+  result: T,
+  session: Session,
+): T & { readonly additionalDirs: readonly string[] } {
+  return {
+    ...result,
+    additionalDirs: session.getAdditionalDirs(),
+  };
+}
+
 function telemetryErrorReason(error: unknown): string {
   if (error instanceof KimiError) return error.code;
   if (error instanceof Error && error.name.length > 0) return error.name;
   return typeof error;
 }
 
+function clientTelemetryProperties(client: ClientTelemetryInfo | undefined): TelemetryProperties {
+  if (client === undefined) return {};
+  // Emit a fixed key set (null when the client did not provide a field) so
+  // `session_started` has a stable schema across clients, matching the harness
+  // producer in `kimi-harness.ts`. Other session events also inherit these as
+  // context properties, so they share the same stable client-attribution shape.
+  return {
+    client_id: client.id ?? null,
+    client_name: client.name ?? null,
+    client_version: client.version ?? null,
+    ui_mode: client.uiMode ?? null,
+  };
+}
+
 async function resumeSessionResult(
   summary: SessionSummary,
   session: Session,
   warning?: string,
+  includeSubagents = false,
 ): Promise<ResumeSessionResult> {
+  if (includeSubagents) {
+    const persistedAgentIds = Object.keys(session.metadata.agents).filter(
+      (agentId) => agentId !== 'main',
+    );
+    const resumedAgents = await Promise.allSettled(
+      persistedAgentIds.map((agentId) => session.ensureAgentResumed(agentId)),
+    );
+    for (const [index, result] of resumedAgents.entries()) {
+      if (result.status === 'fulfilled') continue;
+      session.log.warn('persisted subagent replay unavailable during session resume', {
+        agentId: persistedAgentIds[index],
+        error: result.reason,
+      });
+    }
+  }
   const api = new SessionAPIImpl(session);
   const agents: Record<string, ResumedAgentState> = {};
   for (const [agentId, entry] of session.agents) {
@@ -1116,12 +1547,15 @@ async function resumeSessionResult(
       background: agent.background.list(false),
     };
   }
-  return {
-    ...summary,
-    sessionMetadata: api.getSessionMetadata({}),
-    agents,
-    warning,
-  };
+  return withAdditionalDirs(
+    {
+      ...summary,
+      sessionMetadata: api.getSessionMetadata({}),
+      agents,
+      warning,
+    },
+    session,
+  );
 }
 
 async function warnIfLogFlushFails(

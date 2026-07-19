@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+
 import { join } from 'pathe';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -12,7 +13,7 @@ describe('generateDefaultMcpGroups', () => {
 
   it('always creates the full wildcard group when servers exist', () => {
     const groups = generateDefaultMcpGroups(['semgrep']);
-    expect(groups.full).toEqual({
+    expect(groups['full']).toEqual({
       description: '全量模式（所有服务器）',
       servers: ['*'],
       skillPrefixes: ['*'],
@@ -21,25 +22,25 @@ describe('generateDefaultMcpGroups', () => {
 
   it('creates the android group when android servers are present', () => {
     const groups = generateDefaultMcpGroups(['ida', 'jadx', 'semgrep']);
-    expect(groups.android).toEqual({
+    expect(groups['android']).toEqual({
       description: '移动安全组：APK反编译 + 二进制逆向 + WebView调试 + ADB设备控制 + Frida动态插桩',
       servers: ['ida', 'jadx'],
-      skillPrefixes: ['android-', 'apk-'],
+      skillPrefixes: ['android-', 'apk-', 'audit-'],
     });
-    expect(groups.web).toBeUndefined();
-    expect(groups.binary).toEqual({
+    expect(groups['web']).toBeUndefined();
+    expect(groups['binary']).toEqual({
       description: '桌面二进制逆向：IDA静态分析 + GDB动态调试 + Frida插桩',
       servers: ['ida'],
-      skillPrefixes: ['audit-'],
+      skillPrefixes: ['binary-', 'audit-', 'code-'],
     });
   });
 
   it('creates the web group when web servers are present', () => {
     const groups = generateDefaultMcpGroups(['playwright', 'semgrep']);
-    expect(groups.web).toEqual({
+    expect(groups['web']).toEqual({
       description: 'Web挖洞组：浏览器自动化 + 深度调试 + JS逆向 + 云端渗透',
       servers: ['playwright'],
-      skillPrefixes: ['web-', 'cloud-'],
+      skillPrefixes: ['web-', 'cloud-', 'audit-'],
     });
   });
 });
@@ -65,8 +66,8 @@ describe('loadMcpGroups', () => {
       JSON.stringify({ mcpServers: { ida: { transport: 'stdio', command: 'ida' } } }),
     );
     const groups = await loadMcpGroups({ cwd, homeDir });
-    expect(groups.full).toBeDefined();
-    expect(groups.android).toBeDefined();
+    expect(groups['full']).toBeDefined();
+    expect(groups['android']).toBeDefined();
   });
 
   it('merges explicit groups from all three locations with later files winning', async () => {
@@ -84,9 +85,9 @@ describe('loadMcpGroups', () => {
     );
 
     const groups = await loadMcpGroups({ cwd, homeDir });
-    expect(groups.shared.servers).toEqual(['b']);
-    expect(groups.root.servers).toEqual(['c']);
-    expect(groups.local.servers).toEqual(['d']);
+    expect(groups['shared']?.servers).toEqual(['b']);
+    expect(groups['root']?.servers).toEqual(['c']);
+    expect(groups['local']?.servers).toEqual(['d']);
   });
 
   it('does not generate defaults when explicit groups exist', async () => {
@@ -98,7 +99,7 @@ describe('loadMcpGroups', () => {
       }),
     );
     const groups = await loadMcpGroups({ cwd, homeDir });
-    expect(groups.custom).toBeDefined();
-    expect(groups.full).toBeUndefined();
+    expect(groups['custom']).toBeDefined();
+    expect(groups['full']).toBeUndefined();
   });
 });

@@ -3,13 +3,15 @@
  *
  * Layout:
  *   Line 1: [yolo] [plan] <model> <cwd>  <git-badge>  <shortcut hints>
- *   Line 2: context: XX.X% (tokens/max)
+ *   Line 2: context: N% (tokens/max)
  */
 
-import type { Component } from '@earendil-works/pi-tui';
-import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import type { Component } from '@moonshot-ai/pi-tui';
+import { truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
 import chalk from 'chalk';
+import { effectiveModelAlias } from '@moonshot-ai/kimi-code-sdk';
 
+import { ALL_TIPS, type ToolbarTip } from '#/tui/constant/tips';
 import { isRainbowDancing, renderDanceFooterModel } from '#/tui/easter-eggs/dance';
 import { currentTheme } from '#/tui/theme';
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -21,7 +23,11 @@ import {
   type GitStatus,
   type GitStatusCache,
 } from '#/utils/git/git-status';
-import { safeUsageRatio } from '#/utils/usage/usage-format';
+import {
+  formatTokenCount,
+  usagePercent,
+  usagePercentFromRatio,
+} from '#/utils/usage/usage-format';
 
 const MAX_CWD_SEGMENTS = 3;
 const GOAL_TIMER_INTERVAL_MS = 1_000;
@@ -31,46 +37,8 @@ const GOAL_TIMER_INTERVAL_MS = 1_000;
 // important enough to take the whole slot on their own. A `priority` weight
 // makes a tip recur more often in the rotation (default 1). Width is always
 // the final arbiter (a pair that doesn't fit falls back to its first tip).
-//
-// This is deliberately code-level configuration: edit the interval and the
-// TOOLBAR_TIPS array below to change what the footer advertises.
 const TIP_ROTATE_INTERVAL_MS = 10_000;
 const TIP_SEPARATOR = ' | ';
-
-export interface ToolbarTip {
-  readonly text: string;
-  /**
-   * Long/important tips render on their own. They never pair with a
-   * neighbour and never appear as the second half of someone else's pair.
-   */
-  readonly solo?: boolean;
-  /**
-   * Rotation weight: a higher value makes the tip recur more often. Defaults
-   * to 1. Used to give newer/important features more airtime.
-   */
-  readonly priority?: number;
-}
-
-const TOOLBAR_TIPS: readonly ToolbarTip[] = [
-  { text: 'shift+tab: plan mode' },
-  { text: '/model: switch model' },
-  { text: 'ctrl+s: steer mid-turn', priority: 2 },
-  { text: '/compact: compact context', priority: 2 },
-  { text: 'ctrl+o: expand tool output' },
-  { text: '/tasks: background tasks' },
-  { text: 'shift+enter: newline' },
-  { text: '/init: generate AGENTS.md', priority: 2 },
-  { text: '@: mention files' },
-  { text: '! to run a shell command', priority: 2 },
-  { text: 'ctrl+c: cancel' },
-  { text: '/theme: switch theme' },
-  { text: '/auto: auto permission mode' },
-  { text: '/yolo: toggle yolo' },
-  { text: '/help: show commands' },
-  { text: '/dance: rainbow mode, because why not' },
-  { text: '/plugins: manage plugins — try the "superpowers" plugin', solo: true, priority: 3 },
-  { text: 'ask Kimi to schedule tasks, e.g. "remind me at 5pm"', solo: true, priority: 3 },
-];
 
 /**
  * Expand tips into a rotation sequence using smooth weighted round-robin
@@ -99,7 +67,7 @@ export function buildWeightedTips(tips: readonly ToolbarTip[]): readonly Toolbar
   return seq;
 }
 
-const ROTATION: readonly ToolbarTip[] = buildWeightedTips(TOOLBAR_TIPS);
+const ROTATION: readonly ToolbarTip[] = buildWeightedTips(ALL_TIPS);
 
 function currentTipIndex(): number {
   return Math.floor(Date.now() / TIP_ROTATE_INTERVAL_MS);
@@ -169,7 +137,8 @@ function formatBadgeElapsed(ms: number): string {
 
 function modelDisplayName(state: AppState): string {
   const model = state.availableModels[state.model];
-  return model?.displayName ?? model?.model ?? state.model;
+  const effective = model === undefined ? undefined : effectiveModelAlias(model);
+  return effective?.displayName ?? effective?.model ?? state.model;
 }
 
 function shortenCwd(path: string): string {
@@ -189,22 +158,18 @@ function shortenCwd(path: string): string {
   return `…/${tail}`;
 }
 
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
-function safeUsage(usage: number): number {
-  return safeUsageRatio(usage);
-}
-
+/**
+ * Footer context readout. Percent comes from the exact token counts when
+ * both are known (the ratio can lag a step behind); otherwise it falls
+ * back to the precomputed ratio. Counts use the shared 1024-based
+ * formatter.
+ */
 function formatContextStatus(usage: number, tokens?: number, maxTokens?: number): string {
-  const pct = `${(safeUsage(usage) * 100).toFixed(1)}%`;
-  if (maxTokens && maxTokens > 0 && tokens !== undefined) {
-    return `context: ${pct} (${formatTokenCount(tokens)}/${formatTokenCount(maxTokens)})`;
+  if (maxTokens !== undefined && maxTokens > 0 && tokens !== undefined) {
+    const pct = String(usagePercent(tokens, maxTokens));
+    return `context: ${pct}% (${formatTokenCount(tokens)}/${formatTokenCount(maxTokens)})`;
   }
-  return `context: ${pct}`;
+  return `context: ${String(usagePercentFromRatio(usage))}%`;
 }
 
 export function formatFooterGitBadge(status: GitStatus, colors: ColorPalette): string {
@@ -265,6 +230,10 @@ export class FooterComponent implements Component {
     this.transientHint = hint;
   }
 
+  getTransientHint(): string | null {
+    return this.transientHint;
+  }
+
   /**
    * Sync both background-task badges with live counts. Each non-zero
    * count produces its own bracketed badge on line 1; zeros hide them
@@ -295,7 +264,18 @@ export class FooterComponent implements Component {
 
     const model = modelDisplayName(state);
     if (model) {
-      const thinkingLabel = state.thinking ? ' thinking' : '';
+      const effort = state.thinkingEffort;
+      const rawCurrentModel = state.availableModels[state.model];
+      const currentModel = rawCurrentModel === undefined ? undefined : effectiveModelAlias(rawCurrentModel);
+      // Only effort-capable models (those declaring support_efforts) show the
+      // concrete effort; legacy boolean models keep the plain "thinking" suffix.
+      const hasEfforts = (currentModel?.supportEfforts?.length ?? 0) > 0;
+      const thinkingLabel =
+        effort !== 'off'
+          ? hasEfforts && effort !== 'on'
+            ? ` thinking: ${effort}`
+            : ' thinking'
+          : '';
       const modelLabel = `${model}${thinkingLabel}`;
       let renderedModelLabel = chalk.hex(colors.text)(modelLabel);
       if (isRainbowDancing()) {
@@ -397,6 +377,13 @@ export class FooterComponent implements Component {
       return;
     }
 
+    if (this.goalTimer !== null) {
+      clearInterval(this.goalTimer);
+      this.goalTimer = null;
+    }
+  }
+
+  dispose(): void {
     if (this.goalTimer !== null) {
       clearInterval(this.goalTimer);
       this.goalTimer = null;

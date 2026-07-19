@@ -5,16 +5,19 @@
  *   GET     /v1/sessions/{id}/profile     -                     data: Session
  *   POST    /v1/sessions/{id}/profile     body: SessionUpdate   data: Session
  *   POST    /v1/sessions/{id}:fork        body: SessionFork     data: Session
+ *   POST    /v1/sessions/{id}:btw         -                     data: StartBtwSession
  *   GET     /v1/sessions/{id}/children    query: ListSessions   data: Page<Session>
  *   POST    /v1/sessions/{id}/children    body: SessionChild    data: Session
- *   GET     /v1/sessions/{id}/status      -                     data: SessionStatus
+ *   GET     /v1/sessions/{id}/status      -                     data: SessionStatusResponse
  *   POST    /v1/sessions/{id}:compact     body: CompactSession  data: {}
  *   POST    /v1/sessions/{id}:undo        body: UndoSession     data: UndoSession
- *   DELETE  /v1/sessions/{id}             -                     data: { deleted: true }
+ *   POST    /v1/sessions/{id}:archive     -                     data: { archived: true }
+ *   POST    /v1/sessions/{id}:restore     -                     data: Session
  */
 
 import { z } from 'zod';
 
+import { goalSnapshotSchema } from '../events';
 import { messageSchema } from '../message';
 import { cursorQuerySchema, pageResponseSchema } from '../pagination';
 import {
@@ -22,7 +25,6 @@ import {
   sessionCreateSchema,
   sessionForkSchema,
   sessionSchema,
-  sessionStatusSchema,
   sessionUpdateSchema,
 } from '../session';
 
@@ -32,9 +34,21 @@ export type CreateSessionRequest = z.infer<typeof createSessionRequestSchema>;
 export const createSessionResponseSchema = sessionSchema;
 export type CreateSessionResponse = z.infer<typeof createSessionResponseSchema>;
 
+const booleanQueryParam = z.preprocess(
+  (value) => {
+    if (value === 'true' || value === '1' || value === 1 || value === true) return true;
+    if (value === 'false' || value === '0' || value === 0 || value === false) return false;
+    return value;
+  },
+  z.boolean().optional(),
+);
+
 export const listSessionsQuerySchema = cursorQuerySchema.and(
   z.object({
-    status: sessionStatusSchema.optional(),
+    busy: booleanQueryParam,
+    include_archive: booleanQueryParam,
+    archived_only: booleanQueryParam,
+    exclude_empty: booleanQueryParam,
   }),
 );
 export type ListSessionsQuery = z.infer<typeof listSessionsQuerySchema>;
@@ -44,6 +58,25 @@ export type GetSessionResponse = z.infer<typeof getSessionResponseSchema>;
 
 export const getSessionProfileResponseSchema = sessionSchema;
 export type GetSessionProfileResponse = z.infer<typeof getSessionProfileResponseSchema>;
+
+export const MAX_SESSION_EXPORT_WEB_LOG_BYTES = 256 * 1024;
+
+export const exportSessionParamsSchema = z.object({
+  session_id: z.string().min(1),
+});
+export type ExportSessionParams = z.infer<typeof exportSessionParamsSchema>;
+
+export const exportSessionRequestSchema = z
+  .object({
+    web_log: z
+      .string()
+      .refine((value) => fitsUtf8ByteLimit(value, MAX_SESSION_EXPORT_WEB_LOG_BYTES), {
+        message: `web_log must not exceed ${MAX_SESSION_EXPORT_WEB_LOG_BYTES} UTF-8 bytes`,
+      })
+      .optional(),
+  })
+  .strict();
+export type ExportSessionRequest = z.infer<typeof exportSessionRequestSchema>;
 
 export const updateSessionProfileRequestSchema = sessionUpdateSchema;
 export type UpdateSessionProfileRequest = z.infer<typeof updateSessionProfileRequestSchema>;
@@ -69,7 +102,19 @@ export type ForkSessionRequest = z.infer<typeof forkSessionRequestSchema>;
 export const forkSessionResponseSchema = sessionSchema;
 export type ForkSessionResponse = z.infer<typeof forkSessionResponseSchema>;
 
-export const listSessionChildrenQuerySchema = listSessionsQuerySchema;
+export const startBtwSessionResponseSchema = z.object({
+  agent_id: z.string().min(1),
+});
+export type StartBtwSessionResponse = z.infer<typeof startBtwSessionResponseSchema>;
+
+// Child lists intentionally omit exclude_empty: the /sessions/{id}/children route
+// does not filter by it, so advertising it would mislead generated clients.
+export const listSessionChildrenQuerySchema = cursorQuerySchema.and(
+  z.object({
+    busy: booleanQueryParam,
+    include_archive: booleanQueryParam,
+  }),
+);
 export type ListSessionChildrenQuery = z.infer<typeof listSessionChildrenQuerySchema>;
 
 export const listSessionChildrenResponseSchema = pageResponseSchema(sessionSchema);
@@ -82,15 +127,37 @@ export const createSessionChildResponseSchema = sessionSchema;
 export type CreateSessionChildResponse = z.infer<typeof createSessionChildResponseSchema>;
 
 export const sessionStatusResponseSchema = z.object({
+  /** Any agent in the session holds an active turn. Replaces the derived
+   *  status enum; awaiting states ride the approval/question channels. */
+  busy: z.boolean(),
   model: z.string().optional(),
   thinking_level: z.string(),
   permission: z.string(),
   plan_mode: z.boolean(),
+  swarm_mode: z.boolean(),
   context_tokens: z.number().int().nonnegative(),
   max_context_tokens: z.number().int().nonnegative(),
   context_usage: z.number().min(0).max(1),
 });
 export type SessionStatusResponse = z.infer<typeof sessionStatusResponseSchema>;
+
+// GET /sessions/{id}/goal — the session's current goal snapshot (camelCase,
+// same shape as the `goal.updated` WS event payload), or null when none is
+// active.
+export const getSessionGoalResponseSchema = goalSnapshotSchema.nullable();
+export type GetSessionGoalResponse = z.infer<typeof getSessionGoalResponseSchema>;
+
+export const sessionWarningSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  severity: z.enum(['info', 'warning', 'error']),
+});
+export type SessionWarning = z.infer<typeof sessionWarningSchema>;
+
+export const sessionWarningsResponseSchema = z.object({
+  warnings: z.array(sessionWarningSchema),
+});
+export type SessionWarningsResponse = z.infer<typeof sessionWarningsResponseSchema>;
 
 export const compactSessionRequestSchema = z.preprocess(
   (value) => value === undefined ? {} : value,
@@ -118,7 +185,39 @@ export const undoSessionResponseSchema = z.object({
 });
 export type UndoSessionResponse = z.infer<typeof undoSessionResponseSchema>;
 
-export const deleteSessionResponseSchema = z.object({
-  deleted: z.literal(true),
+export const archiveSessionResponseSchema = z.object({
+  archived: z.literal(true),
 });
-export type DeleteSessionResponse = z.infer<typeof deleteSessionResponseSchema>;
+export type ArchiveSessionResponse = z.infer<typeof archiveSessionResponseSchema>;
+
+export const restoreSessionResponseSchema = sessionSchema;
+export type RestoreSessionResponse = z.infer<typeof restoreSessionResponseSchema>;
+
+/** @deprecated kept as an alias for backward compatibility; prefer archiveSessionResponseSchema. */
+export const deleteSessionResponseSchema = archiveSessionResponseSchema;
+/** @deprecated kept as an alias for backward compatibility; prefer ArchiveSessionResponse. */
+export type DeleteSessionResponse = ArchiveSessionResponse;
+
+export const sessionAbortResponseSchema = z.object({
+  aborted: z.boolean(),
+});
+export type SessionAbortResponse = z.infer<typeof sessionAbortResponseSchema>;
+
+function fitsUtf8ByteLimit(value: string, limit: number): boolean {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const codePoint = value.codePointAt(index)!;
+    if (codePoint < 0x80) {
+      bytes += 1;
+    } else if (codePoint < 0x800) {
+      bytes += 2;
+    } else if (codePoint > 0xffff) {
+      bytes += 4;
+      index += 1;
+    } else {
+      bytes += 3;
+    }
+    if (bytes > limit) return false;
+  }
+  return true;
+}

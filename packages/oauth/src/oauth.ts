@@ -11,7 +11,12 @@
  */
 
 import { extractApiErrorMessage } from './api-error';
-import { OAuthError, OAuthUnauthorizedError, RetryableRefreshError } from './errors';
+import {
+  OAuthConnectionError,
+  OAuthError,
+  OAuthUnauthorizedError,
+  RetryableRefreshError,
+} from './errors';
 import type { DeviceAuthorization, DeviceHeaders, OAuthFlowConfig, TokenInfo } from './types';
 import { isRecord } from './utils';
 
@@ -76,8 +81,9 @@ async function postForm(
       signal,
     });
   } catch (error) {
-    throw new OAuthError(
-      `OAuth request to ${url} failed: ${error instanceof Error ? error.message : String(error)}`,
+    throw new OAuthConnectionError(
+      `OAuth request to ${url} failed: ${describeFetchFailure(error)}`,
+      { cause: error },
     );
   }
   const status = response.status;
@@ -89,6 +95,23 @@ async function postForm(
     // Non-JSON response — leave data empty; caller interprets by status.
   }
   return { status, data };
+}
+
+/**
+ * Flatten a fetch rejection into a readable message. undici throws a generic
+ * `TypeError: fetch failed` and hides the real reason (DNS, refused, TLS,
+ * timeout) in a nested `cause` chain — walk it so the surfaced message names
+ * the actual failure instead of just "fetch failed".
+ */
+function describeFetchFailure(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const messages = new Set<string>();
+  let current: Error | undefined = error;
+  while (current !== undefined) {
+    messages.add(current.message);
+    current = current.cause instanceof Error ? current.cause : undefined;
+  }
+  return [...messages].join(': ');
 }
 
 // ── requestDeviceAuthorization ────────────────────────────────────────

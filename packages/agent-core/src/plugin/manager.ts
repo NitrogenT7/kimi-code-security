@@ -4,6 +4,8 @@ import path from 'node:path';
 
 import type { McpServerConfig } from '../config/schema';
 import { discoverSkills, type SkillRoot } from '../skill';
+import type { HookDef } from '../session/hooks';
+import { loadPluginCommand } from './commands';
 import { downloadZip, extractZip } from './archive';
 import { resolveGithubSource } from './github-resolver';
 import { parseManifest, type ParsedManifestResult } from './manifest';
@@ -12,6 +14,7 @@ import { resolveInstallSource } from './source';
 import {
   type EnabledPluginSessionStart,
   type PluginCapabilityState,
+  type PluginCommandDef,
   type PluginGithubMetadata,
   type PluginInfo,
   type PluginMcpServerInfo,
@@ -239,6 +242,37 @@ export class PluginManager {
     return out;
   }
 
+  enabledHooks(): readonly HookDef[] {
+    const out: HookDef[] = [];
+    for (const record of this.records.values()) {
+      if (!record.enabled || record.state !== 'ok' || record.manifest === undefined) continue;
+      for (const hook of record.manifest.hooks ?? []) {
+        out.push({
+          ...hook,
+          cwd: record.root,
+          env: { KIMI_CODE_HOME: this.kimiHomeDir, KIMI_PLUGIN_ROOT: record.root },
+        });
+      }
+    }
+    return out;
+  }
+
+  async enabledCommands(): Promise<readonly PluginCommandDef[]> {
+    const out: PluginCommandDef[] = [];
+    for (const record of this.records.values()) {
+      if (!record.enabled || record.state !== 'ok' || record.manifest === undefined) continue;
+      for (const entry of record.manifest.commands ?? []) {
+        const def = await loadPluginCommand({
+          commandPath: entry.path,
+          pluginId: record.id,
+          fallbackName: entry.name,
+        });
+        if (def !== undefined) out.push(def);
+      }
+    }
+    return out;
+  }
+
   summaries(): readonly PluginSummary[] {
     return this.list().map((record) => recordToSummary(record));
   }
@@ -362,6 +396,8 @@ function recordToSummary(record: PluginRecord): PluginSummary {
     skillCount: record.skillCount,
     mcpServerCount: Object.keys(record.manifest?.mcpServers ?? {}).length,
     enabledMcpServerCount: pluginMcpServersInfo(record).filter((server) => server.enabled).length,
+    hookCount: record.manifest?.hooks?.length ?? 0,
+    commandCount: record.manifest?.commands?.length ?? 0,
     hasErrors: record.diagnostics.some((d) => d.severity === 'error'),
     source: record.source,
     originalSource: record.originalSource,
@@ -417,25 +453,25 @@ function pluginMcpServerInfo(
   name: string,
   config: McpServerConfig,
 ): PluginMcpServerInfo {
-  if (config.transport === 'stdio') {
+  if (config.transport === 'http' || config.transport === 'sse') {
     return {
       name,
       runtimeName: pluginMcpRuntimeName(record.id, name),
       enabled: isMcpServerEnabled(record, name, config),
-      transport: 'stdio',
-      command: config.command,
-      args: config.args,
-      cwd: config.cwd,
-      envKeys: config.env === undefined ? undefined : Object.keys(config.env).toSorted(),
+      transport: config.transport,
+      url: config.url,
+      headerKeys: config.headers === undefined ? undefined : Object.keys(config.headers).toSorted(),
     };
   }
   return {
     name,
     runtimeName: pluginMcpRuntimeName(record.id, name),
     enabled: isMcpServerEnabled(record, name, config),
-    transport: config.transport,
-    url: config.url,
-    headerKeys: config.headers === undefined ? undefined : Object.keys(config.headers).toSorted(),
+    transport: 'stdio',
+    command: config.command,
+    args: config.args,
+    cwd: config.cwd,
+    envKeys: config.env === undefined ? undefined : Object.keys(config.env).toSorted(),
   };
 }
 
@@ -454,7 +490,7 @@ function withPluginMcpRuntime(
   pluginRoot: string,
   kimiHomeDir: string,
 ): McpServerConfig {
-  if (config.transport !== 'stdio') return config;
+  if (config.transport === 'http' || config.transport === 'sse') return config;
 
   const env = {
     ...config.env,

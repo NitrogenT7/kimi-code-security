@@ -9,19 +9,25 @@ import {
 import { type ApprovalHandler, type Event, type QuestionHandler } from '#/events';
 import type { SDKRpcClientBase } from '#/rpc';
 import type {
+  AddAdditionalDirOptions,
+  AddAdditionalDirResult,
   BackgroundTaskInfo,
   CompactOptions,
   CreateGoalInput,
+  GetCronTasksResult,
   GoalSnapshot,
   GoalTemplateDetail,
   GoalTemplateSummary,
   GoalToolResult,
+  JsonObject,
+  McpGroupInfo,
   McpServerInfo,
   McpStartupMetrics,
   PermissionMode,
   PluginInfo,
   PluginSummary,
   PromptInput,
+  ReloadSessionOptions,
   ReloadSummary,
   ResumedSessionState,
   ResumedSessionSummary,
@@ -30,6 +36,8 @@ import type {
   SessionSummary,
   SessionUsage,
   SkillSummary,
+  PluginCommandDef,
+  ThinkingEffort,
   Unsubscribe,
 } from '#/types';
 
@@ -68,9 +76,12 @@ export class Session {
     return this.resumeState;
   }
 
-  async reloadSession(): Promise<ResumedSessionSummary> {
+  async reloadSession(options?: ReloadSessionOptions): Promise<ResumedSessionSummary> {
     this.ensureOpen();
-    const summary = await this.rpc.reloadSession({ sessionId: this.id });
+    const summary = await this.rpc.reloadSession({
+      sessionId: this.id,
+      forcePluginSessionStartReminder: options?.forcePluginSessionStartReminder,
+    });
     this.summary = summary;
     this.resumeState = resumeStateFromSummary(summary);
     return summary;
@@ -103,6 +114,27 @@ export class Session {
     });
   }
 
+  /** Execute a user-initiated `!` shell command (silent — does not prompt the
+   *  model). Resolves with the command's stdout/stderr for immediate display.
+   *  Pass `commandId` to receive live `shell.output` events for this command. */
+  async runShellCommand(
+    command: string,
+    options?: { commandId?: string },
+  ): Promise<{ stdout: string; stderr: string; isError?: boolean; backgrounded?: boolean }> {
+    this.ensureOpen();
+    return this.rpc.runShellCommand({
+      sessionId: this.id,
+      command,
+      commandId: options?.commandId,
+    });
+  }
+
+  /** Cancel a running `!` shell command by its commandId (e.g. on Esc / Ctrl+C). */
+  async cancelShellCommand(commandId: string): Promise<void> {
+    this.ensureOpen();
+    return this.rpc.cancelShellCommand({ sessionId: this.id, commandId });
+  }
+
   async steer(input: string | PromptInput): Promise<void> {
     this.ensureOpen();
     await this.rpc.steer({
@@ -122,6 +154,30 @@ export class Session {
   async init(): Promise<void> {
     this.ensureOpen();
     await this.rpc.generateAgentsMd({ sessionId: this.id });
+  }
+
+  async getSessionWarnings() {
+    this.ensureOpen();
+    return this.rpc.getSessionWarnings({ sessionId: this.id });
+  }
+
+  async addAdditionalDir(
+    path: string,
+    options?: AddAdditionalDirOptions,
+  ): Promise<AddAdditionalDirResult> {
+    this.ensureOpen();
+    const normalized = normalizeRequiredString(
+      path,
+      'Additional directory cannot be empty',
+      ErrorCodes.REQUEST_INVALID,
+    );
+    const result = await this.rpc.addAdditionalDir({
+      id: this.id,
+      path: normalized,
+      persist: options?.persist ?? true,
+    });
+    this.summary = { ...this.requireSummary(), additionalDirs: result.additionalDirs };
+    return result;
   }
 
   async startBtw(): Promise<string> {
@@ -144,14 +200,14 @@ export class Session {
     await this.rpc.setModel({ sessionId: this.id, model: normalized });
   }
 
-  async setThinking(level: string): Promise<void> {
+  async setThinking(effort: ThinkingEffort): Promise<void> {
     this.ensureOpen();
     const normalized = normalizeRequiredString(
-      level,
-      'Session thinking level cannot be empty',
+      effort,
+      'Session thinking effort cannot be empty',
       ErrorCodes.SESSION_THINKING_EMPTY,
     );
-    await this.rpc.setThinking({ sessionId: this.id, level: normalized });
+    await this.rpc.setThinking({ sessionId: this.id, effort: normalized });
   }
 
   async setPermission(mode: PermissionMode): Promise<void> {
@@ -163,6 +219,30 @@ export class Session {
       );
     }
     await this.rpc.setPermission({ sessionId: this.id, mode });
+  }
+
+  /** Shallow-merge host-owned fields into this session's persisted custom metadata. */
+  async updateMetadata(patch: JsonObject): Promise<void> {
+    this.ensureOpen();
+    if (Object.hasOwn(patch, 'goal')) {
+      throw new KimiError(
+        ErrorCodes.GOAL_METADATA_RESERVED,
+        'Session metadata key "goal" is reserved for the goal lifecycle',
+      );
+    }
+    const summary = this.requireSummary();
+    await this.rpc.updateSessionMetadata({ sessionId: this.id, metadata: patch });
+    const metadata = { ...summary.metadata, ...patch };
+    this.summary = { ...summary, metadata };
+    if (this.resumeState !== undefined) {
+      this.resumeState = {
+        ...this.resumeState,
+        sessionMetadata: {
+          ...this.resumeState.sessionMetadata,
+          custom: { ...this.resumeState.sessionMetadata.custom, ...patch },
+        },
+      };
+    }
   }
 
   async setPlanMode(enabled: boolean): Promise<void> {
@@ -220,6 +300,18 @@ export class Session {
     await this.rpc.undoHistory({ sessionId: this.id, count });
   }
 
+  /** Clear this session's model context without creating a new session. */
+  async clearContext(): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.clearContext({ sessionId: this.id });
+  }
+
+  /** Append imported text to this session's context without prompting the model. */
+  async importContext(content: string, source: string): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.importContext({ sessionId: this.id, content, source });
+  }
+
   async getContext(): Promise<AgentContextData> {
     this.ensureOpen();
     return this.rpc.getContext({ sessionId: this.id });
@@ -238,6 +330,11 @@ export class Session {
   async listSkills(): Promise<readonly SkillSummary[]> {
     this.ensureOpen();
     return this.rpc.listSkills({ sessionId: this.id });
+  }
+
+  async listPluginCommands(): Promise<readonly PluginCommandDef[]> {
+    this.ensureOpen();
+    return this.rpc.listPluginCommands({ sessionId: this.id });
   }
 
   /**
@@ -304,41 +401,47 @@ export class Session {
     });
   }
 
-  async runShellCommand(
-    command: string,
-    options: { commandId?: string } = {},
-  ): Promise<{ stdout: string; stderr: string; isError?: boolean; backgrounded?: boolean }> {
+  /**
+   * Detach a running foreground task so the current tool call can return while
+   * the task continues under background-task management.
+   */
+  async detachBackgroundTask(taskId: string): Promise<BackgroundTaskInfo | undefined> {
     this.ensureOpen();
-    const trimmedCommand = normalizeRequiredString(
-      command,
-      'Command cannot be empty',
-      ErrorCodes.REQUEST_INVALID,
+    const trimmedTaskId = normalizeRequiredString(
+      taskId,
+      'Task id cannot be empty',
+      ErrorCodes.BACKGROUND_TASK_ID_EMPTY,
     );
-    return this.rpc.runShellCommand({
+    return this.rpc.detachBackgroundTask({
       sessionId: this.id,
-      command: trimmedCommand,
-      commandId: options.commandId,
+      taskId: trimmedTaskId,
     });
   }
 
-  async cancelShellCommand(commandId: string): Promise<void> {
+  /**
+   * Block until every still-running background task (across all agents in this
+   * session) reaches a terminal state. Used by `kimi -p` after the main agent's
+   * turn finishes when the resolved print background mode is `'drain'`
+   * (`print_background_mode = "drain"`, or the legacy `keep_alive_on_exit = true`
+   * fallback), so background subagents get a chance to complete before the process
+   * exits. No-op in other modes. Bounded by `background.print_wait_ceiling_s`.
+   */
+  async waitForBackgroundTasksOnPrint(): Promise<void> {
     this.ensureOpen();
-    const trimmedCommandId = normalizeRequiredString(
-      commandId,
-      'Command id cannot be empty',
-      ErrorCodes.REQUEST_INVALID,
-    );
-    await this.rpc.cancelShellCommand({ sessionId: this.id, commandId: trimmedCommandId });
+    await this.rpc.waitForBackgroundTasksOnPrint({ sessionId: this.id });
   }
 
-  async detachShellCommand(commandId: string): Promise<{ info?: BackgroundTaskInfo }> {
+  /**
+   * Used by `kimi -p` after the main agent's turn ends with `reason ===
+   * 'completed'`. Returns `'finish'` when the run may exit, or `'continue'` when
+   * the caller must keep the session alive so a background-task completion can
+   * steer the main agent into a new turn. Policy is selected by
+   * `background.print_background_mode` (`'exit' | 'drain' | 'steer'`); when unset
+   * it falls back to the legacy `keep_alive_on_exit` mapping (`true ⇒ 'drain'`).
+   */
+  async handlePrintMainTurnCompleted(): Promise<'finish' | 'continue'> {
     this.ensureOpen();
-    const trimmedCommandId = normalizeRequiredString(
-      commandId,
-      'Command id cannot be empty',
-      ErrorCodes.REQUEST_INVALID,
-    );
-    return this.rpc.detachShellCommand({ sessionId: this.id, commandId: trimmedCommandId });
+    return this.rpc.handlePrintMainTurnCompleted({ sessionId: this.id });
   }
 
   // --- Goal lifecycle ---------------------------------------------------
@@ -382,6 +485,16 @@ export class Session {
     return this.rpc.getGoalTemplate({ sessionId: this.id, name });
   }
 
+  /**
+   * Enumerate the cron tasks scheduled in this session. Hosts running a
+   * bounded session lifetime (e.g. `kimi -p`) poll this to decide whether
+   * pending scheduled work still needs the process alive.
+   */
+  async getCronTasks(): Promise<GetCronTasksResult> {
+    this.ensureOpen();
+    return this.rpc.getCronTasks({ sessionId: this.id });
+  }
+
   async listMcpServers(): Promise<readonly McpServerInfo[]> {
     this.ensureOpen();
     return this.rpc.listMcpServers({ sessionId: this.id });
@@ -397,11 +510,27 @@ export class Session {
     await this.rpc.reconnectMcpServer({ sessionId: this.id, name });
   }
 
+  /**
+   * List the MCP groups declared in mcp.json (`mcpGroups`).
+   */
+  async listMcpGroups(): Promise<readonly McpGroupInfo[]> {
+    this.ensureOpen();
+    return this.rpc.listMcpGroups({ sessionId: this.id });
+  }
+
+  /**
+   * Connect every server in the named MCP group and mark it as the active
+   * group.
+   */
   async loadMcpGroup(name: string): Promise<void> {
     this.ensureOpen();
     await this.rpc.loadMcpGroup({ sessionId: this.id, name });
   }
 
+  /**
+   * Set or clear the active MCP group without connecting servers. Pass `null`
+   * to clear. Rejects when the engine does not support MCP groups.
+   */
   async setMcpGroupMode(groupName: string | null): Promise<void> {
     this.ensureOpen();
     await this.rpc.setMcpGroupMode({ sessionId: this.id, groupName });
@@ -461,6 +590,29 @@ export class Session {
     });
   }
 
+  async activatePluginCommand(
+    pluginId: string,
+    commandName: string,
+    args?: string | undefined,
+  ): Promise<void> {
+    this.ensureOpen();
+    const normalizedPluginId = pluginId.trim();
+    const normalizedCommandName = commandName.trim();
+    if (normalizedPluginId.length === 0 || normalizedCommandName.length === 0) {
+      throw new KimiError(
+        ErrorCodes.REQUEST_INVALID,
+        'Plugin id and command name cannot be empty',
+      );
+    }
+    const commandArgs = normalizeOptionalString(args);
+    await this.rpc.activatePluginCommand({
+      sessionId: this.id,
+      pluginId: normalizedPluginId,
+      commandName: normalizedCommandName,
+      ...(commandArgs !== undefined ? { args: commandArgs } : {}),
+    });
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
@@ -491,6 +643,13 @@ export class Session {
     if (this.closed) {
       throw new KimiError(ErrorCodes.SESSION_CLOSED, 'Session is closed');
     }
+  }
+
+  private requireSummary(): SessionSummary {
+    if (this.summary === undefined) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Session summary is unavailable');
+    }
+    return this.summary;
   }
 }
 

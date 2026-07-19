@@ -1,5 +1,48 @@
 # @moonshot-ai/acp-adapter
 
+## 0.3.4
+
+### Patch Changes
+
+- Updated dependencies [[`f0896a5`](https://github.com/MoonshotAI/kimi-code/commit/f0896a53b01f7e5b9bf5b8f93d2cd7387d765f07)]:
+  - @moonshot-ai/kimi-code-sdk@0.13.0
+
+## 0.3.3
+
+### Patch Changes
+
+- Updated dependencies [[`b905dd4`](https://github.com/MoonshotAI/kimi-code/commit/b905dd49108c567d0fecd38a096808c121672795), [`bf35f63`](https://github.com/MoonshotAI/kimi-code/commit/bf35f63c5d9b53625f3bf04f50b9a0bb49ced2c9), [`ace7901`](https://github.com/MoonshotAI/kimi-code/commit/ace79010669d19ad175bc25443b6efb41ca2e2ac), [`e47ca10`](https://github.com/MoonshotAI/kimi-code/commit/e47ca10267e75d0b462f9f54e1ae6fc188521703)]:
+  - @moonshot-ai/agent-core@0.15.0
+  - @moonshot-ai/kimi-code-sdk@0.12.0
+
+## 0.3.2
+
+### Patch Changes
+
+- Updated dependencies [[`a3f9cec`](https://github.com/MoonshotAI/kimi-code/commit/a3f9cec8a975f11e37e992e42f954789ed394207), [`108299b`](https://github.com/MoonshotAI/kimi-code/commit/108299be3cdffc31a23f64efd3ff5ba50976b412)]:
+  - @moonshot-ai/agent-core@0.14.3
+  - @moonshot-ai/kimi-code-sdk@0.11.0
+
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [[`c0eeca2`](https://github.com/MoonshotAI/kimi-code/commit/c0eeca24692edd736eecd3c2541d7566bac9f80f), [`2730079`](https://github.com/MoonshotAI/kimi-code/commit/27300797f2149900219b05dda49dce65e71fa85a), [`ba64072`](https://github.com/MoonshotAI/kimi-code/commit/ba64072559c1e9bb3447ede39991ac2e8bdb7645)]:
+  - @moonshot-ai/agent-core@0.14.0
+  - @moonshot-ai/kimi-code-sdk@0.10.0
+
+## 0.3.0
+
+### Minor Changes
+
+- [#744](https://github.com/MoonshotAI/kimi-code/pull/744) [`18f299f`](https://github.com/MoonshotAI/kimi-code/commit/18f299fd0b266545a1f7cebae9f58b83b9d9776e) - Add support for legacy SSE MCP servers alongside stdio and streamable HTTP transports.
+
+### Patch Changes
+
+- Updated dependencies [[`4516f62`](https://github.com/MoonshotAI/kimi-code/commit/4516f62f6a7e4dd7675a3aec16b2a26c5e310d83), [`8a92db6`](https://github.com/MoonshotAI/kimi-code/commit/8a92db6a0c110a21c6e6e86622f498e836178e5f), [`e10b25f`](https://github.com/MoonshotAI/kimi-code/commit/e10b25f9be18ca64aada0d0a3cab0e02fdbd46df), [`c6a9967`](https://github.com/MoonshotAI/kimi-code/commit/c6a996756cd8f1fb317b6eee6f4e668eebc7dc14), [`4516f62`](https://github.com/MoonshotAI/kimi-code/commit/4516f62f6a7e4dd7675a3aec16b2a26c5e310d83), [`9cef896`](https://github.com/MoonshotAI/kimi-code/commit/9cef89656311974a57e6675f474ea6c2adb1d8e9), [`046856b`](https://github.com/MoonshotAI/kimi-code/commit/046856b740afb604132e914f1fc489de72394036), [`4578f05`](https://github.com/MoonshotAI/kimi-code/commit/4578f05f44101f24d45c6452e2a6993cbb52e331), [`a562ef5`](https://github.com/MoonshotAI/kimi-code/commit/a562ef54e537a36211c48f0fe19e9252e83397a0), [`18f299f`](https://github.com/MoonshotAI/kimi-code/commit/18f299fd0b266545a1f7cebae9f58b83b9d9776e), [`ecd7a0a`](https://github.com/MoonshotAI/kimi-code/commit/ecd7a0afb646d14a14c780a4088fd8a59da134ad), [`1eb363f`](https://github.com/MoonshotAI/kimi-code/commit/1eb363f655aa44abc1e5c3af89016f00764ecc95)]:
+  - @moonshot-ai/agent-core@0.13.0
+  - @moonshot-ai/kimi-code-sdk@0.9.3
+
 ## 0.2.5
 
 ### Patch Changes

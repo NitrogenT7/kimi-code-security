@@ -15,12 +15,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
+
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
-import { toInputJsonSchema } from '../../support/input-schema';
 import type { ToolStore } from '../../store';
+import { toInputJsonSchema } from '../../support/input-schema';
 import { FINDINGS_STORE_KEY, type FindingItem } from './findings';
 import DESCRIPTION from './todo-list.md?raw';
 
@@ -126,7 +127,13 @@ function looksLikeQuestionItem(value: unknown): value is Record<string, unknown>
   if (typeof r['question'] !== 'string' || r['question'].trim().length === 0) return false;
   if (typeof r['id'] !== 'string' || r['id'].trim().length === 0) return false;
   const status = r['status'];
-  if (status !== 'pending' && status !== 'investigating' && status !== 'resolved' && status !== 'inconclusive') return false;
+  if (
+    status !== 'pending' &&
+    status !== 'investigating' &&
+    status !== 'resolved' &&
+    status !== 'inconclusive'
+  )
+    return false;
   const confidence = r['confidence'];
   if (confidence !== 'low' && confidence !== 'medium' && confidence !== 'high') return false;
   const depth = r['depth'];
@@ -151,7 +158,11 @@ function normalizeQuestionItem(raw: Record<string, unknown>): QuestionItem {
   return QuestionItemSchema.parse(raw);
 }
 
-function validateResolvedItem(evidence: readonly unknown[], conclusion: unknown, status: unknown): string | null {
+function validateResolvedItem(
+  evidence: readonly unknown[],
+  conclusion: unknown,
+  status: unknown,
+): string | null {
   if (status !== 'resolved') return null;
   const issues: string[] = [];
   if (!conclusion || (typeof conclusion === 'string' && conclusion.trim().length === 0)) {
@@ -169,10 +180,17 @@ function describeValidationIssue(value: unknown): string {
   }
   const r = value as Record<string, unknown>;
   if (r['type'] !== 'question') return 'Missing or invalid "type" field (must be "question")';
-  if (typeof r['question'] !== 'string' || r['question'].trim().length === 0) return 'Missing or empty "question" field';
-  if (typeof r['id'] !== 'string' || r['id'].trim().length === 0) return 'Missing or empty "id" field (provide a UUID)';
+  if (typeof r['question'] !== 'string' || r['question'].trim().length === 0)
+    return 'Missing or empty "question" field';
+  if (typeof r['id'] !== 'string' || r['id'].trim().length === 0)
+    return 'Missing or empty "id" field (provide a UUID)';
   const status = r['status'];
-  if (status !== 'pending' && status !== 'investigating' && status !== 'resolved' && status !== 'inconclusive') {
+  if (
+    status !== 'pending' &&
+    status !== 'investigating' &&
+    status !== 'resolved' &&
+    status !== 'inconclusive'
+  ) {
     return `Invalid "status": "${String(status)}" (must be pending|investigating|resolved|inconclusive)`;
   }
   const confidence = r['confidence'];
@@ -183,9 +201,12 @@ function describeValidationIssue(value: unknown): string {
   if (depth !== 'quick' && depth !== 'deep') {
     return `Invalid "depth": "${String(depth)}" (must be quick|deep)`;
   }
-  if (r['evidence'] !== undefined && !Array.isArray(r['evidence'])) return '"evidence" must be an array (use [] for empty)';
-  if (r['blockers'] !== undefined && !Array.isArray(r['blockers'])) return '"blockers" must be an array (use [] for empty)';
-  if (r['subQuestions'] !== undefined && !Array.isArray(r['subQuestions'])) return '"subQuestions" must be an array';
+  if (r['evidence'] !== undefined && !Array.isArray(r['evidence']))
+    return '"evidence" must be an array (use [] for empty)';
+  if (r['blockers'] !== undefined && !Array.isArray(r['blockers']))
+    return '"blockers" must be an array (use [] for empty)';
+  if (r['subQuestions'] !== undefined && !Array.isArray(r['subQuestions']))
+    return '"subQuestions" must be an array';
   return 'Unknown validation error';
 }
 
@@ -238,9 +259,12 @@ function migrateOldTodo(old: OldTodoItem): QuestionItem {
 
 // ── Rendering ────────────────────────────────────────────────────────
 
-export function renderTodoList(todos: readonly TodoItem[], title = 'Current question list:'): string {
+export function renderTodoList(
+  todos: readonly TodoItem[],
+  title = 'Current question list:',
+): string {
   // Migrate any old-format items on the fly for rendering
-  const normalized = todos.map((t) => isOldFormatTodo(t) ? migrateOldTodo(t) : t) as TodoItem[];
+  const normalized = todos.map((t) => (isOldFormatTodo(t) ? migrateOldTodo(t) : t)) as TodoItem[];
 
   // Build child map before filtering, so we can check parent status
   const childMap = new Map<string, TodoItem[]>();
@@ -285,7 +309,12 @@ export function renderTodoList(todos: readonly TodoItem[], title = 'Current ques
   return lines.join('\n');
 }
 
-function renderQuestion(item: QuestionItem, lines: string[], prefix: number | string, isChild: boolean): void {
+function renderQuestion(
+  item: QuestionItem,
+  lines: string[],
+  prefix: number | string,
+  isChild: boolean,
+): void {
   const marker = statusMarker(item.status);
   lines.push(`${isChild ? '  ' : ''}${prefix}. ${marker} ${item.question}`);
 
@@ -321,10 +350,14 @@ function formatEvidenceItem(ev: EvidenceItem): string {
 
 function statusMarker(status: QuestionStatus): string {
   switch (status) {
-    case 'pending': return '[pending]';
-    case 'investigating': return '[investigating]';
-    case 'resolved': return '[resolved]';
-    case 'inconclusive': return '[inconclusive]';
+    case 'pending':
+      return '[pending]';
+    case 'investigating':
+      return '[investigating]';
+    case 'resolved':
+      return '[resolved]';
+    case 'inconclusive':
+      return '[inconclusive]';
     default: {
       const _exhaustive: never = status;
       return _exhaustive;
@@ -350,6 +383,22 @@ export class TodoListTool implements BuiltinTool<TodoListInput> {
           : 'Updating question list';
     return {
       description,
+      display: {
+        kind: 'todo_list',
+        items: (args.todos ?? this.getTodos()).map((todo) => {
+          // The wire display shape is { title, status }; question-driven
+          // items store the text in `question`, old-format items in `title`.
+          const record = todo as Record<string, unknown>;
+          const title =
+            typeof record['question'] === 'string'
+              ? record['question']
+              : typeof record['title'] === 'string'
+                ? record['title']
+                : '';
+          const status = typeof record['status'] === 'string' ? record['status'] : 'pending';
+          return { title, status };
+        }),
+      },
       approvalRule: this.name,
       execute: async () => {
         try {
@@ -386,20 +435,25 @@ export class TodoListTool implements BuiltinTool<TodoListInput> {
               const r = item as Record<string, unknown>;
               return {
                 type: 'question',
-                id: typeof r['id'] === 'string' && r['id'].trim().length > 0 ? r['id'] : randomUUID(),
+                id:
+                  typeof r['id'] === 'string' && r['id'].trim().length > 0 ? r['id'] : randomUUID(),
                 question: typeof r['question'] === 'string' ? r['question'] : 'Unknown question',
-                status: (['pending', 'investigating', 'resolved', 'inconclusive'] as const).includes(r['status'] as never)
+                status: (
+                  ['pending', 'investigating', 'resolved', 'inconclusive'] as const
+                ).includes(r['status'] as never)
                   ? (r['status'] as QuestionStatus)
                   : 'pending',
-                evidence: Array.isArray(r['evidence']) ? r['evidence'] as EvidenceItem[] : [],
-                blockers: Array.isArray(r['blockers']) ? r['blockers'] as string[] : [],
+                evidence: Array.isArray(r['evidence']) ? (r['evidence'] as EvidenceItem[]) : [],
+                blockers: Array.isArray(r['blockers']) ? (r['blockers'] as string[]) : [],
                 confidence: (['low', 'medium', 'high'] as const).includes(r['confidence'] as never)
                   ? (r['confidence'] as Confidence)
                   : 'medium',
                 depth: (['quick', 'deep'] as const).includes(r['depth'] as never)
                   ? (r['depth'] as Depth)
                   : 'deep',
-                subQuestions: Array.isArray(r['subQuestions']) ? r['subQuestions'] as string[] : [],
+                subQuestions: Array.isArray(r['subQuestions'])
+                  ? (r['subQuestions'] as string[])
+                  : [],
                 hypothesis: typeof r['hypothesis'] === 'string' ? r['hypothesis'] : undefined,
                 conclusion: typeof r['conclusion'] === 'string' ? r['conclusion'] : undefined,
                 parentId: typeof r['parentId'] === 'string' ? r['parentId'] : undefined,
@@ -476,13 +530,15 @@ export class TodoListTool implements BuiltinTool<TodoListInput> {
       if (incomingIds.has(item.id)) return false;
       if (item.status !== 'resolved' && item.status !== 'inconclusive') return false;
       // Must have a conclusion to be worth archiving
-      if (item.status === 'resolved' && (!item.conclusion || item.conclusion.trim().length === 0)) return false;
+      if (item.status === 'resolved' && (!item.conclusion || item.conclusion.trim().length === 0))
+        return false;
       return true;
     });
 
     if (completed.length === 0) return;
 
-    const existingFindings = (this.store.get(FINDINGS_STORE_KEY) as FindingItem[] | undefined) ?? [];
+    const existingFindings =
+      (this.store.get(FINDINGS_STORE_KEY) as FindingItem[] | undefined) ?? [];
     const existingIds = new Set(existingFindings.map((f) => f.id));
 
     const newFindings: FindingItem[] = completed
@@ -502,9 +558,6 @@ export class TodoListTool implements BuiltinTool<TodoListInput> {
 
     if (newFindings.length === 0) return;
 
-    this.store.set(FINDINGS_STORE_KEY, [
-      ...newFindings,
-      ...existingFindings,
-    ]);
+    this.store.set(FINDINGS_STORE_KEY, [...newFindings, ...existingFindings]);
   }
 }

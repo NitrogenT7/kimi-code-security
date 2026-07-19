@@ -234,9 +234,7 @@ describe('ToolManager MCP integration', () => {
     // registering an MCP server does not mutate enabledTools and does not
     // emit a set_active_tools record. This is what keeps wire.jsonl free of
     // synthetic mutations on session resume.
-    expect(calls).not.toContainEqual(
-      expect.objectContaining({ type: 'tools.set_active_tools' }),
-    );
+    expect(calls).not.toContainEqual(expect.objectContaining({ type: 'tools.set_active_tools' }));
     expect(calls).not.toContainEqual(
       expect.objectContaining({ type: 'tools.register_mcp_server' }),
     );
@@ -414,9 +412,7 @@ describe('ToolManager MCP integration', () => {
     expect(parts[2]).toEqual({ type: 'text', text: '</mcp_tool_result>' });
     // The notice replaces the binary part; the *text* truncation marker must
     // not fire because the text character budget was never touched.
-    const joined = parts
-      .map((p) => (p.type === 'text' ? p.text : ''))
-      .join('');
+    const joined = parts.map((p) => (p.type === 'text' ? p.text : '')).join('');
     expect(joined).not.toContain('Output truncated');
   });
 

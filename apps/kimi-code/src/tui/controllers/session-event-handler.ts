@@ -1,4 +1,4 @@
-import type { Component, Focusable } from '@earendil-works/pi-tui';
+import type { Component, Focusable } from '@moonshot-ai/pi-tui';
 import type {
   AgentStatusUpdatedEvent,
   AssistantDeltaEvent,
@@ -17,6 +17,7 @@ import type {
   Session,
   SessionMetaUpdatedEvent,
   SkillActivatedEvent,
+  PluginCommandActivatedEvent,
   ThinkingDeltaEvent,
   ToolCallDeltaEvent,
   ToolCallStartedEvent,
@@ -30,10 +31,6 @@ import type {
   WarningEvent,
 } from '@moonshot-ai/kimi-code-sdk';
 
-import type {
-  UiFindingItem,
-  UiQuestionItem,
-} from '../components/chrome/investigation-board';
 import { MoonLoader } from '../components/chrome/moon-loader';
 import { buildGoalMarker } from '../components/messages/goal-markers';
 import { StatusMessageComponent } from '../components/messages/status-message';
@@ -46,11 +43,19 @@ import {
   OAUTH_LOGIN_REQUIRED_STARTUP_NOTICE,
 } from '../constant/kimi-tui';
 import { buildGoalCompletionMessage } from '../utils/goal-completion';
+import type {
+  UiFindingItem,
+  UiQuestionItem,
+} from '../components/chrome/investigation-board';
 import {
   argsRecord,
   formatErrorPayload,
   formatErrorMessage,
+  isQuestionItemShape,
+  isTodoItemShape,
+  migrateTodoItemShape,
   normalizeQuestionItem,
+  questionToFinding,
   serializeToolResultOutput,
   stringValue,
 } from '../utils/event-payload';
@@ -138,9 +143,11 @@ export class SessionEventHandler {
   backgroundTaskTranscriptedTerminal: Set<string> = new Set();
 
   renderedSkillActivationIds: Set<string> = new Set();
+  renderedPluginCommandActivationIds: Set<string> = new Set();
   renderedMcpServerStatusKeys: Map<string, string> = new Map();
   mcpServerStatusSpinners: Map<string, MoonLoader> = new Map();
   mcpServers: Map<string, McpServerStatusSnapshot> = new Map();
+  private readonly investigationFindings = new Map<string, UiFindingItem>();
   private goalCompletionAwaitingClear = false;
   private goalCompletionTurnEnded = false;
   private currentTurnHasAssistantText = false;
@@ -154,8 +161,10 @@ export class SessionEventHandler {
     this.backgroundTaskTranscriptedTerminal.clear();
     this.subAgentEventHandler.resetRuntimeState();
     this.renderedSkillActivationIds.clear();
+    this.renderedPluginCommandActivationIds.clear();
     this.renderedMcpServerStatusKeys.clear();
     this.mcpServers.clear();
+    this.investigationFindings.clear();
     this.goalCompletionAwaitingClear = false;
     this.goalCompletionTurnEnded = false;
     this.currentTurnHasAssistantText = false;
@@ -164,6 +173,14 @@ export class SessionEventHandler {
     this.queuedGoalPromotionInFlight = false;
     this.clearQueuedGoalPromotionTimer();
     this.stopAllMcpServerStatusSpinners();
+  }
+
+  /** Seeds the findings accumulator from replay hydration (findings tool store). */
+  setInvestigationFindings(findings: readonly UiFindingItem[]): void {
+    this.investigationFindings.clear();
+    for (const finding of findings) {
+      this.investigationFindings.set(finding.id, finding);
+    }
   }
 
   clearAgentSwarmProgress(): void {
@@ -260,6 +277,7 @@ export class SessionEventHandler {
       case 'session.meta.updated': this.handleSessionMetaChanged(event); break;
       case 'goal.updated': this.handleGoalUpdated(event); break;
       case 'skill.activated': this.handleSkillActivated(event); break;
+      case 'plugin_command.activated': this.handlePluginCommandActivated(event); break;
       case 'error': this.handleSessionError(event); break;
       case 'warning': this.handleSessionWarning(event); break;
       case 'compaction.started': this.handleCompactionBegin(event); break;
@@ -333,6 +351,12 @@ export class SessionEventHandler {
     if (event.reason === 'cancelled') {
       this.markActiveAgentSwarmsCancelled();
     }
+    if (event.reason === 'failed' && event.error?.code === 'provider.filtered') {
+      this.host.showStatus('Turn stopped: provider safety policy blocked the response.', 'error');
+    }
+    if (event.reason === 'blocked') {
+      this.host.showStatus('Turn stopped: prompt hook blocked the request.', 'error');
+    }
     this.host.streamingUI.resetToolUi();
     this.host.streamingUI.finalizeTurn(sendQueued);
     this.renderPendingModelBlockedFallback();
@@ -360,6 +384,15 @@ export class SessionEventHandler {
   private handleStepCompleted(event: TurnStepCompletedEvent): void {
     this.host.streamingUI.flushNow();
     this.maybeShowDebugTiming(event);
+
+    if (event.providerFinishReason === 'filtered') {
+      this.host.showNotice(
+        'Provider safety policy blocked the response.',
+        `The model output was filtered (${event.rawFinishReason ?? 'content_filter'}).`,
+      );
+      return;
+    }
+
     if (event.finishReason !== 'max_tokens') return;
 
     const truncatedCount = this.host.streamingUI.markStepTruncated(
@@ -380,7 +413,14 @@ export class SessionEventHandler {
   private maybeShowDebugTiming(event: TurnStepCompletedEvent): void {
     if (process.env['KIMI_CODE_DEBUG'] !== '1') return;
     const text = formatStepDebugTiming(event);
-    if (text !== undefined) this.host.showStatus(text);
+    if (text === undefined) return;
+    this.host.appendTranscriptEntry({
+      id: nextTranscriptId(),
+      kind: 'status',
+      turnId: String(event.turnId),
+      renderMode: 'plain',
+      content: text,
+    });
   }
 
   private markActiveAgentSwarmsCancelled(): void {
@@ -389,9 +429,10 @@ export class SessionEventHandler {
 
   private isAnthropicSessionActive(): boolean {
     const { state } = this.host;
-    const providerKey = state.appState.availableModels[state.appState.model]?.provider;
-    if (providerKey === undefined) return false;
-    return state.appState.availableProviders[providerKey]?.type === 'anthropic';
+    const model = state.appState.availableModels[state.appState.model];
+    if (model === undefined) return false;
+    if (model.protocol === 'anthropic') return true;
+    return state.appState.availableProviders[model.provider]?.type === 'anthropic';
   }
 
   private handleStepInterrupted(event: TurnStepInterruptedEvent): void {
@@ -402,7 +443,11 @@ export class SessionEventHandler {
     if (reason === 'error') return;
     if (reason === 'aborted' || reason === undefined || reason === '') {
       this.markActiveAgentSwarmsCancelled();
-      this.host.showStatus('Interrupted by user', 'error');
+      if (event.message === undefined || event.message === '') {
+        this.host.showStatus('Interrupted by user', 'error');
+      } else {
+        this.host.showError(event.message);
+      }
       return;
     }
     this.host.showError(
@@ -414,6 +459,15 @@ export class SessionEventHandler {
 
   private handleThinkingDelta(event: ThinkingDeltaEvent): void {
     const { state, streamingUI } = this.host;
+    // Encrypted / redacted reasoning (e.g. Kimi over the Anthropic-compatible
+    // protocol) streams thinking deltas whose visible text is empty — only an
+    // opaque signature rides along. Models also occasionally stream whitespace-
+    // only thinking (e.g. a single space). Such deltas carry nothing to render,
+    // so switching into the `thinking` pane mode here would stop the "waiting"
+    // moon spinner while no ThinkingComponent is ever created (it needs visible
+    // text), leaving a blank, spinner-less gap until the first real text/tool
+    // token arrives. Keep the moon up until actual thinking text shows up.
+    if (event.delta.trim().length === 0 && !streamingUI.hasThinkingDraft()) return;
     streamingUI.appendThinkingDelta(event.delta);
     this.host.patchLivePane({ mode: 'idle' });
     if (state.appState.streamingPhase !== 'thinking') {
@@ -550,25 +604,22 @@ export class SessionEventHandler {
     if (matchedCall !== undefined && matchedCall.name === 'TodoList' && !event.isError) {
       const rawTodos = (matchedCall.args as { todos?: unknown }).todos;
       if (Array.isArray(rawTodos)) {
+        if (rawTodos.length === 0) this.investigationFindings.clear();
         const questions: UiQuestionItem[] = [];
-        const findings: UiFindingItem[] = [];
         for (const item of rawTodos) {
-          const q = normalizeQuestionItem(item);
+          const q = isQuestionItemShape(item)
+            ? normalizeQuestionItem(item)
+            : isTodoItemShape(item)
+              ? migrateTodoItemShape(item)
+              : null;
           if (q === null) continue;
           if (q.status === 'pending' || q.status === 'investigating') {
             questions.push(q);
-          } else if (q.status === 'resolved' || q.status === 'inconclusive') {
-            findings.push({
-              id: q.id,
-              question: q.question,
-              conclusion: q.conclusion ?? (q.status === 'inconclusive' ? 'Unable to determine' : ''),
-              confidence: q.confidence,
-              depth: q.depth,
-              status: q.status,
-            });
+          } else {
+            this.investigationFindings.set(q.id, questionToFinding(q));
           }
         }
-        streamingUI.setInvestigation(questions, findings);
+        streamingUI.setInvestigation(questions, [...this.investigationFindings.values()]);
       }
     }
     this.host.patchLivePane({ mode: 'waiting' });
@@ -589,6 +640,7 @@ export class SessionEventHandler {
       patch.permissionMode = event.permission;
     }
     if (event.model !== undefined) patch.model = event.model;
+    if (event.thinkingEffort !== undefined) patch.thinkingEffort = event.thinkingEffort;
     if (Object.keys(patch).length > 0) this.host.setAppState(patch);
     if (event.swarmMode === false) {
       this.host.state.swarmModeEntry = undefined;
@@ -719,7 +771,8 @@ export class SessionEventHandler {
       (session === undefined || this.host.session === session) &&
       !this.host.aborted &&
       this.host.state.appState.streamingPhase === 'idle' &&
-      this.host.state.queuedMessages.length === 0
+      this.host.state.queuedMessages.length === 0 &&
+      !this.host.state.queuedMessageDispatchPending
     );
   }
 
@@ -817,27 +870,9 @@ export class SessionEventHandler {
 
   private handleSessionMetaChanged(event: SessionMetaUpdatedEvent): void {
     const title = event.title ?? stringValue(event.patch?.['title']);
-    const lastPrompt = stringValue(event.patch?.['lastPrompt']);
-    const patch: Partial<AppState> = {};
     if (title !== undefined) {
-      patch.sessionTitle = title;
-    }
-    if (lastPrompt !== undefined) {
-      patch.sessionLastPrompt = lastPrompt;
-    }
-    if (Object.keys(patch).length > 0) {
-      this.host.setAppState(patch);
-      if (title !== undefined) {
-        this.host.updateTerminalTitle();
-      }
-    }
-    // Keep the cached sessions list in sync so the picker search sees the latest prompt.
-    if (lastPrompt !== undefined) {
-      const currentSessionId = this.host.state.appState.sessionId;
-      const session = this.host.state.sessions.find((s) => s.id === currentSessionId);
-      if (session !== undefined) {
-        (session as { last_prompt?: string | null }).last_prompt = lastPrompt;
-      }
+      this.host.setAppState({ sessionTitle: title });
+      this.host.updateTerminalTitle();
     }
   }
 
@@ -895,11 +930,6 @@ export class SessionEventHandler {
       case 'pending':
         this.showMcpServerStatusSpinner(server.name);
         return;
-      case 'registered':
-        // Lazy-registered but not connected yet: do not render a "connecting"
-        // spinner, because nothing finalizes it until the user loads the group
-        // (it would stay stuck forever). The summary above still reflects it.
-        return;
     }
   }
 
@@ -955,6 +985,25 @@ export class SessionEventHandler {
     });
   }
 
+  private handlePluginCommandActivated(event: PluginCommandActivatedEvent): void {
+    if (this.renderedPluginCommandActivationIds.has(event.activationId)) return;
+    this.renderedPluginCommandActivationIds.add(event.activationId);
+    this.host.appendTranscriptEntry({
+      id: nextTranscriptId(),
+      kind: 'plugin_command',
+      turnId: undefined,
+      renderMode: 'plain',
+      content: `/${event.pluginId}:${event.commandName}`,
+      pluginCommandData: {
+        activationId: event.activationId,
+        pluginId: event.pluginId,
+        commandName: event.commandName,
+        args: event.commandArgs,
+        trigger: event.trigger,
+      },
+    });
+  }
+
   private handleCompactionBegin(event: CompactionStartedEvent): void {
     this.host.streamingUI.finalizeLiveTextBuffers('waiting');
     this.host.setAppState({
@@ -969,7 +1018,11 @@ export class SessionEventHandler {
     event: CompactionCompletedEvent,
     sendQueued: (item: QueuedMessage) => void,
   ): void {
-    this.host.streamingUI.endCompaction(event.result.tokensBefore, event.result.tokensAfter);
+    this.host.streamingUI.endCompaction(
+      event.result.tokensBefore,
+      event.result.tokensAfter,
+      event.result.summary,
+    );
     this.finishCompaction(sendQueued);
   }
 
@@ -984,14 +1037,18 @@ export class SessionEventHandler {
   private finishCompaction(sendQueued: (item: QueuedMessage) => void): void {
     const hasActiveTurn = this.host.streamingUI.hasActiveTurn();
     if (!hasActiveTurn) {
+      const next = this.host.shiftQueuedMessage();
+      if (next !== undefined) {
+        this.host.state.queuedMessageDispatchPending = true;
+      }
       this.host.setAppState({
         isCompacting: false,
         streamingPhase: 'idle',
       });
       this.host.resetLivePane();
-      const next = this.host.shiftQueuedMessage();
       if (next !== undefined) {
         setTimeout(() => {
+          this.host.state.queuedMessageDispatchPending = false;
           sendQueued(next);
         }, 0);
       }
@@ -1026,6 +1083,9 @@ export class SessionEventHandler {
 
     if (event.type === 'background.task.started') {
       if (info.kind === 'agent') {
+        // A foreground subagent detached via Ctrl+B: flip its card to
+        // `◐ backgrounded` so it doesn't look like it completed.
+        this.host.streamingUI.markSubagentBackgrounded(info.agentId);
         this.syncBackgroundTaskBadge();
         this.host.tasksBrowserController.repaint();
         return;

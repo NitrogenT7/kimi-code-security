@@ -1,8 +1,13 @@
+/**
+ * Scenario: exercise the Anthropic adapter over a real local HTTP connection.
+ * Responsibilities: verify public-provider request serialization and response parsing at the wire.
+ * Wiring: the provider and Anthropic SDK are real; only the remote Messages API is stubbed.
+ * Run: pnpm exec vitest run packages/kosong/test/e2e/anthropic-adapter.test.ts
+ */
 import type { Message, StreamedMessagePart, ToolCall } from '#/message';
 import { AnthropicChatProvider } from '#/providers/anthropic';
 import type { Tool } from '#/tool';
 import type { TokenUsage } from '#/usage';
-import Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it } from 'vitest';
 
 import { createFakeProviderHarness } from './fake-provider-harness';
@@ -21,10 +26,15 @@ async function collectParts(
   return parts;
 }
 
-function makeAnthropicProvider(): AnthropicChatProvider {
+function makeAnthropicProvider(
+  baseUrl?: string,
+  defaultHeaders?: Record<string, string>,
+): AnthropicChatProvider {
   return new AnthropicChatProvider({
     model: 'k25',
     apiKey: 'test-key',
+    baseUrl,
+    defaultHeaders,
     defaultMaxTokens: 1024,
     stream: true,
   });
@@ -57,9 +67,121 @@ const MUL_TOOL: Tool = {
 };
 
 describe('e2e: Anthropic adapter bridge', () => {
-  it('sends the adapter request body and parses streamed text, tool use, and usage', async () => {
+  it('replays model-switched text-only history as valid preserved-thinking wire content for a compatible endpoint', async () => {
     const harness = await createFakeProviderHarness();
+
     try {
+      harness.route('POST', '/v1/messages', async (_request, reply) => {
+        const stream = [
+          anthropicSseFrame('message_start', {
+            type: 'message_start',
+            message: {
+              id: 'msg_compatible',
+              type: 'message',
+              role: 'assistant',
+              model: 'compatible-preserved-thinking-model',
+              content: [],
+              stop_reason: null,
+              stop_sequence: null,
+              usage: { input_tokens: 12, output_tokens: 0 },
+            },
+          }),
+          anthropicSseFrame('content_block_start', {
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'text', text: 'Compatible endpoint accepted the history.' },
+          }),
+          anthropicSseFrame('content_block_stop', {
+            type: 'content_block_stop',
+            index: 0,
+          }),
+          anthropicSseFrame('message_delta', {
+            type: 'message_delta',
+            delta: { type: 'message_delta', stop_reason: 'end_turn', stop_sequence: null },
+            usage: { input_tokens: 12, output_tokens: 7 },
+          }),
+          anthropicSseFrame('message_stop', { type: 'message_stop' }),
+        ].join('');
+
+        await reply.raw(200, stream, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+        });
+      });
+
+      const provider = new AnthropicChatProvider({
+        model: 'compatible-preserved-thinking-model',
+        apiKey: 'test-key',
+        baseUrl: harness.baseUrl,
+        stream: true,
+      })
+        .withThinking('max')
+        .withThinkingKeep('all');
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Hi' }], toolCalls: [] },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Hello from Opus' }],
+          toolCalls: [],
+        },
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'Continue with the compatible model' }],
+          toolCalls: [],
+        },
+      ];
+
+      const response = await provider.generate('', [], history);
+      expect(await collectParts(response)).toEqual([
+        { type: 'text', text: 'Compatible endpoint accepted the history.' },
+      ]);
+      expect(harness.requests).toHaveLength(1);
+      expect(harness.requests[0]!.search).toBe('?beta=true');
+      expect(harness.requests[0]!.headers['anthropic-beta']).toBe(
+        'context-management-2025-06-27',
+      );
+      expect(harness.requests[0]!.bodyJson).toMatchObject({
+        model: 'compatible-preserved-thinking-model',
+        max_tokens: 128000,
+        thinking: { type: 'adaptive', display: 'summarized' },
+        output_config: { effort: 'max' },
+        context_management: {
+          edits: [{ type: 'clear_thinking_20251015', keep: 'all' }],
+        },
+        messages: [
+          { role: 'user', content: [{ type: 'text', text: 'Hi' }] },
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Hello from Opus' }],
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Continue with the compatible model',
+                cache_control: { type: 'ephemeral' },
+              },
+            ],
+          },
+        ],
+      });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('sends the adapter request body and parses streamed text, tool use, and usage', async () => {
+    const previousAuthToken = process.env['ANTHROPIC_AUTH_TOKEN'];
+    const previousCustomHeaders = process.env['ANTHROPIC_CUSTOM_HEADERS'];
+    const harness = await createFakeProviderHarness();
+
+    try {
+      process.env['ANTHROPIC_AUTH_TOKEN'] = 'env-auth-token';
+      process.env['ANTHROPIC_CUSTOM_HEADERS'] =
+        'Authorization: Bearer env-token\nX-Api-Key: env-key\nX-Leak: shell';
+
       harness.route('POST', '/v1/messages', async (request, reply) => {
         const body = request.bodyJson as Record<string, unknown>;
         expect(request.pathname).toBe('/v1/messages');
@@ -168,11 +290,7 @@ describe('e2e: Anthropic adapter bridge', () => {
         });
       });
 
-      const provider = makeAnthropicProvider();
-      (provider as any)._client = new Anthropic({
-        apiKey: 'test-key',
-        baseURL: harness.baseUrl,
-      });
+      const provider = makeAnthropicProvider(harness.baseUrl, { 'X-Configured': 'yes' });
 
       const history: Message[] = [
         {
@@ -209,7 +327,20 @@ describe('e2e: Anthropic adapter bridge', () => {
       } satisfies TokenUsage);
 
       expect(harness.requests).toHaveLength(1);
+      expect(harness.requests[0]!.headers['authorization']).toBeUndefined();
+      expect(harness.requests[0]!.headers['x-leak']).toBeUndefined();
+      expect(harness.requests[0]!.headers['x-configured']).toBe('yes');
     } finally {
+      if (previousAuthToken === undefined) {
+        delete process.env['ANTHROPIC_AUTH_TOKEN'];
+      } else {
+        process.env['ANTHROPIC_AUTH_TOKEN'] = previousAuthToken;
+      }
+      if (previousCustomHeaders === undefined) {
+        delete process.env['ANTHROPIC_CUSTOM_HEADERS'];
+      } else {
+        process.env['ANTHROPIC_CUSTOM_HEADERS'] = previousCustomHeaders;
+      }
       await harness.close();
     }
   });

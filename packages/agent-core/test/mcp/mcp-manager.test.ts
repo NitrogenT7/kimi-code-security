@@ -1,8 +1,7 @@
+import { join } from 'pathe';
 import { describe, expect, it } from 'vitest';
 
 import type { Agent } from '../../src/agent';
-import { join } from 'pathe';
-
 import type { RunnableToolExecution } from '../../src/loop/types';
 import { McpConnectionManager } from '../../src/mcp/connection-manager';
 import type { McpServerEntry } from '../../src/mcp/connection-manager';
@@ -86,7 +85,10 @@ describe('MCPManagerTool', () => {
       reconnect: async (_name: string) => {},
     };
     const tool = new MCPManagerTool(fakeAgent(manager));
-    const result = await executeTool(tool, ctx({ action: 'load_server', server_name: 'playwright' }));
+    const result = await executeTool(
+      tool,
+      ctx({ action: 'load_server', server_name: 'playwright' }),
+    );
     expect(result.isError).toBeFalsy();
     expect(result.output).toBe('MCP server "playwright" loaded successfully.');
   });
@@ -112,7 +114,13 @@ describe('MCPManagerTool', () => {
     const manager: Partial<McpConnectionManager> = {
       get: (name: string) =>
         name === 'remote'
-          ? { name: 'remote', transport: 'http', status: 'needs-auth', toolCount: 0, error: 'please log in' }
+          ? {
+              name: 'remote',
+              transport: 'http',
+              status: 'needs-auth',
+              toolCount: 0,
+              error: 'please log in',
+            }
           : undefined,
     };
     const tool = new MCPManagerTool(fakeAgent(manager));
@@ -172,7 +180,10 @@ describe('MCPManagerTool', () => {
 
   it('rejects add_or_update_server without config', async () => {
     const tool = new MCPManagerTool(fakeAgent({}));
-    const result = await executeTool(tool, ctx({ action: 'add_or_update_server', server_name: 'bad' }));
+    const result = await executeTool(
+      tool,
+      ctx({ action: 'add_or_update_server', server_name: 'bad' }),
+    );
     expect(result.isError).toBeTruthy();
     expect(result.output).toContain('config is required');
   });
@@ -197,14 +208,20 @@ describe('MCPManagerTool', () => {
       remove: async () => false,
     };
     const tool = new MCPManagerTool(fakeAgent(manager));
-    const result = await executeTool(tool, ctx({ action: 'remove_server', server_name: 'missing' }));
+    const result = await executeTool(
+      tool,
+      ctx({ action: 'remove_server', server_name: 'missing' }),
+    );
     expect(result.isError).toBeTruthy();
     expect(result.output).toContain('Unknown MCP server: missing');
   });
 
   it('describes actions in resolveExecution', () => {
     const tool = new MCPManagerTool(fakeAgent({}));
-    const execution = tool.resolveExecution({ action: 'add_or_update_server', server_name: 'x' }) as RunnableToolExecution;
+    const execution = tool.resolveExecution({
+      action: 'add_or_update_server',
+      server_name: 'x',
+    }) as RunnableToolExecution;
     expect(execution.description).toBe('Adding/updating MCP server: x');
   });
 });
@@ -231,7 +248,10 @@ describe('MCPManagerTool integration', () => {
       expect(addResult.isError).toBeFalsy();
       expect(addResult.output).toContain('added/updated and connected');
 
-      const getResult = await executeTool(tool, ctx({ action: 'get_server', server_name: 'alpha' }));
+      const getResult = await executeTool(
+        tool,
+        ctx({ action: 'get_server', server_name: 'alpha' }),
+      );
       expect(getResult.isError).toBeFalsy();
       expect(getResult.output).toContain('status: connected');
 
@@ -239,7 +259,10 @@ describe('MCPManagerTool integration', () => {
       expect(listResult.isError).toBeFalsy();
       expect(listResult.output).toContain('alpha: connected');
 
-      const removeResult = await executeTool(tool, ctx({ action: 'remove_server', server_name: 'alpha' }));
+      const removeResult = await executeTool(
+        tool,
+        ctx({ action: 'remove_server', server_name: 'alpha' }),
+      );
       expect(removeResult.isError).toBeFalsy();
       expect(removeResult.output).toContain('removed');
 

@@ -12,12 +12,10 @@ function mcpStartupStatusPriority(status: McpServerStatusSnapshot['status']): nu
       return 1;
     case 'pending':
       return 2;
-    case 'registered':
-      return 3;
     case 'connected':
-      return 4;
+      return 3;
     case 'disabled':
-      return 5;
+      return 4;
   }
 }
 
@@ -36,7 +34,6 @@ export function formatMcpStartupStatusSummary(
   let failed = 0;
   let needsAuth = 0;
   let connecting = 0;
-  let registered = 0;
   let connected = 0;
   let disabled = 0;
   for (const server of servers) {
@@ -49,9 +46,6 @@ export function formatMcpStartupStatusSummary(
         break;
       case 'pending':
         connecting++;
-        break;
-      case 'registered':
-        registered++;
         break;
       case 'connected':
         connected++;
@@ -66,7 +60,6 @@ export function formatMcpStartupStatusSummary(
   if (failed > 0) parts.push(`${failed} failed`);
   if (needsAuth > 0) parts.push(`${needsAuth} need auth`);
   if (connecting > 0) parts.push(`${connecting} connecting`);
-  if (registered > 0) parts.push(`${registered} registered`);
   if (connected > 0) parts.push(`${connected} connected`);
   if (disabled > 0) parts.push(`${disabled} disabled`);
   return parts.join(', ');

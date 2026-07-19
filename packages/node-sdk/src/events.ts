@@ -16,6 +16,7 @@ export type {
   SessionMetaUpdatedEvent,
   GoalUpdatedEvent,
   SkillActivatedEvent,
+  PluginCommandActivatedEvent,
   ErrorEvent,
   WarningEvent,
   UsageStatus,
@@ -105,9 +106,6 @@ export type {
 } from '@moonshot-ai/agent-core';
 
 export type { CronFiredEvent } from '@moonshot-ai/agent-core';
-
-// Shell-mode events for `!` command streaming.
-export type { ShellOutputEvent, ShellStartedEvent } from '@moonshot-ai/agent-core';
 
 export type MaybePromise<T> = T | Promise<T>;
 

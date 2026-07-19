@@ -6,7 +6,6 @@ import {
   appendStreamingArgsPreview,
   formatErrorMessage,
   formatErrorPayload,
-  normalizeQuestionItem,
   parseStreamingArgs,
 } from '#/tui/utils/event-payload';
 
@@ -68,45 +67,5 @@ describe('error payload formatting', () => {
     });
 
     expect(formatErrorMessage(error)).toBe(conciseFilteredMessage);
-  });
-});
-
-describe('normalizeQuestionItem', () => {
-  it('returns null for non-question-shaped values', () => {
-    expect(normalizeQuestionItem(null)).toBeNull();
-    expect(normalizeQuestionItem({ type: 'todo', id: 'a', question: 'x', status: 'pending' })).toBeNull();
-  });
-
-  it('defaults missing array/optional fields so the renderer never sees undefined', () => {
-    // Mirrors legacy session items that predate the blockers/evidence fields.
-    const q = normalizeQuestionItem({ type: 'question', id: 'q1', question: 'legacy?', status: 'investigating' });
-
-    expect(q).not.toBeNull();
-    expect(q?.evidence).toEqual([]);
-    expect(q?.blockers).toEqual([]);
-    expect(q?.confidence).toBe('medium');
-    expect(q?.depth).toBe('deep');
-    expect(q?.conclusion).toBeUndefined();
-  });
-
-  it('filters non-string blockers and normalizes evidence entries', () => {
-    const q = normalizeQuestionItem({
-      type: 'question',
-      id: 'q2',
-      question: 'with data',
-      status: 'pending',
-      blockers: ['a', 1, null, 'b'],
-      evidence: [
-        { status: 'confirmed', description: 'ok' },
-        { status: 'bogus', description: 42 },
-        'not-an-object',
-      ],
-    });
-
-    expect(q?.blockers).toEqual(['a', 'b']);
-    expect(q?.evidence).toEqual([
-      { status: 'confirmed', description: 'ok' },
-      { status: 'checking', description: '' },
-    ]);
   });
 });

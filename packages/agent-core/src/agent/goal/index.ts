@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
 import { ErrorCodes, KimiError } from '#/errors';
+
 import type { Agent } from '..';
+import { type TelemetryProperties } from '../../telemetry';
 import type { AgentRecordOf } from '../records/types';
-import {
-  type TelemetryProperties,
-} from '../../telemetry';
 
 /**
  * Durable goal-mode state owned by {@link GoalMode}.
@@ -18,6 +17,15 @@ import {
 
 /** Maximum objective length in characters. */
 const MAX_GOAL_OBJECTIVE_LENGTH = 4000;
+
+/**
+ * Maximum completion-criterion length in characters. The criterion is repeated
+ * in every active/paused/blocked goal reminder, so an unbounded one would bloat
+ * both `state.json` and every continuation prompt. Unlike the objective (which
+ * is rejected when too long), this supplementary field is truncated so an
+ * over-long criterion never fails goal creation outright.
+ */
+const MAX_GOAL_COMPLETION_CRITERION_LENGTH = MAX_GOAL_OBJECTIVE_LENGTH;
 
 const GOAL_CANCELLED_REMINDER = [
   'The user cancelled the current goal.',
@@ -221,8 +229,7 @@ interface GoalReasonInput {
 export class GoalMode {
   private state: GoalState | undefined;
 
-  constructor(private readonly agent: Agent) {
-  }
+  constructor(private readonly agent: Agent) {}
 
   /**
    * Reconciles replayed goal state with runtime reality on agent resume.
@@ -288,7 +295,8 @@ export class GoalMode {
     }
     if (record.objective !== undefined) state.objective = record.objective;
     if (record.purpose !== undefined) state.purpose = record.purpose;
-    if (record.completionCriterion !== undefined) state.completionCriterion = record.completionCriterion;
+    if (record.completionCriterion !== undefined)
+      state.completionCriterion = record.completionCriterion;
     if (record.turnsUsed !== undefined) state.turnsUsed = record.turnsUsed;
     if (record.tokensUsed !== undefined) state.tokensUsed = record.tokensUsed;
     if (record.wallClockMs !== undefined) {
@@ -301,20 +309,21 @@ export class GoalMode {
     this.agent.replayBuilder.push({
       type: 'goal_updated',
       snapshot: this.toSnapshot(state),
-      change: status === 'complete'
-        ? {
-            kind: 'completion',
-            status,
-            reason: record.reason,
-            stats: this.statsOf(state),
-            actor: record.actor,
-          }
-        : {
-            kind: 'lifecycle',
-            status,
-            reason: record.reason,
-            actor: record.actor,
-          },
+      change:
+        status === 'complete'
+          ? {
+              kind: 'completion',
+              status,
+              reason: record.reason,
+              stats: this.statsOf(state),
+              actor: record.actor,
+            }
+          : {
+              kind: 'lifecycle',
+              status,
+              reason: record.reason,
+              actor: record.actor,
+            },
     });
   }
 
@@ -652,10 +661,7 @@ export class GoalMode {
 
   // --- Internals ---------------------------------------------------------
 
-  private clearInternal(
-    actor: GoalActor,
-    opts: { emit?: boolean; track?: boolean } = {},
-  ): void {
+  private clearInternal(actor: GoalActor, opts: { emit?: boolean; track?: boolean } = {}): void {
     const state = this.state;
     if (state === undefined) return; // idempotent
     this.persistState(undefined, { silent: opts.emit === false });
@@ -682,19 +688,14 @@ export class GoalMode {
     });
   }
 
-  private appendGoalUpdate(
-    update: Omit<AgentRecordOf<'goal.update'>, 'type' | 'time'>,
-  ): void {
+  private appendGoalUpdate(update: Omit<AgentRecordOf<'goal.update'>, 'type' | 'time'>): void {
     this.agent.records.logRecord({
       type: 'goal.update',
       ...update,
     });
   }
 
-  private trackGoalCreated(
-    actor: GoalActor,
-    replace: boolean,
-  ): void {
+  private trackGoalCreated(actor: GoalActor, replace: boolean): void {
     this.track('goal_created', {
       actor,
       replace,
@@ -705,10 +706,7 @@ export class GoalMode {
     this.agent.telemetry.track(event, properties);
   }
 
-  private applyStatus(
-    state: GoalState,
-    status: GoalStatus,
-  ): void {
+  private applyStatus(state: GoalState, status: GoalStatus): void {
     // Fold the live wall-clock interval into the running total when leaving
     // `active`, and anchor a fresh interval when entering it, so `wallClockMs`
     // stays a correct, persistable total across pause/resume/complete.
@@ -730,7 +728,6 @@ export class GoalMode {
     }
     return state;
   }
-
 
   /**
    * Updates in-memory goal state and (unless `silent`) emits a `goal.updated`
@@ -788,10 +785,7 @@ function liveWallClockMs(state: GoalState, now: number = Date.now()): number {
   return state.wallClockMs;
 }
 
-function computeBudgetReport(
-  state: GoalState,
-  now: number = Date.now(),
-): GoalBudgetReport {
+function computeBudgetReport(state: GoalState, now: number = Date.now()): GoalBudgetReport {
   const limits = state.budgetLimits;
   const tokenBudget = limits.tokenBudget ?? null;
   const turnBudget = limits.turnBudget ?? null;
@@ -800,8 +794,7 @@ function computeBudgetReport(
 
   const tokenBudgetReached = tokenBudget !== null && state.tokensUsed >= tokenBudget;
   const turnBudgetReached = turnBudget !== null && state.turnsUsed >= turnBudget;
-  const wallClockBudgetReached =
-    wallClockBudgetMs !== null && wallClockMs >= wallClockBudgetMs;
+  const wallClockBudgetReached = wallClockBudgetMs !== null && wallClockMs >= wallClockBudgetMs;
 
   return {
     tokenBudget,
@@ -833,7 +826,10 @@ function normalizeObjective(value: string | undefined): string | undefined {
 
 function normalizeCompletionCriterion(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
-  return trimmed?.length ? trimmed : undefined;
+  if (!trimmed?.length) return undefined;
+  return trimmed.length > MAX_GOAL_COMPLETION_CRITERION_LENGTH
+    ? trimmed.slice(0, MAX_GOAL_COMPLETION_CRITERION_LENGTH)
+    : trimmed;
 }
 
 function normalizePurpose(value: string | undefined): string | undefined {

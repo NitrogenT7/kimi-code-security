@@ -63,7 +63,7 @@ export function formatBashOutputForDisplay(stdout: string, stderr: string, isErr
     }
     return parts.length > 0 ? parts.join('\n') : dim('(no output)');
   } catch {
-    const plain = [sanitizeShellOutput(stdout ?? ''), sanitizeShellOutput(stderr ?? '')]
+    const plain = [sanitizeShellOutput(String(stdout ?? '')), sanitizeShellOutput(String(stderr ?? ''))]
       .filter((s) => s.length > 0)
       .join('\n');
     return plain.length > 0 ? plain : '(no output)';

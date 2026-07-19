@@ -9,6 +9,8 @@ export interface FileType {
   readonly mimeType: string;
 }
 
+export type DetectFileTypeMode = 'text' | 'media';
+
 export const IMAGE_MIME_BY_SUFFIX: Readonly<Record<string, string>> = Object.freeze({
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -235,6 +237,11 @@ export function sniffMediaFromMagic(data: Buffer | Uint8Array): FileType | null 
 export interface ImageDimensions {
   readonly width: number;
   readonly height: number;
+  /**
+   * Present (true) when a JPEG EXIF orientation of 5-8 swapped the reported
+   * width/height into display space.
+   */
+  readonly transposed?: boolean;
 }
 
 /**
@@ -245,6 +252,11 @@ export interface ImageDimensions {
  * after the `WEBP` tag, or the first JPEG SOFn segment). Returns `null`
  * for formats whose dimensions are not locatable from that region, or
  * when the supplied buffer is too short to cover it.
+ *
+ * JPEG dimensions are reported in DISPLAY space: an EXIF Orientation of
+ * 5-8 transposes the image at decode time, so the SOF width/height are
+ * swapped to match what decoders (and this codebase's crop regions and
+ * compression captions) actually operate in.
  */
 export function sniffImageDimensions(data: Buffer | Uint8Array): ImageDimensions | null {
   const buf = toBuffer(data);
@@ -295,8 +307,10 @@ export function sniffImageDimensions(data: Buffer | Uint8Array): ImageDimensions
   }
 
   // JPEG — scan segment markers for a Start-Of-Frame (SOFn) marker,
-  // whose payload carries height/width as big-endian uint16.
+  // whose payload carries height/width as big-endian uint16. An EXIF
+  // APP1 segment encountered on the way supplies the orientation.
   if (startsWith(buf, [0xff, 0xd8])) {
+    let orientation: number | null = null;
     let offset = 2;
     while (offset + 9 < buf.length) {
       if (buf[offset] !== 0xff) {
@@ -312,10 +326,11 @@ export function sniffImageDimensions(data: Buffer | Uint8Array): ImageDimensions
         marker !== 0xc8 &&
         marker !== 0xcc
       ) {
-        return {
-          height: buf.readUInt16BE(offset + 5),
-          width: buf.readUInt16BE(offset + 7),
-        };
+        const height = buf.readUInt16BE(offset + 5);
+        const width = buf.readUInt16BE(offset + 7);
+        return orientation !== null && orientation >= 5
+          ? { width: height, height: width, transposed: true }
+          : { width, height };
       }
       // Standalone markers (RSTn, SOI, EOI) carry no length field.
       if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) {
@@ -324,10 +339,49 @@ export function sniffImageDimensions(data: Buffer | Uint8Array): ImageDimensions
       }
       const segmentLength = buf.readUInt16BE(offset + 2);
       if (segmentLength < 2) break;
+      if (marker === 0xe1 && orientation === null) {
+        orientation = readExifOrientation(buf, offset + 4, offset + 2 + segmentLength);
+      }
       offset += 2 + segmentLength;
     }
   }
 
+  return null;
+}
+
+/**
+ * Read the Orientation tag (0x0112) out of a JPEG APP1 payload spanning
+ * [`start`, `end`). Returns 1-8, or `null` when the payload is not EXIF,
+ * is truncated, or carries no valid orientation. Only IFD0 is examined —
+ * that is where the tag lives; nothing here follows nested IFDs.
+ */
+function readExifOrientation(buf: Buffer, start: number, end: number): number | null {
+  const boundedEnd = Math.min(end, buf.length);
+  // 'Exif\0\0' preamble, then the TIFF header.
+  if (start + 6 > boundedEnd || buf.toString('latin1', start, start + 6) !== 'Exif\0\0') {
+    return null;
+  }
+  const tiff = start + 6;
+  if (tiff + 8 > boundedEnd) return null;
+  const byteOrder = buf.toString('latin1', tiff, tiff + 2);
+  const le = byteOrder === 'II';
+  if (!le && byteOrder !== 'MM') return null;
+  const u16 = (offset: number): number => (le ? buf.readUInt16LE(offset) : buf.readUInt16BE(offset));
+  const u32 = (offset: number): number => (le ? buf.readUInt32LE(offset) : buf.readUInt32BE(offset));
+  if (u16(tiff + 2) !== 42) return null;
+  const ifd = tiff + u32(tiff + 4);
+  if (ifd + 2 > boundedEnd) return null;
+  const entryCount = u16(ifd);
+  for (let i = 0; i < entryCount; i += 1) {
+    const entry = ifd + 2 + i * 12;
+    if (entry + 12 > boundedEnd) return null;
+    if (u16(entry) === 0x0112) {
+      // Type SHORT: the value sits in the first two bytes of the 4-byte
+      // value field, in the TIFF byte order.
+      const value = u16(entry + 8);
+      return value >= 1 && value <= 8 ? value : null;
+    }
+  }
   return null;
 }
 
@@ -340,7 +394,11 @@ function getSuffix(path: string): string {
   return path.slice(idx).toLowerCase();
 }
 
-export function detectFileType(path: string, header?: Buffer | Uint8Array): FileType {
+export function detectFileType(
+  path: string,
+  header?: Buffer | Uint8Array,
+  type: DetectFileTypeMode = 'text',
+): FileType {
   const suffix = getSuffix(path);
   let mediaHint: FileType | null = null;
   if (suffix in TEXT_MIME_BY_SUFFIX) {
@@ -351,16 +409,15 @@ export function detectFileType(path: string, header?: Buffer | Uint8Array): File
     mediaHint = { kind: 'video', mimeType: VIDEO_MIME_BY_SUFFIX[suffix]! };
   }
 
-  // When a header is supplied, cross-validate against the ext hint —
-  // a mismatch reports `unknown` rather than blindly trusting the
-  // extension. When ext hint + sniff agree on kind, prefer the ext's
-  // mimeType so the reported MIME matches what the filename advertised.
-  // A disagreement on `kind` (e.g. `.mp4` with JPEG magic) still
-  // collapses to `unknown`.
+  // When a header is supplied, cross-validate against the ext hint by
+  // default: a kind mismatch reports `unknown` rather than blindly trusting
+  // either signal. Media readers treat bytes as authoritative and only fall
+  // back to media suffixes when the header cannot be sniffed.
   if (header !== undefined) {
     const buf = toBuffer(header);
     const sniffed = sniffMediaFromMagic(buf);
     if (sniffed) {
+      if (type === 'media') return sniffed;
       if (mediaHint) {
         if (sniffed.kind !== mediaHint.kind) {
           return { kind: 'unknown', mimeType: '' };
@@ -369,10 +426,27 @@ export function detectFileType(path: string, header?: Buffer | Uint8Array): File
       }
       return sniffed;
     }
+    // Sniff failed.
+    // An image extension without confirming magic is not an image in any mode.
+    // Every image format the model accepts (PNG/JPEG/GIF/WebP) has a reliable
+    // signature, so trusting the extension would only mislead: in media mode it
+    // builds a mismatched data URL the model API rejects; in text mode it
+    // redirects the user to ReadMediaFile for a file that is not an image.
+    if (mediaHint?.kind === 'image') {
+      return { kind: 'unknown', mimeType: '' };
+    }
+    // In media mode, fall back to the extension for video: some containers
+    // (e.g. MPEG-PS `.mpg`) have no magic we recognise, so the extension is
+    // the only signal. Runs before the NUL check so a video extension wins
+    // even when the header happens to contain a 0x00 byte.
+    if (type === 'media' && mediaHint?.kind === 'video') {
+      return mediaHint;
+    }
     if (buf.includes(0x00)) {
       return { kind: 'unknown', mimeType: '' };
     }
-    // No sniff and no NUL: fall through to hint / text / unknown logic.
+    // No sniff, not an image hint, no NUL: fall through to the
+    // hint / text / unknown logic.
   }
 
   if (mediaHint) return mediaHint;

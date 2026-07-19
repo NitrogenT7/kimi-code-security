@@ -1,6 +1,11 @@
 import { ErrorCodes, isKimiError, type PermissionMode } from '@moonshot-ai/kimi-code-sdk';
 
 import {
+  composeGoalObjectiveFromTemplate,
+  findGoalTemplate,
+  listGoalTemplates,
+} from '../../utils/goal-templates';
+import {
   GoalStartPermissionPromptComponent,
   type GoalStartPermissionChoice,
 } from '../components/dialogs/goal-start-permission-prompt';
@@ -10,10 +15,6 @@ import {
   type GoalQueueEditResult,
   type GoalQueueManagerAction,
 } from '../components/dialogs/goal-queue-manager';
-import {
-  GoalSetDialogComponent,
-  type GoalSetDialogResult,
-} from '../components/dialogs/goal-set-dialog';
 import {
   GoalSetMessageComponent,
   GoalStatusMessageComponent,
@@ -60,15 +61,12 @@ export type ParsedGoalCommand =
   | { readonly kind: 'pause' }
   | { readonly kind: 'resume' }
   | { readonly kind: 'cancel' }
-  | { readonly kind: 'set-manual'; readonly templateName?: string }
+  | { readonly kind: 'set'; readonly templateName?: string }
   | {
       readonly kind: 'create';
       readonly objective: string;
-      readonly purpose?: string;
-      readonly completionCriterion?: string;
       readonly replace: boolean;
     }
-  | { readonly kind: 'templates' }
   | { readonly kind: 'next-add'; readonly objective: string }
   | { readonly kind: 'next-manage' }
   | { readonly kind: 'error'; readonly message: string; readonly severity?: 'error' | 'hint' };
@@ -77,16 +75,14 @@ const CONTROL_SUBCOMMANDS = new Set(['pause', 'resume', 'cancel']);
 
 /**
  * Parses the deterministic `/goal` command grammar. Reserved subcommands
- * (`pause`/`resume`/`cancel`/`status`/`replace`) are only honored as the first
+ * (`pause`/`resume`/`cancel`/`status`/`replace`/`set`) are only honored as the first
  * token; use `/goal -- <objective>` to start a goal whose text begins with one
  * of those words. (`cancel` is the single discard action — it removes the
- * current goal.) Stop conditions are expressed in the objective in natural
+ * current goal.) `/goal set [template-name]` applies a goal template from
+ * `.goal/` or `~/.agents/goals/`, composing a four-element objective. Stop
+ * conditions are expressed in the objective in natural
  * language (e.g. "…or stop after 20 turns"); the model honors them when it
  * self-audits each turn and reports `complete`/`blocked` via UpdateGoal.
- *
- * Purpose syntax (two forms):
- *   1. `/goal <objective>\n  目的：<purpose>`  — 中文换行格式
- *   2. `/goal <objective> --purpose "<purpose>"` — 显式参数格式
  */
 export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
   const args = rawArgs.trim();
@@ -98,11 +94,8 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
     return parseNextGoalCommand(tokens);
   }
   if (first === 'set') {
-    const templateName = tokens.length > 1 ? tokens.slice(1).join(' ').trim() : undefined;
-    return { kind: 'set-manual', templateName: templateName ?? undefined };
-  }
-  if (first === 'templates') {
-    return { kind: 'templates' };
+    const templateName = tokens.slice(1).join(' ').trim();
+    return { kind: 'set', templateName: templateName.length > 0 ? templateName : undefined };
   }
   if (first !== undefined && CONTROL_SUBCOMMANDS.has(first) && tokens.length === 1) {
     return { kind: first as 'pause' | 'resume' | 'cancel' };
@@ -120,34 +113,7 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
     index += 1;
   }
 
-  // Parse purpose from the raw args. Two forms:
-  // 1. `--purpose "<text>"` anywhere in the args
-  // 2. `目的：<text>` at end of args (typically on a new line)
-  let purpose: string | undefined;
-
-  // Form 1: --purpose "<text>"
-  const purposeMatch = args.match(/--purpose\s+"([^"]+)"/);
-  if (purposeMatch !== null && purposeMatch[1] !== undefined) {
-    purpose = purposeMatch[1].trim();
-  }
-
-  // Form 2: 目的：<text> (remove from the objective text)
-  const chinesePurposeMatch = args.match(/目的[：:]\s*(.+)/);
-  if (chinesePurposeMatch !== null && chinesePurposeMatch[1] !== undefined) {
-    purpose = chinesePurposeMatch[1].trim();
-  }
-
-  // Build the objective by stripping purpose-related markers.
-  // If `replace` (or `--`) was the last token, there is no objective.
-  const sliceStart = index === 0 ? 0 : args.indexOf(tokens[index] ?? '');
-  const hasObjective = index === 0 || tokens[index] !== undefined;
-  let objectiveText = hasObjective ? args.slice(sliceStart) : '';
-  // Remove --purpose "..." from the objective
-  objectiveText = objectiveText.replace(/--purpose\s+"[^"]+"/g, '').trim();
-  // Remove 目的：... from the objective
-  objectiveText = objectiveText.replace(/目的[：:]\s*.+/g, '').trim();
-
-  const objective = objectiveText;
+  const objective = tokens.slice(index).join(' ').trim();
   if (objective.length === 0) {
     // A usage hint, not a failure — shown in the same calm style as the other
     // "nothing to act on" messages (no goal to pause/resume/cancel).
@@ -163,7 +129,7 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
       message: `Goal objective is too long (max ${MAX_GOAL_OBJECTIVE_LENGTH} characters). Reference long details by file path.`,
     };
   }
-  return { kind: 'create', objective, purpose, replace };
+  return { kind: 'create', objective, replace };
 }
 
 export async function handleGoalCommand(host: SlashCommandHost, args: string): Promise<void> {
@@ -185,11 +151,8 @@ export async function handleGoalCommand(host: SlashCommandHost, args: string): P
     case 'cancel':
       await cancelGoal(host);
       return;
-    case 'set-manual':
+    case 'set':
       await handleGoalSetCommand(host, parsed.templateName);
-      return;
-    case 'templates':
-      await showGoalTemplates(host);
       return;
     case 'next-add':
       await queueNextGoal(host, parsed);
@@ -424,10 +387,19 @@ async function startGoalWithPermission(
   choice: GoalStartPermissionChoice,
   options: GoalStartOptions,
 ): Promise<void> {
-  if (choice !== host.state.appState.permissionMode && (choice === 'auto' || choice === 'yolo')) {
+  const previousMode = host.state.appState.permissionMode;
+  const switched =
+    choice !== previousMode && (choice === 'auto' || choice === 'yolo');
+  if (switched) {
     if (!(await setPermissionForGoal(host, choice))) return;
   }
-  await startGoal(host, parsed, options);
+  const started = await startGoal(host, parsed, options);
+  // The permission switch only exists to run this goal. If creation fails
+  // (e.g. a goal already exists and `replace` was not given), restore the
+  // previous mode so the session is not left more permissive than before.
+  if (!started && switched) {
+    await setPermissionForGoal(host, previousMode);
+  }
 }
 
 async function setPermissionForGoal(host: GoalCommandHost, mode: PermissionMode): Promise<boolean> {
@@ -449,8 +421,6 @@ async function startGoal(
   try {
     await host.requireSession().createGoal({
       objective: parsed.objective,
-      purpose: parsed.purpose,
-      completionCriterion: parsed.completionCriterion,
       replace: parsed.replace,
     });
   } catch (error) {
@@ -466,7 +436,6 @@ async function startGoal(
   if (options.beforeSend !== undefined && !(await options.beforeSend())) {
     return false;
   }
-  host.track('goal_create', { replace: parsed.replace });
   host.state.transcriptContainer.addChild(new GoalSetMessageComponent());
   host.state.ui.requestRender();
   if (options.sendInput !== undefined) {
@@ -540,62 +509,27 @@ async function handleGoalSetCommand(
     return;
   }
 
-  let initialValues:
-    | Pick<GoalSetDialogResult, 'purpose' | 'keyTasks' | 'endState' | 'constraints'>
-    | undefined;
-
-  if (templateName !== undefined && templateName.length > 0) {
-    const session = host.requireSession();
-    try {
-      const template = await session.getGoalTemplate(templateName);
-      initialValues = {
-        purpose: template.purpose,
-        keyTasks: template.keyTasks,
-        endState: template.endState,
-        constraints: template.constraints,
-      };
-    } catch {
-      host.showError(
-        `Goal template "${templateName}" not found. Use /goal templates to list available templates.`,
-      );
-      // Fall back to a blank dialog so the user can still create manually.
+  const workDir = process.cwd();
+  if (templateName === undefined) {
+    const templates = await listGoalTemplates(workDir);
+    if (templates.length === 0) {
+      host.showStatus('No goal templates found. Add markdown files to .goal/ or ~/.agents/goals/.');
+      return;
     }
-  }
-
-  const result = await new Promise<GoalSetDialogResult>((resolve) => {
-    const dialog = new GoalSetDialogComponent(host.state.ui, (res) => {
-      host.restoreEditor();
-      resolve(res);
-    }, initialValues);
-    host.mountEditorReplacement(dialog);
-  });
-
-  if (result.kind === 'cancel') {
-    host.showStatus('Goal creation cancelled.');
+    const lines = templates.map((t) => `- ${t.name} (${t.source}): ${t.description}`);
+    host.showStatus(`Goal templates:\n${lines.join('\n')}\nApply one with \`/goal set <name>\`.`);
     return;
   }
 
-  const { purpose, keyTasks, endState, constraints } = result;
-  const parts: string[] = [];
-  if (purpose !== undefined && purpose.length > 0) {
-    parts.push(`[Purpose]\n${purpose}`);
-  }
-  if (keyTasks !== undefined && keyTasks.length > 0) {
-    parts.push(`[Key Tasks]\n${keyTasks}`);
-  }
-  if (endState !== undefined && endState.length > 0) {
-    parts.push(`[End State]\n${endState}`);
-  }
-  if (constraints !== undefined && constraints.length > 0) {
-    parts.push(`[Constraints]\n${constraints}`);
-  }
-
-  if (parts.length === 0) {
-    host.showStatus('Goal creation cancelled — no content provided.');
+  const template = await findGoalTemplate(workDir, templateName);
+  if (template === undefined) {
+    host.showError(
+      `Goal template "${templateName}" not found. Use \`/goal set\` to list available templates.`,
+    );
     return;
   }
 
-  const objective = parts.join('\n\n');
+  const objective = composeGoalObjectiveFromTemplate(template);
   if (objective.length > MAX_GOAL_OBJECTIVE_LENGTH) {
     host.showError(
       `Goal is too long (max ${MAX_GOAL_OBJECTIVE_LENGTH} characters). Reference long details by file path.`,
@@ -603,16 +537,11 @@ async function handleGoalSetCommand(
     return;
   }
 
+  host.track('goal_template_apply');
   await createGoal(
     host,
-    {
-      kind: 'create',
-      objective,
-      purpose,
-      completionCriterion: endState,
-      replace: false,
-    },
-    undefined,
+    { kind: 'create', objective, replace: false },
+    `set ${template.name}`,
     {
       sendInput: () => {
         // The structured goal is already injected into the next turn via the
@@ -635,19 +564,6 @@ async function showGoalStatus(host: SlashCommandHost): Promise<void> {
     new GoalStatusMessageComponent(goal),
   );
   host.state.ui.requestRender();
-}
-
-async function showGoalTemplates(host: SlashCommandHost): Promise<void> {
-  const session = host.requireSession();
-  const templates = await session.listGoalTemplates();
-  if (templates.length === 0) {
-    host.showStatus('No goal templates found. Add markdown files to .goal/ or ~/.goal/.');
-    return;
-  }
-  const lines = templates.map(
-    (t) => `- ${t.name} (${t.source}): ${t.description}`,
-  );
-  host.showStatus(`Goal templates:\n${lines.join('\n')}`);
 }
 
 function isStreaming(host: SlashCommandHost): boolean {

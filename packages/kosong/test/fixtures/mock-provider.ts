@@ -1,4 +1,3 @@
-import { UNKNOWN_CAPABILITY, type ModelCapability } from '#/capability';
 import type { Message, StreamedMessagePart } from '#/message';
 import type {
   ChatProvider,
@@ -70,10 +69,6 @@ export class MockChatProvider implements ChatProvider {
     );
   }
 
-  getCapability(_model?: string): ModelCapability {
-    return UNKNOWN_CAPABILITY;
-  }
-
   withThinking(_effort: ThinkingEffort): MockChatProvider {
     const opts: MockChatProviderOptions = {
       id: this._id,
@@ -96,6 +91,7 @@ class MockStreamedMessage implements StreamedMessage {
   readonly usage: TokenUsage | null;
   readonly finishReason: FinishReason | null;
   readonly rawFinishReason: string | null;
+  readonly traceId: string | null = null;
 
   private readonly _parts: StreamedMessagePart[];
 

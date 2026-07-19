@@ -1,10 +1,8 @@
-import {
-  isKimiError,
-  type KimiErrorPayload,
-} from '@moonshot-ai/kimi-code-sdk';
+import { isKimiError } from '@moonshot-ai/kimi-code-sdk';
 
 import type {
   UiEvidenceItem,
+  UiFindingItem,
   UiQuestionItem,
 } from '#/tui/components/chrome/investigation-board';
 import {
@@ -147,6 +145,56 @@ export function normalizeQuestionItem(value: unknown): UiQuestionItem | null {
   };
 }
 
+/** Migrate a legacy `{ title, status }` item into a fully-populated question item. */
+export function migrateTodoItemShape(value: {
+  title: string;
+  status: 'pending' | 'in_progress' | 'done';
+}): UiQuestionItem {
+  return {
+    id: String(Math.random()).slice(2, 10),
+    question: value.title,
+    status:
+      value.status === 'done'
+        ? 'resolved'
+        : value.status === 'in_progress'
+          ? 'investigating'
+          : 'pending',
+    evidence: [],
+    blockers: [],
+    confidence: 'medium',
+    depth: 'deep',
+  };
+}
+
+/** Project a question item into a finding entry for the conclusions area. */
+export function questionToFinding(q: UiQuestionItem): UiFindingItem {
+  return {
+    id: q.id,
+    question: q.question,
+    conclusion: q.conclusion ?? (q.status === 'inconclusive' ? 'Unable to determine' : ''),
+    confidence: q.confidence,
+    depth: q.depth,
+    status: q.status === 'resolved' ? 'resolved' : 'inconclusive',
+  };
+}
+
+/** Normalize an archived finding record from the findings tool store. */
+export function normalizeFindingItem(value: unknown): UiFindingItem | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const rec = value as Record<string, unknown>;
+  if (typeof rec['id'] !== 'string' || rec['id'].trim().length === 0) return null;
+  if (typeof rec['question'] !== 'string' || rec['question'].trim().length === 0) return null;
+  if (rec['status'] !== 'resolved' && rec['status'] !== 'inconclusive') return null;
+  return {
+    id: rec['id'],
+    question: rec['question'],
+    conclusion: typeof rec['conclusion'] === 'string' ? rec['conclusion'] : '',
+    confidence: typeof rec['confidence'] === 'string' ? rec['confidence'] : 'medium',
+    depth: typeof rec['depth'] === 'string' ? rec['depth'] : 'deep',
+    status: rec['status'],
+  };
+}
+
 export function formatErrorMessage(error: unknown): string {
   if (isKimiError(error)) {
     return formatErrorPayload({
@@ -158,9 +206,13 @@ export function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function formatErrorPayload(
-  error: Pick<KimiErrorPayload, 'code' | 'message' | 'details'>,
-): string {
+interface ErrorPayloadLike {
+  readonly code: string;
+  readonly message: string;
+  readonly details?: Record<string, unknown>;
+}
+
+export function formatErrorPayload(error: ErrorPayloadLike): string {
   const filteredMessage = formatProviderFilteredMessage(error.details);
   if (filteredMessage !== undefined) return `[${error.code}] ${filteredMessage}`;
   return `[${error.code}] ${error.message}`;
