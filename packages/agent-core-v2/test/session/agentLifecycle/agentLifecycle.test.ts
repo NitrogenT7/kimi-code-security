@@ -9,6 +9,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'pathe';
+
 import { SyncDescriptor } from '#/_base/di/descriptors';
 import { Disposable, DisposableStore } from '#/_base/di/lifecycle';
 import { type ISessionScopeHandle, LifecycleScope } from '#/_base/di/scope';
@@ -577,6 +581,77 @@ describe('AgentLifecycleService', () => {
 
     await sessionMcp.ensureMcpReady({ ignored: { transport: 'stdio', command: 'ignored' } });
     expect(connectAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('defers group member servers until loadGroup while ungrouped servers connect eagerly', async () => {
+    const workDir = await mkdtemp(join(tmpdir(), 'kimi-mcp-groups-work-'));
+    const homeDir = await mkdtemp(join(tmpdir(), 'kimi-mcp-groups-home-'));
+    try {
+      await mkdir(join(workDir, '.kimi-code'), { recursive: true });
+      await writeFile(
+        join(workDir, '.kimi-code', 'mcp.json'),
+        JSON.stringify({
+          mcpServers: {
+            grouped: { transport: 'stdio', command: 'grouped-cmd' },
+            free: { transport: 'stdio', command: 'free-cmd' },
+          },
+          mcpGroups: { audit: { servers: ['grouped'], skillPrefixes: ['audit-'] } },
+        }),
+      );
+      ix.stub(ISessionWorkspaceContext, {
+        _serviceBrand: undefined,
+        workDir,
+        additionalDirs: [],
+      } as unknown as ISessionWorkspaceContext);
+      ix.stub(IBootstrapService, {
+        _serviceBrand: undefined,
+        homeDir,
+        cwd: homeDir,
+      } as unknown as IBootstrapService);
+
+      const connectAll = vi
+        .spyOn(McpConnectionManager.prototype, 'connectAll')
+        .mockResolvedValue(undefined);
+      const registerLazy = vi.spyOn(McpConnectionManager.prototype, 'registerLazyServers');
+
+      const sessionMcp = ix.get(ISessionMcpService);
+      await sessionMcp.ensureMcpReady();
+
+      // The group member stays lazy; the ungrouped server connects eagerly.
+      expect(registerLazy).toHaveBeenCalledWith({
+        grouped: { transport: 'stdio', command: 'grouped-cmd' },
+      });
+      expect(connectAll).toHaveBeenCalledTimes(1);
+      expect(connectAll).toHaveBeenCalledWith({
+        free: { transport: 'stdio', command: 'free-cmd' },
+      });
+
+      const groups = sessionMcp.listGroups();
+      expect(groups).toHaveLength(1);
+      expect(groups[0]).toMatchObject({
+        name: 'audit',
+        servers: ['grouped'],
+        skillPrefixes: ['audit-'],
+        loaded: false,
+      });
+      expect(sessionMcp.activeGroup()).toBeNull();
+
+      const loadGroup = vi
+        .spyOn(McpConnectionManager.prototype, 'loadGroup')
+        .mockResolvedValue(undefined);
+      await sessionMcp.loadGroup('audit');
+      expect(loadGroup).toHaveBeenCalledTimes(1);
+      expect(sessionMcp.activeGroup()).toBe('audit');
+
+      sessionMcp.setGroupMode(null);
+      expect(sessionMcp.activeGroup()).toBeNull();
+      await expect(sessionMcp.loadGroup('missing')).rejects.toMatchObject({
+        code: 'mcp.server_not_found',
+      });
+    } finally {
+      await rm(workDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
   });
 
   it('exposes the in-flight handle and joins it after bootstrap', async () => {

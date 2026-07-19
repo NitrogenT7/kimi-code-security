@@ -166,6 +166,26 @@ describe('InMemorySkillCatalog model skill listing', () => {
       /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/,
     );
   });
+
+  it('filters the listing by skill-name prefixes when provided', () => {
+    const registry = makeRegistry([
+      makeSkill('android-apk-audit', 'user', 'APK audit'),
+      makeSkill('apk-hardcode-analyzer', 'user', 'Hardcoded secrets'),
+      makeSkill('web-pentest', 'user', 'Web pentest'),
+      makeSkill('misc-notes', 'user', 'Notes'),
+    ]);
+
+    const androidOnly = registry.getModelSkillListing(['android-', 'apk-']);
+    expect(androidOnly).toContain('android-apk-audit');
+    expect(androidOnly).toContain('apk-hardcode-analyzer');
+    expect(androidOnly).not.toContain('web-pentest');
+    expect(androidOnly).not.toContain('misc-notes');
+
+    // '*' and empty/absent prefix lists disable filtering.
+    expect(registry.getModelSkillListing(['*'])).toContain('misc-notes');
+    expect(registry.getModelSkillListing([])).toContain('misc-notes');
+    expect(registry.getModelSkillListing()).toContain('misc-notes');
+  });
 });
 
 describe('InMemorySkillCatalog prompt rendering', () => {
