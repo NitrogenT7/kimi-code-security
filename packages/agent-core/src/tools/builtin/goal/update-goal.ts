@@ -9,27 +9,57 @@
  * goal-store operations decide whether a requested transition is valid.
  */
 
-import type { Agent } from '#/agent';
 import { z } from 'zod';
 
-import {
-  buildGoalBlockedReasonPrompt,
-  buildGoalCompletionSummaryPrompt,
-} from './outcome-prompts';
+import type { Agent } from '#/agent';
+
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
 import { toInputJsonSchema } from '../../support/input-schema';
+import { buildGoalBlockedReasonPrompt, buildGoalCompletionSummaryPrompt } from './outcome-prompts';
 import DESCRIPTION from './update-goal.md?raw';
 
 export const UpdateGoalToolInputSchema = z
   .object({
     status: z
       .enum(['active', 'complete', 'blocked'])
+      .optional()
       .describe(
         'The lifecycle status to set for the current goal. Use `blocked` for impossible, unsafe, or contradictory objectives, or after the same non-terminal blocking condition repeats for at least 3 consecutive goal turns.',
       ),
+    objective: z
+      .string()
+      .optional()
+      .describe(
+        'Rewrite the goal objective into a structured four-element format: [Purpose] / [Key Tasks] / [End State] / [Constraints]. ' +
+          'Only allowed during the first turn (turnsUsed <= 1) of a lightweight goal; afterwards changes are rejected. ' +
+          "Do not change the user's original intent, only structure it.",
+      ),
+    purpose: z
+      .string()
+      .optional()
+      .describe(
+        'Extract the purpose from the objective. Only allowed during the first turn (turnsUsed <= 1).',
+      ),
+    completionCriterion: z
+      .string()
+      .optional()
+      .describe(
+        'Extract the end-state / completion criterion from the objective. Only allowed during the first turn (turnsUsed <= 1).',
+      ),
   })
-  .strict();
+  .strict()
+  .refine(
+    (data) =>
+      data.status !== undefined ||
+      data.objective !== undefined ||
+      data.purpose !== undefined ||
+      data.completionCriterion !== undefined,
+    {
+      message:
+        'At least one of status, objective, purpose, or completionCriterion must be provided.',
+    },
+  );
 
 export type UpdateGoalToolInput = z.infer<typeof UpdateGoalToolInputSchema>;
 
@@ -41,6 +71,33 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
   constructor(private readonly agent: Agent) {}
 
   resolveExecution(args: UpdateGoalToolInput): ToolExecution {
+    const goal = this.agent.goal;
+    const currentGoal = goal.getGoal().goal;
+    const goalIsActive = currentGoal?.status === 'active';
+    const hasContentUpdate =
+      args.objective !== undefined ||
+      args.purpose !== undefined ||
+      args.completionCriterion !== undefined;
+
+    if (hasContentUpdate) {
+      return {
+        description: 'Rewriting goal into four-element format',
+        stopBatchAfterThis: args.status !== undefined && args.status !== 'active' && goalIsActive,
+        approvalRule: this.name,
+        execute: async () => {
+          const rewritten = await goal.rewriteGoalContent(
+            {
+              objective: args.objective,
+              purpose: args.purpose,
+              completionCriterion: args.completionCriterion,
+            },
+            'model',
+          );
+          return { output: JSON.stringify({ goal: rewritten }, null, 2) };
+        },
+      };
+    }
+
     if (!isUpdateGoalStatus(args.status)) {
       return {
         isError: true,
@@ -49,9 +106,6 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
     }
 
     const status = args.status;
-    const goal = this.agent.goal;
-    const currentGoal = goal.getGoal().goal;
-    const goalIsActive = currentGoal?.status === 'active';
 
     return {
       description: `Setting goal status: ${status}`,
@@ -70,8 +124,7 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
           if (completed === null) {
             return { output: 'Goal not completed: no active goal.' };
           }
-          const output =
-            buildGoalCompletionSummaryPrompt(completed);
+          const output = buildGoalCompletionSummaryPrompt(completed);
           return { output, stopTurn: true };
         }
         if (status === 'blocked') {
@@ -79,8 +132,7 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
           if (blocked === null) {
             return { output: 'Goal not blocked: no active goal.' };
           }
-          const output =
-            buildGoalBlockedReasonPrompt(blocked);
+          const output = buildGoalBlockedReasonPrompt(blocked);
           return { output, stopTurn: true };
         }
         return {

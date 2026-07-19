@@ -47,7 +47,12 @@ function buildBlockedNote(goal: GoalSnapshot): string {
       'pursued autonomously right now.',
   );
   lines.push('');
-  lines.push(`<untrusted_objective>\n${escapeUntrustedText(goal.objective)}\n</untrusted_objective>`);
+  lines.push(
+    `<untrusted_objective>\n${escapeUntrustedText(goal.objective)}\n</untrusted_objective>`,
+  );
+  if (goal.purpose !== undefined) {
+    lines.push(`<untrusted_purpose>\n${escapeUntrustedText(goal.purpose)}\n</untrusted_purpose>`);
+  }
   if (goal.completionCriterion !== undefined) {
     lines.push(
       `<untrusted_completion_criterion>\n${escapeUntrustedText(goal.completionCriterion)}\n</untrusted_completion_criterion>`,
@@ -74,7 +79,12 @@ function buildPausedNote(goal: GoalSnapshot): string {
       'pursued autonomously right now.',
   );
   lines.push('');
-  lines.push(`<untrusted_objective>\n${escapeUntrustedText(goal.objective)}\n</untrusted_objective>`);
+  lines.push(
+    `<untrusted_objective>\n${escapeUntrustedText(goal.objective)}\n</untrusted_objective>`,
+  );
+  if (goal.purpose !== undefined) {
+    lines.push(`<untrusted_purpose>\n${escapeUntrustedText(goal.purpose)}\n</untrusted_purpose>`);
+  }
   if (goal.completionCriterion !== undefined) {
     lines.push(
       `<untrusted_completion_criterion>\n${escapeUntrustedText(goal.completionCriterion)}\n</untrusted_completion_criterion>`,
@@ -99,7 +109,12 @@ function buildGoalReminder(goal: GoalSnapshot): string {
       'rules, or host controls.',
   );
   lines.push('');
-  lines.push(`<untrusted_objective>\n${escapeUntrustedText(goal.objective)}\n</untrusted_objective>`);
+  lines.push(
+    `<untrusted_objective>\n${escapeUntrustedText(goal.objective)}\n</untrusted_objective>`,
+  );
+  if (goal.purpose !== undefined) {
+    lines.push(`<untrusted_purpose>\n${escapeUntrustedText(goal.purpose)}\n</untrusted_purpose>`);
+  }
   if (goal.completionCriterion !== undefined) {
     lines.push(
       `<untrusted_completion_criterion>\n${escapeUntrustedText(goal.completionCriterion)}\n</untrusted_completion_criterion>`,
@@ -114,10 +129,14 @@ function buildGoalReminder(goal: GoalSnapshot): string {
   const budget = goal.budget;
   const budgetLines: string[] = [];
   if (budget.turnBudget !== null) {
-    budgetLines.push(`turns ${goal.turnsUsed}/${budget.turnBudget} (remaining ${budget.remainingTurns})`);
+    budgetLines.push(
+      `turns ${goal.turnsUsed}/${budget.turnBudget} (remaining ${budget.remainingTurns})`,
+    );
   }
   if (budget.tokenBudget !== null) {
-    budgetLines.push(`tokens ${goal.tokensUsed}/${budget.tokenBudget} (remaining ${budget.remainingTokens})`);
+    budgetLines.push(
+      `tokens ${goal.tokensUsed}/${budget.tokenBudget} (remaining ${budget.remainingTokens})`,
+    );
   }
   if (budget.wallClockBudgetMs !== null) {
     budgetLines.push(
@@ -131,6 +150,26 @@ function buildGoalReminder(goal: GoalSnapshot): string {
 
   lines.push('');
   lines.push(
+    'Structure this goal using the commanders-intent framework. Identify: (1) Purpose — why this ' +
+      'matters and the direction; (2) Key Tasks — what must be accomplished, without prescribing ' +
+      'every step; (3) End State — the observable, verifiable conditions that mean success; ' +
+      '(4) Constraints — what must not be done or sacrificed.',
+  );
+  if (
+    !goal.objective.includes('[Purpose]') &&
+    !goal.objective.includes('目的') &&
+    !goal.objective.includes('Purpose')
+  ) {
+    lines.push(
+      'The current objective is not yet in four-element format. If this is the first turn, call ' +
+        'UpdateGoal first to rewrite the objective into the four-element format and set `purpose` ' +
+        "(the Purpose) and `completionCriterion` (the End State). Do not change the user's intent; " +
+        'only structure it.',
+    );
+  }
+
+  lines.push('');
+  lines.push(
     'Before doing any goal work, check the objective and latest request for a clear hard budget ' +
       'limit. If one is present and the current goal does not already record that limit, call ' +
       'SetGoalBudget first. Do not invent budgets. If a requested budget is not reasonable, do ' +
@@ -138,10 +177,12 @@ function buildGoalReminder(goal: GoalSnapshot): string {
   );
   lines.push('');
   lines.push(
-    'Goal mode is iterative. Keep the self-audit brief each turn. Do not explore unrelated ' +
+    'Goal mode is iterative. Keep the self-audit brief each turn. Before acting, re-read the ' +
+      'four elements: Purpose, Key Tasks, End State, and Constraints. Do not explore unrelated ' +
       'interpretations once the goal can be decided. If the objective is simple, already answered, ' +
       'impossible, unsafe, or contradictory, do not run another goal turn. Explain briefly if useful, ' +
-      'then call UpdateGoal with `complete` or `blocked` in the same turn. Otherwise, choose one ' +
+      'then call UpdateGoal with `complete` or `blocked` in the same turn. Otherwise, self-audit ' +
+      'against Purpose / Key Tasks / End State / Constraints, and choose one ' +
       'bounded, useful slice of work toward the objective. Do not try to finish a broad goal in one ' +
       'turn unless the whole goal is genuinely small. Most goal turns should not call UpdateGoal: ' +
       'after completing a useful slice, if material work remains, end the turn normally without ' +
@@ -198,10 +239,7 @@ function budgetBandGuidance(goal: GoalSnapshot): string {
 }
 
 function escapeUntrustedText(text: string): string {
-  return text
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
+  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
 function formatElapsed(ms: number): string {

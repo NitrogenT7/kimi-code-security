@@ -1,17 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'pathe';
-import { setTimeout as sleep } from 'node:timers/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-import { testKaos } from '../fixtures/test-kaos';
-import type { ProviderConfig } from '@moonshot-ai/kosong';
-import { describe, expect, it } from 'vitest';
-
-import { randomUUID } from 'node:crypto';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo as HttpAddress } from 'node:net';
+import { tmpdir } from 'node:os';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -19,17 +13,20 @@ import type {
   OAuthClientInformationFull,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
+import type { ProviderConfig } from '@moonshot-ai/kosong';
+import { dirname, join } from 'pathe';
+import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { KimiError } from '../../src/errors';
-import { ProviderManager } from '../../src/session/provider-manager';
 import { McpConnectionManager, type McpServerEntry } from '../../src/mcp/connection-manager';
 import { JsonFileStore, McpOAuthService } from '../../src/mcp/oauth';
 import type { AgentEvent, SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
+import { ProviderManager } from '../../src/session/provider-manager';
 import { SessionAPIImpl } from '../../src/session/rpc';
 import { createScriptedGenerate } from '../agent/harness';
-
+import { testKaos } from '../fixtures/test-kaos';
 
 const here = import.meta.dirname;
 const stdioFixture = join(here, 'fixtures', 'mock-stdio-server.mjs');
@@ -51,10 +48,12 @@ function stdioConfig(args: string[] = [stdioFixture]) {
   };
 }
 
-function sessionRpc(options: {
-  readonly events?: SessionRpcEvent[] | undefined;
-  readonly onEvent?: ((event: SessionRpcEvent) => void) | undefined;
-} = {}): SDKSessionRPC {
+function sessionRpc(
+  options: {
+    readonly events?: SessionRpcEvent[] | undefined;
+    readonly onEvent?: ((event: SessionRpcEvent) => void) | undefined;
+  } = {},
+): SDKSessionRPC {
   return {
     emitEvent: async (event: SessionRpcEvent) => {
       options.events?.push(event);
@@ -371,7 +370,8 @@ describe('McpConnectionManager', () => {
     const server: HttpServer = createHttpServer((_req, res) => {
       res.writeHead(401, {
         'content-type': 'application/json',
-        'www-authenticate': 'Bearer realm="mcp", resource_metadata="http://x/.well-known/oauth-protected-resource"',
+        'www-authenticate':
+          'Bearer realm="mcp", resource_metadata="http://x/.well-known/oauth-protected-resource"',
       });
       res.end(JSON.stringify({ error: 'unauthorized' }));
     });
@@ -413,7 +413,8 @@ describe('McpConnectionManager', () => {
     const server: HttpServer = createHttpServer((_req, res) => {
       res.writeHead(401, {
         'content-type': 'text/plain',
-        'www-authenticate': 'Bearer realm="mcp", resource_metadata="http://x/.well-known/oauth-protected-resource"',
+        'www-authenticate':
+          'Bearer realm="mcp", resource_metadata="http://x/.well-known/oauth-protected-resource"',
       });
       res.end('unauthorized');
     });
@@ -661,9 +662,11 @@ describe('McpConnectionManager', () => {
       expect(cm.get('remote')?.status).toBe('connected');
 
       // Reach into the live client to invoke the same hook the SDK uses.
-      const internalClient = (cm as unknown as {
-        entries: Map<string, { client?: { client: { onerror?: (e: Error) => void } } }>;
-      }).entries.get('remote')?.client?.client;
+      const internalClient = (
+        cm as unknown as {
+          entries: Map<string, { client?: { client: { onerror?: (e: Error) => void } } }>;
+        }
+      ).entries.get('remote')?.client?.client;
       internalClient?.onerror?.(new Error('Maximum reconnection attempts (3) exceeded.'));
 
       // Listener fires asynchronously through our wrapper; allow microtasks.
@@ -754,10 +757,7 @@ describe('Session MCP startup', () => {
       } satisfies OAuthTokens);
 
       await expect(
-        readFile(
-          join(kimiHome, 'credentials', 'mcp', `${provider.storeKey}-tokens.json`),
-          'utf-8',
-        ),
+        readFile(join(kimiHome, 'credentials', 'mcp', `${provider.storeKey}-tokens.json`), 'utf-8'),
       ).resolves.toContain('session-token');
       await expect(
         readFile(
@@ -972,6 +972,60 @@ describe('Session MCP startup', () => {
       await rm(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
     }
   }, 10_000);
+
+  it('connects a single server after the manager is created', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      await cm.connect('alpha', stdioConfig());
+      const alpha = cm.get('alpha');
+      expect(alpha?.status).toBe('connected');
+      expect(alpha?.toolCount).toBe(3);
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20_000);
+
+  it('replace an existing server config when connect is called again', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      await cm.connect('flaky', { transport: 'stdio', command: '/no/such/binary' });
+      expect(cm.get('flaky')?.status).toBe('failed');
+
+      await cm.connect('flaky', stdioConfig());
+      expect(cm.get('flaky')?.status).toBe('connected');
+      expect(cm.get('flaky')?.toolCount).toBe(3);
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20_000);
+
+  it('remove disconnects and deletes the server entry', async () => {
+    const cm = new McpConnectionManager();
+    const seen: Array<{ name: string; status: McpServerEntry['status'] }> = [];
+    cm.onStatusChange((e) => seen.push({ name: e.name, status: e.status }));
+    try {
+      await cm.connect('alpha', stdioConfig());
+      expect(cm.get('alpha')).toBeDefined();
+
+      const removed = await cm.remove('alpha');
+      expect(removed).toBe(true);
+      expect(cm.get('alpha')).toBeUndefined();
+
+      const disabledStatuses = seen.filter((s) => s.name === 'alpha' && s.status === 'disabled');
+      expect(disabledStatuses.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20_000);
+
+  it('remove returns false for unknown servers', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      expect(await cm.remove('not-there')).toBe(false);
+    } finally {
+      await cm.shutdown();
+    }
+  });
 });
 
 function testProviderManager(): ProviderManager {

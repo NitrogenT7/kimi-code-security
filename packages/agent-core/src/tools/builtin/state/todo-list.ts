@@ -1,10 +1,11 @@
 /**
- * TodoListTool — structured TODO list management tool.
+ * TodoListTool — structured question-driven investigation tracker.
  *
- * The LLM uses this tool to maintain a visible plan of sub-tasks during
- * plan-mode workflows and multi-step operations. A single tool serves
- * both reads and writes:
+ * REPLACED the old task-oriented TODO list with a question-driven one.
+ * Instead of tracking "tasks to do", it tracks "questions to answer" with
+ * hypotheses, evidence chains, blockers, and confidence levels.
  *
+ * Usage:
  *   - `resolveExecution({ todos: [...] })` — replace the full list
  *   - `resolveExecution({ todos: [] })`    — clear the list
  *   - `resolveExecution({})`               — query current list (no mutation)
@@ -13,12 +14,15 @@
  * `tools.update_store`, so the store update is visible on wire replay.
  */
 
+import { randomUUID } from 'node:crypto';
+
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
-import { toInputJsonSchema } from '../../support/input-schema';
 import type { ToolStore } from '../../store';
+import { toInputJsonSchema } from '../../support/input-schema';
+import { FINDINGS_STORE_KEY, type FindingItem } from './findings';
 import DESCRIPTION from './todo-list.md?raw';
 
 // ── TODO state shape ─────────────────────────────────────────────────
@@ -26,14 +30,37 @@ import DESCRIPTION from './todo-list.md?raw';
 export const TODO_LIST_TOOL_NAME = 'TodoList' as const;
 export const TODO_STORE_KEY = 'todo';
 const TODO_LIST_WRITE_REMINDER =
-  'Ensure that you continue to use the todo list to track progress. Mark tasks done immediately after finishing them, and keep exactly one task in_progress when work is underway.';
+  'Ensure that you continue to use the todo list to track progress. Keep questions updated with evidence and confidence as you investigate.';
 
-export type TodoStatus = 'pending' | 'in_progress' | 'done';
+export type QuestionStatus = 'pending' | 'investigating' | 'resolved' | 'inconclusive';
 
-export interface TodoItem {
-  readonly title: string;
-  readonly status: TodoStatus;
+export type EvidenceStatus = 'confirmed' | 'refuted' | 'checking';
+
+export type Confidence = 'low' | 'medium' | 'high';
+
+export type Depth = 'quick' | 'deep';
+
+export interface EvidenceItem {
+  readonly status: EvidenceStatus;
+  readonly description: string;
 }
+
+export interface QuestionItem {
+  readonly type: 'question';
+  readonly id: string;
+  readonly question: string;
+  readonly hypothesis?: string;
+  readonly conclusion?: string;
+  readonly evidence: readonly EvidenceItem[];
+  readonly blockers: readonly string[];
+  readonly confidence: Confidence;
+  readonly depth: Depth;
+  readonly status: QuestionStatus;
+  readonly parentId?: string;
+  readonly subQuestions: readonly string[];
+}
+
+export type TodoItem = QuestionItem;
 
 declare module '../../store' {
   interface ToolStoreData {
@@ -41,53 +68,304 @@ declare module '../../store' {
   }
 }
 
-// ── Schema ───────────────────────────────────────────────────────────
+// ── Zod schemas ───────────────────────────────────────────────────────
 
-const TodoItemSchema = z.object({
-  title: z.string().min(1).describe('Short, actionable title for the todo.'),
-  status: z.enum(['pending', 'in_progress', 'done']).describe('Current status of the todo.'),
+const EvidenceItemSchema = z.object({
+  status: z.enum(['confirmed', 'refuted', 'checking']),
+  description: z.string().min(1),
+});
+
+const QuestionItemSchema: z.ZodType<QuestionItem> = z.object({
+  type: z.literal('question'),
+  id: z.string().min(1),
+  question: z.string().min(1),
+  hypothesis: z.string().optional(),
+  conclusion: z.string().optional(),
+  evidence: z.array(EvidenceItemSchema).default([]),
+  blockers: z.array(z.string()).default([]),
+  confidence: z.enum(['low', 'medium', 'high']),
+  depth: z.enum(['quick', 'deep']),
+  status: z.enum(['pending', 'investigating', 'resolved', 'inconclusive']),
+  parentId: z.string().optional(),
+  subQuestions: z.array(z.string()).default([]),
 });
 
 export interface TodoListInput {
-  todos?: Array<{ title: string; status: TodoStatus }>;
+  todos?: Array<unknown>;
 }
 
+// The array items MUST advertise the real question-item shape. With
+// `z.unknown()` items the advertised JSON schema degenerates to `items: {}`
+// ("anything"), which providers may further mangle (e.g. into
+// `items: {type: 'string'}`) — the model then submits plain strings and the
+// runtime validation rejects them ("Item is not an object"). The schema is
+// the model-facing contract and must match todo-list.md and validateTodoItem.
+// In the input view the `.default([])` fields become optional, so the
+// advertised required set is exactly what looksLikeQuestionItem enforces.
 export const TodoListInputSchema: z.ZodType<TodoListInput> = z.object({
   todos: z
-    .array(TodoItemSchema)
+    .array(QuestionItemSchema)
     .optional()
     .describe(
-      'The updated todo list. Omit to read the current todo list without making changes. Pass an empty array to clear the list.',
+      'The updated todo list. Omit to read the current list. Pass an empty array to clear.',
     ),
 });
 
-// ── Implementation ───────────────────────────────────────────────────
+// ── Validation helpers ───────────────────────────────────────────────
 
-export function renderTodoList(todos: readonly TodoItem[], title = 'Current todo list:'): string {
-  if (todos.length === 0) {
-    return 'Todo list is empty.';
-  }
-  const lines = todos.map((t) => {
-    const marker = statusMarker(t.status);
-    return `  ${marker} ${t.title}`;
-  });
-  return [title, ...lines].join('\n');
+/**
+ * Lightweight structural check — does the value look like a QuestionItem
+ * with the bare minimum required fields? This is deliberately looser than
+ * the full Zod schema because LLM-provided plain objects may omit optional
+ * fields that have `.default()` in the schema (Zod v4 does not auto-fill
+ * defaults during `.parse()` validation).
+ */
+function looksLikeQuestionItem(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  if (r['type'] !== 'question') return false;
+  if (typeof r['question'] !== 'string' || r['question'].trim().length === 0) return false;
+  if (typeof r['id'] !== 'string' || r['id'].trim().length === 0) return false;
+  const status = r['status'];
+  if (
+    status !== 'pending' &&
+    status !== 'investigating' &&
+    status !== 'resolved' &&
+    status !== 'inconclusive'
+  )
+    return false;
+  const confidence = r['confidence'];
+  if (confidence !== 'low' && confidence !== 'medium' && confidence !== 'high') return false;
+  const depth = r['depth'];
+  if (depth !== 'quick' && depth !== 'deep') return false;
+  // Validate evidence: must be an array if present (null / string / etc. will fail)
+  const evidence = r['evidence'];
+  if (evidence !== undefined && !Array.isArray(evidence)) return false;
+  // Validate blockers: must be an array if present
+  const blockers = r['blockers'];
+  if (blockers !== undefined && !Array.isArray(blockers)) return false;
+  // Validate subQuestions: must be an array if present
+  const subQuestions = r['subQuestions'];
+  if (subQuestions !== undefined && !Array.isArray(subQuestions)) return false;
+  return true;
 }
 
-function statusMarker(status: TodoStatus): string {
+/**
+ * Normalize a raw object into a proper QuestionItem using the Zod schema,
+ * which fills in defaults for optional fields and validates types strictly.
+ */
+function normalizeQuestionItem(raw: Record<string, unknown>): QuestionItem {
+  return QuestionItemSchema.parse(raw);
+}
+
+function validateResolvedItem(
+  evidence: readonly unknown[],
+  conclusion: unknown,
+  status: unknown,
+): string | null {
+  if (status !== 'resolved') return null;
+  const issues: string[] = [];
+  if (!conclusion || (typeof conclusion === 'string' && conclusion.trim().length === 0)) {
+    issues.push('conclusion is required when status is "resolved"');
+  }
+  if (!Array.isArray(evidence) || evidence.length === 0) {
+    issues.push('evidence is required when status is "resolved"');
+  }
+  return issues.length > 0 ? issues.join('; ') : null;
+}
+
+function describeValidationIssue(value: unknown): string {
+  if (typeof value !== 'object' || value === null) {
+    return 'Item is not an object';
+  }
+  const r = value as Record<string, unknown>;
+  if (r['type'] !== 'question') return 'Missing or invalid "type" field (must be "question")';
+  if (typeof r['question'] !== 'string' || r['question'].trim().length === 0)
+    return 'Missing or empty "question" field';
+  if (typeof r['id'] !== 'string' || r['id'].trim().length === 0)
+    return 'Missing or empty "id" field (provide a UUID)';
+  const status = r['status'];
+  if (
+    status !== 'pending' &&
+    status !== 'investigating' &&
+    status !== 'resolved' &&
+    status !== 'inconclusive'
+  ) {
+    return `Invalid "status": "${String(status)}" (must be pending|investigating|resolved|inconclusive)`;
+  }
+  const confidence = r['confidence'];
+  if (confidence !== 'low' && confidence !== 'medium' && confidence !== 'high') {
+    return `Invalid "confidence": "${String(confidence)}" (must be low|medium|high)`;
+  }
+  const depth = r['depth'];
+  if (depth !== 'quick' && depth !== 'deep') {
+    return `Invalid "depth": "${String(depth)}" (must be quick|deep)`;
+  }
+  if (r['evidence'] !== undefined && !Array.isArray(r['evidence']))
+    return '"evidence" must be an array (use [] for empty)';
+  if (r['blockers'] !== undefined && !Array.isArray(r['blockers']))
+    return '"blockers" must be an array (use [] for empty)';
+  if (r['subQuestions'] !== undefined && !Array.isArray(r['subQuestions']))
+    return '"subQuestions" must be an array';
+  return 'Unknown validation error';
+}
+
+function validateTodoItem(value: unknown): string | null {
+  // Old format migration check: { title, status } → migrate to question
+  if (isOldFormatTodo(value)) {
+    const migrated = migrateOldTodo(value);
+    return validateResolvedItem(migrated.evidence, migrated.conclusion, migrated.status);
+  }
+  if (!looksLikeQuestionItem(value)) {
+    return describeValidationIssue(value);
+  }
+  const r = value as Record<string, unknown>;
+  return validateResolvedItem(r['evidence'] as readonly unknown[], r['conclusion'], r['status']);
+}
+
+// ── Old format migration ─────────────────────────────────────────────
+
+interface OldTodoItem {
+  title: string;
+  status: 'pending' | 'in_progress' | 'done';
+}
+
+function isOldFormatTodo(value: unknown): value is OldTodoItem {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return typeof r['title'] === 'string' && typeof r['status'] === 'string';
+}
+
+/** Map old task status to question status. */
+const OLD_STATUS_MAP: Record<string, QuestionStatus> = {
+  pending: 'pending',
+  in_progress: 'investigating',
+  done: 'resolved',
+};
+
+function migrateOldTodo(old: OldTodoItem): QuestionItem {
+  return {
+    type: 'question',
+    id: randomUUID(),
+    question: old.title,
+    status: OLD_STATUS_MAP[old.status] ?? 'pending',
+    evidence: [],
+    blockers: [],
+    confidence: 'medium' as Confidence,
+    depth: 'deep' as Depth,
+    subQuestions: [],
+  };
+}
+
+// ── Rendering ────────────────────────────────────────────────────────
+
+export function renderTodoList(
+  todos: readonly TodoItem[],
+  title = 'Current question list:',
+): string {
+  // Migrate any old-format items on the fly for rendering
+  const normalized = todos.map((t) => (isOldFormatTodo(t) ? migrateOldTodo(t) : t)) as TodoItem[];
+
+  // Build child map before filtering, so we can check parent status
+  const childMap = new Map<string, TodoItem[]>();
+  for (const t of normalized) {
+    if (t.parentId) {
+      const siblings = childMap.get(t.parentId) ?? [];
+      siblings.push(t);
+      childMap.set(t.parentId, siblings);
+    }
+  }
+
+  // Only show pending and investigating items, but include their children regardless of child status
+  const parentIds = new Set(normalized.filter((t) => !t.parentId).map((t) => t.id));
+  const active = normalized.filter((t) => {
+    if (t.status === 'pending' || t.status === 'investigating') return true;
+    // Also include children whose parent is active
+    if (t.parentId && parentIds.has(t.parentId)) {
+      const parent = normalized.find((p) => p.id === t.parentId);
+      if (parent && (parent.status === 'pending' || parent.status === 'investigating')) return true;
+    }
+    return false;
+  });
+  if (active.length === 0) {
+    return 'Question list is empty.';
+  }
+
+  const topLevel = active.filter((t) => !t.parentId);
+
+  const lines: string[] = [title];
+  let index = 1;
+  for (const parent of topLevel) {
+    renderQuestion(parent, lines, index, false);
+    const children = childMap.get(parent.id) ?? [];
+    let childIndex = 1;
+    for (const child of children) {
+      renderQuestion(child, lines, `${index}.${childIndex}`, true);
+      childIndex += 1;
+    }
+    index += 1;
+  }
+
+  return lines.join('\n');
+}
+
+function renderQuestion(
+  item: QuestionItem,
+  lines: string[],
+  prefix: number | string,
+  isChild: boolean,
+): void {
+  const marker = statusMarker(item.status);
+  lines.push(`${isChild ? '  ' : ''}${prefix}. ${marker} ${item.question}`);
+
+  if (item.hypothesis) {
+    lines.push(`${isChild ? '  ' : ''}   假设：${item.hypothesis}`);
+  }
+  if (item.evidence.length > 0) {
+    if (item.evidence.length === 1) {
+      const first = item.evidence[0];
+      if (first !== undefined) {
+        lines.push(`${isChild ? '  ' : ''}   证据链：${formatEvidenceItem(first)}`);
+      }
+    } else {
+      lines.push(`${isChild ? '  ' : ''}   证据链：`);
+      for (const ev of item.evidence) {
+        lines.push(`${isChild ? '  ' : ''}     ${formatEvidenceItem(ev)}`);
+      }
+    }
+  }
+  if (item.blockers.length > 0) {
+    lines.push(`${isChild ? '  ' : ''}   阻碍：${item.blockers.join('; ')}`);
+  }
+  if (item.conclusion) {
+    lines.push(`${isChild ? '  ' : ''}   结论：${item.conclusion}`);
+  }
+  lines.push(`${isChild ? '  ' : ''}   置信度：${item.confidence}｜深度：${item.depth}`);
+}
+
+function formatEvidenceItem(ev: EvidenceItem): string {
+  const evMarker = ev.status === 'confirmed' ? '✅' : ev.status === 'refuted' ? '❌' : '❓';
+  return `${evMarker} [${ev.status}] ${ev.description}`;
+}
+
+function statusMarker(status: QuestionStatus): string {
   switch (status) {
     case 'pending':
       return '[pending]';
-    case 'in_progress':
-      return '[in_progress]';
-    case 'done':
-      return '[done]';
+    case 'investigating':
+      return '[investigating]';
+    case 'resolved':
+      return '[resolved]';
+    case 'inconclusive':
+      return '[inconclusive]';
     default: {
       const _exhaustive: never = status;
       return _exhaustive;
     }
   }
 }
+
+// ── Tool implementation ──────────────────────────────────────────────
 
 export class TodoListTool implements BuiltinTool<TodoListInput> {
   readonly name = TODO_LIST_TOOL_NAME;
@@ -99,32 +377,126 @@ export class TodoListTool implements BuiltinTool<TodoListInput> {
   resolveExecution(args: TodoListInput): ToolExecution {
     const description =
       args.todos === undefined
-        ? 'Reading todo list'
+        ? 'Reading question list'
         : args.todos.length === 0
-          ? 'Clearing todo list'
-          : 'Updating todo list';
+          ? 'Clearing question list'
+          : 'Updating question list';
     return {
       description,
       display: {
         kind: 'todo_list',
-        items: (args.todos ?? this.getTodos()).map((todo) => ({ ...todo })),
+        items: (args.todos ?? this.getTodos()).map((todo) => {
+          // The wire display shape is { title, status }; question-driven
+          // items store the text in `question`, old-format items in `title`.
+          const record = todo as Record<string, unknown>;
+          const title =
+            typeof record['question'] === 'string'
+              ? record['question']
+              : typeof record['title'] === 'string'
+                ? record['title']
+                : '';
+          const status = typeof record['status'] === 'string' ? record['status'] : 'pending';
+          return { title, status };
+        }),
       },
       approvalRule: this.name,
       execute: async () => {
-        // Query mode — return the current list without mutation.
-        if (args.todos === undefined) {
-          const current = this.getTodos();
-          return { isError: false, output: renderTodoList(current) };
-        }
+        try {
+          // Query mode — return the current list without mutation.
+          if (args.todos === undefined) {
+            const current = this.getTodos();
+            return { isError: false, output: renderTodoList(current) };
+          }
 
-        // Write mode — replace the full list and return the new state.
-        this.setTodos(args.todos);
-        const stored = this.getTodos();
-        const output =
-          stored.length === 0
-            ? 'Todo list cleared.'
-            : `Todo list updated.\n${renderTodoList(stored)}\n\n${TODO_LIST_WRITE_REMINDER}`;
-        return { isError: false, output };
+          // Validate each item before writing.
+          for (let i = 0; i < args.todos.length; i++) {
+            const err = validateTodoItem(args.todos[i]);
+            if (err !== null) {
+              return {
+                isError: true,
+                output: `Item at index ${i}: ${err}`,
+              };
+            }
+          }
+
+          // Normalize: migrate old-format items and ensure IDs exist.
+          // Use Zod schema (.parse) to fill in defaults for optional fields.
+          const normalized: QuestionItem[] = args.todos.map((item) => {
+            if (isOldFormatTodo(item)) return migrateOldTodo(item);
+            try {
+              const raw = item as Record<string, unknown>;
+              if (!raw['id'] || (typeof raw['id'] === 'string' && raw['id'].trim().length === 0)) {
+                raw['id'] = randomUUID();
+              }
+              return normalizeQuestionItem(raw);
+            } catch {
+              // Defensive: build a valid QuestionItem with sensible defaults
+              // so downstream code (rendering, archiving) never hits undefined fields.
+              const r = item as Record<string, unknown>;
+              return {
+                type: 'question',
+                id:
+                  typeof r['id'] === 'string' && r['id'].trim().length > 0 ? r['id'] : randomUUID(),
+                question: typeof r['question'] === 'string' ? r['question'] : 'Unknown question',
+                status: (
+                  ['pending', 'investigating', 'resolved', 'inconclusive'] as const
+                ).includes(r['status'] as never)
+                  ? (r['status'] as QuestionStatus)
+                  : 'pending',
+                evidence: Array.isArray(r['evidence']) ? (r['evidence'] as EvidenceItem[]) : [],
+                blockers: Array.isArray(r['blockers']) ? (r['blockers'] as string[]) : [],
+                confidence: (['low', 'medium', 'high'] as const).includes(r['confidence'] as never)
+                  ? (r['confidence'] as Confidence)
+                  : 'medium',
+                depth: (['quick', 'deep'] as const).includes(r['depth'] as never)
+                  ? (r['depth'] as Depth)
+                  : 'deep',
+                subQuestions: Array.isArray(r['subQuestions'])
+                  ? (r['subQuestions'] as string[])
+                  : [],
+                hypothesis: typeof r['hypothesis'] === 'string' ? r['hypothesis'] : undefined,
+                conclusion: typeof r['conclusion'] === 'string' ? r['conclusion'] : undefined,
+                parentId: typeof r['parentId'] === 'string' ? r['parentId'] : undefined,
+              };
+            }
+          });
+
+          // Ensure parentId references are valid (2-level nesting only).
+          for (const item of normalized) {
+            if (item.parentId) {
+              const parent = normalized.find((p) => p.id === item.parentId);
+              if (!parent) {
+                return {
+                  isError: true,
+                  output: `Item "${item.question}" references parentId "${item.parentId}" which does not exist in the list.`,
+                };
+              }
+              if (parent.parentId) {
+                return {
+                  isError: true,
+                  output: `Item "${item.question}" is nested too deep. Maximum nesting is 2 levels (parent → child).`,
+                };
+              }
+            }
+          }
+
+          // Write mode — replace the full list.
+          // Before writing, archive any resolved/inconclusive items that will be removed.
+          this.archiveCompletedFindings(normalized);
+
+          this.setTodos(normalized);
+          const stored = this.getTodos();
+          const output =
+            stored.length === 0
+              ? 'Question list cleared.'
+              : `Question list updated.\n${renderTodoList(stored)}\n\n${TODO_LIST_WRITE_REMINDER}`;
+          return { isError: false, output };
+        } catch (err) {
+          return {
+            isError: true,
+            output: `Internal error: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
       },
     };
   }
@@ -134,10 +506,58 @@ export class TodoListTool implements BuiltinTool<TodoListInput> {
     return todos ?? [];
   }
 
-  private setTodos(todos: readonly TodoItem[]): void {
-    this.store.set(
-      TODO_STORE_KEY,
-      todos.map((todo) => ({ title: todo.title, status: todo.status })),
-    );
+  private setTodos(todos: readonly QuestionItem[]): void {
+    this.store.set(TODO_STORE_KEY, todos);
+  }
+
+  /**
+   * Archives resolved/inconclusive items that exist in the current store but are
+   * absent from the incoming list (i.e. they were intentionally removed by the model
+   * after being answered). Archived items are persisted to the findings board.
+   */
+  private archiveCompletedFindings(incoming: readonly QuestionItem[]): void {
+    const current = this.getTodos();
+    const incomingIds = new Set(incoming.map((i) => i.id));
+
+    // Build a map of current items keyed by id for lookup.
+    const currentById = new Map<string, TodoItem>();
+    for (const item of current) {
+      currentById.set(item.id, item);
+    }
+
+    const completed = current.filter((item) => {
+      // Only consider resolved/inconclusive items that are NOT in the incoming list
+      if (incomingIds.has(item.id)) return false;
+      if (item.status !== 'resolved' && item.status !== 'inconclusive') return false;
+      // Must have a conclusion to be worth archiving
+      if (item.status === 'resolved' && (!item.conclusion || item.conclusion.trim().length === 0))
+        return false;
+      return true;
+    });
+
+    if (completed.length === 0) return;
+
+    const existingFindings =
+      (this.store.get(FINDINGS_STORE_KEY) as FindingItem[] | undefined) ?? [];
+    const existingIds = new Set(existingFindings.map((f) => f.id));
+
+    const newFindings: FindingItem[] = completed
+      .filter((item) => !existingIds.has(item.id)) // skip already-archived
+      .map((item) => ({
+        id: item.id,
+        question: item.question,
+        conclusion: item.conclusion ?? (item.status === 'inconclusive' ? '无法得出结论' : ''),
+        evidence: item.evidence,
+        confidence: item.confidence,
+        depth: item.depth,
+        status: item.status as 'resolved' | 'inconclusive',
+        resolvedAt: Date.now(),
+        parentId: item.parentId,
+        subFindings: item.subQuestions,
+      }));
+
+    if (newFindings.length === 0) return;
+
+    this.store.set(FINDINGS_STORE_KEY, [...newFindings, ...existingFindings]);
   }
 }

@@ -1,15 +1,15 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'pathe';
 
+import { join } from 'pathe';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentRecord } from '../../src/agent';
+import { BackgroundTaskPersistence } from '../../src/agent/background';
 import {
   AGENT_WIRE_PROTOCOL_VERSION,
   InMemoryAgentRecordPersistence,
 } from '../../src/agent/records';
-import { BackgroundTaskPersistence } from '../../src/agent/background';
 import { createFakeKaos } from '../tools/fixtures/fake-kaos';
 import { testAgent } from './harness/agent';
 import { DEFAULT_TEST_SYSTEM_PROMPT } from './harness/snapshots';
@@ -211,7 +211,7 @@ describe('Agent resume', () => {
         value: [
           { title: 'Inspect resume snapshot', status: 'done' },
           { title: 'Hydrate TUI todo panel', status: 'in_progress' },
-        ],
+        ] as any,
       },
     ]);
     const ctx = testAgent({ persistence });
@@ -303,10 +303,7 @@ describe('Agent resume', () => {
         endedAt: 1_700_000_010,
         status: 'completed',
       });
-      await backgroundPersistence.appendTaskOutput(
-        'agent-seen0000',
-        'already delivered summary',
-      );
+      await backgroundPersistence.appendTaskOutput('agent-seen0000', 'already delivered summary');
       const steer = vi.spyOn(ctx.agent.turn, 'steer');
 
       await ctx.agent.resume();
@@ -752,9 +749,7 @@ describe('Agent resume', () => {
       'tool',
       'user',
     ]);
-    expect(textContent(llmHistory[3])).toContain(
-      'ERROR: Tool execution failed.',
-    );
+    expect(textContent(llmHistory[3])).toContain('ERROR: Tool execution failed.');
     expect(textContent(llmHistory[3])).toContain(
       'Tool execution was interrupted before its result was recorded',
     );
@@ -1166,13 +1161,8 @@ describe('Agent resume', () => {
 
     await ctx.agent.resume();
 
-    expect(ctx.agent.context.history.map((message) => message.role)).toEqual([
-      'user',
-      'assistant',
-    ]);
-    expect(
-      ctx.agent.context.history.some((message) => message.role === 'tool'),
-    ).toBe(false);
+    expect(ctx.agent.context.history.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(ctx.agent.context.history.some((message) => message.role === 'tool')).toBe(false);
     await ctx.expectResumeMatches();
   });
 
@@ -1311,11 +1301,17 @@ describe('Agent resume', () => {
     expect(replay).toHaveLength(2);
     expect(replay[0]).toMatchObject({
       type: 'message',
-      message: expect.objectContaining({ role: 'user', content: [{ type: 'text', text: 'first prompt' }] }),
+      message: expect.objectContaining({
+        role: 'user',
+        content: [{ type: 'text', text: 'first prompt' }],
+      }),
     });
     expect(replay[1]).toMatchObject({
       type: 'message',
-      message: expect.objectContaining({ role: 'assistant', content: [{ type: 'text', text: 'first response' }] }),
+      message: expect.objectContaining({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'first response' }],
+      }),
     });
   });
 });
@@ -1642,7 +1638,11 @@ function loopEventsForTurn(turnId: string, responseText: string): AgentRecord[] 
 
 // A prompted turn: the `turn.prompt` record + the appended user message + the
 // loop events the turn produced.
-function minimalPromptedTurn(turnId: string, promptText: string, responseText: string): AgentRecord[] {
+function minimalPromptedTurn(
+  turnId: string,
+  promptText: string,
+  responseText: string,
+): AgentRecord[] {
   return [
     {
       type: 'turn.prompt',
@@ -1680,7 +1680,6 @@ function goalContinuationResumeHistory(): AgentRecord[] {
     ...loopEventsForTurn('2', 'Continuation turn two.'),
   ];
 }
-
 
 function findRpcEvent(
   ctxEvents: readonly { type: string; event: string; args: unknown }[],

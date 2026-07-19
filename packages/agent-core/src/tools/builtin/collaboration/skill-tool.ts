@@ -135,6 +135,8 @@ export class SkillTool implements BuiltinTool<SkillToolInput> {
       );
     }
 
+    skills.assertSkillAllowed(skill);
+
     const origin = skillOrigin(skill, skillArgs, currentDepth);
     const promptTrigger = origin.trigger === 'nested-skill' ? 'nested-skill' : 'model-tool';
     skills.recordActivation(origin);

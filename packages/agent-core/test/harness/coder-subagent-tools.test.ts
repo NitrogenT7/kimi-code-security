@@ -11,7 +11,6 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
-import { join } from 'pathe';
 
 import {
   isContentPart,
@@ -21,6 +20,7 @@ import {
   type ProviderConfig,
   type StreamedMessagePart,
 } from '@moonshot-ai/kosong';
+import { join } from 'pathe';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Agent, AgentOptions } from '../../src/agent';
@@ -32,7 +32,11 @@ import { ProviderManager } from '../../src/session/provider-manager';
 import { createScriptedGenerate } from '../agent/harness/scripted-generate';
 import { testKaos } from '../fixtures/test-kaos';
 
-const MOCK_PROVIDER = { type: 'kimi', apiKey: 'test-key', model: 'mock-model' } as const satisfies ProviderConfig;
+const MOCK_PROVIDER = {
+  type: 'kimi',
+  apiKey: 'test-key',
+  model: 'mock-model',
+} as const satisfies ProviderConfig;
 
 const tempDirs: string[] = [];
 const openSessions: Session[] = [];
@@ -57,7 +61,9 @@ function toolText(message: Message | undefined): string | null {
   if (message === undefined) return null;
   const parts = message.content;
   return parts
-    .map((part) => ('text' in part && typeof part.text === 'string' ? part.text : JSON.stringify(part)))
+    .map((part) =>
+      'text' in part && typeof part.text === 'string' ? part.text : JSON.stringify(part),
+    )
     .join('');
 }
 
@@ -124,10 +130,28 @@ function createVerifyGenerate(steps: StepRecord[]): GenerateFn {
           parts = callTool('Skill', { skill: 'demo-skill', args: 'e2e' });
           break;
         case 2:
-          parts = callTool('TodoList', { todos: [{ title: 'verify-tools-e2e', status: 'in_progress' }] });
+          parts = callTool('TodoList', {
+            todos: [
+              {
+                type: 'question',
+                id: 'verify-tools-e2e',
+                question: 'verify-tools-e2e',
+                status: 'investigating',
+                confidence: 'medium',
+                depth: 'quick',
+                evidence: [],
+                blockers: [],
+                subQuestions: [],
+              },
+            ],
+          });
           break;
         case 3:
-          parts = callTool('Bash', { command: 'sleep 15', description: 'e2e bg sleep', run_in_background: true });
+          parts = callTool('Bash', {
+            command: 'sleep 15',
+            description: 'e2e bg sleep',
+            run_in_background: true,
+          });
           break;
         case 4: {
           const match = /task_id: (\S+)/.exec(prevToolOutput ?? '');
@@ -229,7 +253,11 @@ async function createCoderSession(
       config: {
         providers: { test: { type: MOCK_PROVIDER.type, apiKey: MOCK_PROVIDER.apiKey } },
         models: {
-          [MOCK_PROVIDER.model]: { provider: 'test', model: MOCK_PROVIDER.model, maxContextSize: 1_000_000 },
+          [MOCK_PROVIDER.model]: {
+            provider: 'test',
+            model: MOCK_PROVIDER.model,
+            maxContextSize: 1_000_000,
+          },
         },
       },
     }),
@@ -272,7 +300,11 @@ describe('coder subagent aligned tools (real Session e2e)', () => {
         config: {
           providers: { test: { type: MOCK_PROVIDER.type, apiKey: MOCK_PROVIDER.apiKey } },
           models: {
-            [MOCK_PROVIDER.model]: { provider: 'test', model: MOCK_PROVIDER.model, maxContextSize: 1_000_000 },
+            [MOCK_PROVIDER.model]: {
+              provider: 'test',
+              model: MOCK_PROVIDER.model,
+              maxContextSize: 1_000_000,
+            },
           },
         },
       }),
@@ -369,7 +401,11 @@ describe('coder subagent aligned tools (real Session e2e)', () => {
       type: 'function',
       id: 'c1',
       name: 'Bash',
-      arguments: JSON.stringify({ command: 'sleep 2', description: 'drain probe', run_in_background: true }),
+      arguments: JSON.stringify({
+        command: 'sleep 2',
+        description: 'drain probe',
+        run_in_background: true,
+      }),
     });
     scripted.mockNextResponse({ type: 'text', text: DRAIN_FINAL_TEXT });
     const { session, mainAgent } = await createCoderSession(scripted.generate);
@@ -413,7 +449,11 @@ describe('coder subagent aligned tools (real Session e2e)', () => {
       type: 'function',
       id: 'c1',
       name: 'Bash',
-      arguments: JSON.stringify({ command: 'sleep 30', description: 'drain cancel probe', run_in_background: true }),
+      arguments: JSON.stringify({
+        command: 'sleep 30',
+        description: 'drain cancel probe',
+        run_in_background: true,
+      }),
     });
     scripted.mockNextResponse({ type: 'text', text: DRAIN_FINAL_TEXT });
     const { mainAgent } = await createCoderSession(scripted.generate);
@@ -451,7 +491,11 @@ describe('coder subagent aligned tools (real Session e2e)', () => {
       type: 'function',
       id: 'c1',
       name: 'Bash',
-      arguments: JSON.stringify({ command: 'sleep 0.2', description: 'early settle probe', run_in_background: true }),
+      arguments: JSON.stringify({
+        command: 'sleep 0.2',
+        description: 'early settle probe',
+        run_in_background: true,
+      }),
     });
     scripted.mockNextResponse({
       type: 'function',

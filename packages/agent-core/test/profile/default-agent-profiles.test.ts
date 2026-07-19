@@ -29,9 +29,9 @@ describe('default agent profiles', () => {
   it('keeps static instructions before dynamic prompt context', () => {
     const prompt = DEFAULT_AGENT_PROFILES['agent']?.systemPrompt(promptContext) ?? '';
 
-    expect(prompt.indexOf('Use this as your basic understanding of the project structure.')).toBeLessThan(
-      prompt.indexOf('LISTING_SNAPSHOT'),
-    );
+    expect(
+      prompt.indexOf('Use this as your basic understanding of the project structure.'),
+    ).toBeLessThan(prompt.indexOf('LISTING_SNAPSHOT'));
     expect(prompt.indexOf('User instructions given directly in the conversation')).toBeLessThan(
       prompt.indexOf('AGENTS_MD_BODY'),
     );
@@ -45,13 +45,35 @@ describe('default agent profiles', () => {
     expect(agentTools).toEqual(
       expect.arrayContaining(['CreateGoal', 'GetGoal', 'SetGoalBudget', 'UpdateGoal']),
     );
-    for (const name of ['coder', 'explore', 'plan']) {
+    for (const name of [
+      'coder',
+      'explore',
+      'plan',
+      'security-analyst',
+      'android-reverser',
+      'web-pentester',
+      'binary-reverser',
+      'code-auditor',
+    ]) {
       const tools = DEFAULT_AGENT_PROFILES[name]?.tools ?? [];
       expect(tools).not.toContain('CreateGoal');
       expect(tools).not.toContain('GetGoal');
       expect(tools).not.toContain('SetGoalBudget');
       expect(tools).not.toContain('UpdateGoal');
     }
+  });
+
+  it('exposes security-research subagent profiles on the main agent profile', () => {
+    const subagents = Object.keys(DEFAULT_AGENT_PROFILES['agent']?.subagents ?? {});
+    expect(subagents).toEqual(
+      expect.arrayContaining([
+        'security-analyst',
+        'android-reverser',
+        'web-pentester',
+        'binary-reverser',
+        'code-auditor',
+      ]),
+    );
   });
 
   it('fails loudly when an embedded system prompt source is missing', () => {

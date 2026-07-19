@@ -36,6 +36,8 @@ export type {
   GetCronTasksResult,
   GoalSnapshot,
   GoalStatus,
+  GoalTemplateDetail,
+  GoalTemplateSummary,
   GoalToolResult,
   KimiConfig,
   KimiConfigPatch,

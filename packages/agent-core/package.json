@@ -3,25 +3,25 @@
   "version": "0.15.5",
   "private": true,
   "description": "The unified agent engine for Kimi",
+  "keywords": [
+    "agent",
+    "ai",
+    "kimi",
+    "llm",
+    "session",
+    "tools"
+  ],
+  "homepage": "https://github.com/MoonshotAI/kimi-code/tree/main/packages/agent-core#readme",
+  "bugs": {
+    "url": "https://github.com/MoonshotAI/kimi-code/issues"
+  },
   "license": "MIT",
   "author": "Moonshot AI",
-  "homepage": "https://github.com/MoonshotAI/kimi-code/tree/main/packages/agent-core#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/MoonshotAI/kimi-code.git",
     "directory": "packages/agent-core"
   },
-  "bugs": {
-    "url": "https://github.com/MoonshotAI/kimi-code/issues"
-  },
-  "keywords": [
-    "kimi",
-    "agent",
-    "ai",
-    "llm",
-    "session",
-    "tools"
-  ],
   "files": [
     "dist"
   ],
@@ -40,6 +40,7 @@
     "#/agent/tool": "./src/agent/tool/index.ts",
     "#/config": "./src/config/index.ts",
     "#/flags": "./src/flags/index.ts",
+    "#/goal-template": "./src/goal-template/index.ts",
     "#/loop": "./src/loop/index.ts",
     "#/rpc": "./src/rpc/index.ts",
     "#/session": "./src/session/index.ts",

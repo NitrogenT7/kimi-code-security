@@ -1,5 +1,7 @@
-import { ErrorCodes, KimiError } from '#/errors';
 import type { SessionWarning } from '@moonshot-ai/protocol';
+
+import { ErrorCodes, KimiError } from '#/errors';
+import type { GoalTemplateDetail, GoalTemplateSummary } from '#/goal-template';
 import type {
   ActivateSkillPayload,
   ActivatePluginCommandPayload,
@@ -16,7 +18,9 @@ import type {
   EnterSwarmPayload,
   GetBackgroundOutputPayload,
   GetBackgroundPayload,
+  GetGoalTemplatePayload,
   ImportContextPayload,
+  LoadMcpGroupPayload,
   McpServerInfo,
   McpStartupMetrics,
   PromptPayload,
@@ -26,6 +30,7 @@ import type {
   RegisterToolPayload,
   SessionAPI,
   SetActiveToolsPayload,
+  SetMcpGroupModePayload,
   SetModelPayload,
   SetPermissionPayload,
   SetThinkingPayload,
@@ -83,6 +88,31 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return this.session.listSkills();
   }
 
+  listGoalTemplates(_payload: EmptyPayload): Promise<readonly GoalTemplateSummary[]> {
+    return this.session.listGoalTemplates();
+  }
+
+  getGoalTemplate(payload: GetGoalTemplatePayload): GoalTemplateDetail {
+    const template = this.session.goalTemplates.getTemplate(payload.name);
+    if (template === undefined) {
+      throw new KimiError(
+        ErrorCodes.GOAL_TEMPLATE_NOT_FOUND,
+        `Goal template "${payload.name}" was not found`,
+      );
+    }
+    return {
+      name: template.name,
+      description: template.description,
+      path: template.path,
+      source: template.source,
+      purpose: template.purpose,
+      keyTasks: template.keyTasks,
+      endState: template.endState,
+      constraints: template.constraints,
+      body: template.body,
+    };
+  }
+
   listPluginCommands(_payload: EmptyPayload): readonly PluginCommandDef[] {
     return this.session.listPluginCommands();
   }
@@ -98,6 +128,34 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   async reconnectMcpServer(payload: ReconnectMcpServerPayload): Promise<void> {
     await this.session.mcp.reconnect(payload.name);
+  }
+
+  async loadMcpGroup(payload: LoadMcpGroupPayload): Promise<void> {
+    const registry = this.session.mcpGroupRegistry;
+    if (registry === undefined) {
+      throw new KimiError(ErrorCodes.MCP_SERVER_NOT_FOUND, 'No MCP groups are configured.');
+    }
+    await this.session.mcp.loadGroup(payload.name, registry);
+  }
+
+  async setMcpGroupMode(payload: SetMcpGroupModePayload): Promise<void> {
+    const agent = await this.session.ensureAgentResumed('main');
+    const registry = this.session.mcpGroupRegistry;
+    if (payload.groupName === null || registry === undefined) {
+      agent.allowedSkillPrefixes = null;
+      agent.mcpGroupMode = null;
+      return;
+    }
+    const group = registry.get(payload.groupName);
+    if (group === undefined) {
+      throw new KimiError(
+        ErrorCodes.MCP_SERVER_NOT_FOUND,
+        `Unknown MCP group: ${payload.groupName}`,
+      );
+    }
+    const prefixes = group.skillPrefixes;
+    agent.allowedSkillPrefixes = prefixes.length > 0 ? [...prefixes] : null;
+    agent.mcpGroupMode = payload.groupName;
   }
 
   generateAgentsMd(_payload: EmptyPayload): Promise<void> {

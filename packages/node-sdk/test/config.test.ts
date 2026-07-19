@@ -345,6 +345,17 @@ describe('KimiHarness config API', () => {
         enabled: false,
         source: 'default',
       },
+      {
+        id: 'retention_plan_compaction',
+        title: 'Retention-plan compaction',
+        description:
+          'Before full context compaction, ask the model to produce a retention plan so the summary preserves what matters for the current task.',
+        surface: 'core',
+        env: 'KIMI_CODE_EXPERIMENTAL_RETENTION_PLAN_COMPACTION',
+        defaultEnabled: false,
+        enabled: false,
+        source: 'default',
+      },
     ]);
   });
 

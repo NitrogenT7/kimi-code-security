@@ -35,6 +35,8 @@ import type {
   GetConfigOptions,
   McpServerConfig,
   GoalSnapshot,
+  GoalTemplateDetail,
+  GoalTemplateSummary,
   GoalToolResult,
   JsonObject,
   KimiConfig,
@@ -756,6 +758,18 @@ export abstract class SDKRpcClientBase {
       throw new TypeError('The current engine does not support MCP groups');
     }
     return rpc.setMcpGroupMode({ sessionId: input.sessionId, groupName: input.groupName });
+  }
+
+  async listGoalTemplates(input: SessionIdRpcInput): Promise<readonly GoalTemplateSummary[]> {
+    const rpc = await this.getRpc();
+    return rpc.listGoalTemplates({ sessionId: input.sessionId });
+  }
+
+  async getGoalTemplate(
+    input: SessionIdRpcInput & { readonly name: string },
+  ): Promise<GoalTemplateDetail> {
+    const rpc = await this.getRpc();
+    return rpc.getGoalTemplate({ sessionId: input.sessionId, name: input.name });
   }
 
   async listPlugins(): Promise<readonly PluginSummary[]> {

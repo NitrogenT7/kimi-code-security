@@ -24,6 +24,8 @@ export type {
   SessionMetaUpdatedEvent,
   SessionStatusChangedEvent,
   SessionWorkChangedEvent,
+  ShellOutputEvent,
+  ShellStartedEvent,
   SkillActivatedEvent,
   SubagentCompletedEvent,
   SubagentFailedEvent,

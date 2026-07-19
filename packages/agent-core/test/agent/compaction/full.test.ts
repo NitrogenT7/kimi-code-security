@@ -1,6 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathe';
 
 import {
   APIConnectionError,
@@ -15,16 +14,17 @@ import {
   type StreamedMessagePart,
   type ToolCall,
 } from '@moonshot-ai/kosong';
+import { join } from 'pathe';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { KimiConfig } from '../../../src/config';
 import type { AgentOptions } from '../../../src/agent';
 import {
   COMPACTION_SUMMARY_PREFIX,
   DefaultCompactionStrategy,
   type CompactionStrategy,
 } from '../../../src/agent/compaction';
-import { FLAG_DEFINITIONS, MASTER_ENV } from '../../../src/flags';
+import type { KimiConfig } from '../../../src/config';
+import { FlagResolver, FLAG_DEFINITIONS, MASTER_ENV } from '../../../src/flags';
 import { HookEngine, type HookEngineTriggerArgs } from '../../../src/session/hooks';
 import { estimateTokens, estimateTokensForMessages } from '../../../src/utils/tokens';
 import { recordingTelemetry, type TelemetryRecord } from '../../fixtures/telemetry';
@@ -32,6 +32,9 @@ import type { TestAgentContext, TestAgentOptions } from '../harness/agent';
 import { testAgent } from '../harness/agent';
 
 type GenerateFn = NonNullable<AgentOptions['generate']>;
+
+// Real PNG magic bytes: projection sniffs image payloads and downgrades impostors.
+const PNG_B64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
 
 const CATALOGUED_PROVIDER = {
   type: 'kimi',
@@ -638,7 +641,7 @@ describe('FullCompaction', () => {
     ctx.agent.context.appendUserMessage(
       [
         { type: 'text', text: '<image path="/workspace/shot.png">' },
-        { type: 'image_url', imageUrl: { url: 'data:image/png;base64,AAAA' } },
+        { type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}` } },
         { type: 'text', text: '</image>' },
       ],
       { kind: 'user' },
@@ -704,7 +707,7 @@ describe('FullCompaction', () => {
     ctx.appendExchange(2, 'old user two', 'old assistant two', 40);
     ctx.appendExchange(3, 'recent user three', 'recent assistant three', 120);
     ctx.agent.context.appendUserMessage(
-      [{ type: 'image_url', imageUrl: { url: 'data:image/png;base64,AAAA' } }],
+      [{ type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}` } }],
       { kind: 'user' },
     );
     const completed = ctx.once('compaction.completed');
@@ -715,9 +718,9 @@ describe('FullCompaction', () => {
     expect(attempts).toBe(3);
     // Attempt 2 is the media strip: same message count, no media parts.
     expect(histories[1]!.length).toBe(histories[0]!.length);
-    expect(
-      histories[1]!.flatMap((m) => m.content).some((part) => part.type === 'image_url'),
-    ).toBe(false);
+    expect(histories[1]!.flatMap((m) => m.content).some((part) => part.type === 'image_url')).toBe(
+      false,
+    );
     // Attempt 3 falls through to the overflow shrink and drops old messages.
     expect(histories[2]!.length).toBeLessThan(histories[1]!.length);
     await ctx.expectResumeMatches();
@@ -791,9 +794,7 @@ describe('FullCompaction', () => {
       { role: 'user', text: 'recent user two' },
       { role: 'user', text: `${COMPACTION_SUMMARY_PREFIX}\nRecovered compacted summary.` },
     ]);
-    expect(
-      ctx.allEvents.filter((event) => event.event === 'compaction.completed'),
-    ).toEqual([
+    expect(ctx.allEvents.filter((event) => event.event === 'compaction.completed')).toEqual([
       expect.objectContaining({
         args: expect.objectContaining({
           result: expect.objectContaining({
@@ -1269,7 +1270,6 @@ describe('FullCompaction', () => {
     await ctx.expectResumeMatches();
   });
 
-
   it('cancels when the compacted prefix changes before completion', async () => {
     const ctx = testAgent();
     ctx.configure({
@@ -1418,11 +1418,7 @@ describe('FullCompaction', () => {
     // Compaction drops the in-flight tool exchange and the deferred reminder
     // (initial context is rebuilt every turn); only real user messages and
     // the compaction summary remain.
-    expect(ctx.agent.context.history.map((m) => m.role)).toEqual([
-      'user',
-      'user',
-      'user',
-    ]);
+    expect(ctx.agent.context.history.map((m) => m.role)).toEqual(['user', 'user', 'user']);
     expect(ctx.agent.context.history.at(-1)?.origin).toEqual({ kind: 'compaction_summary' });
 
     // The dropped tool calls no longer exist, so late tool results are orphans
@@ -1446,11 +1442,7 @@ describe('FullCompaction', () => {
       },
     });
 
-    expect(ctx.agent.context.history.map((m) => m.role)).toEqual([
-      'user',
-      'user',
-      'user',
-    ]);
+    expect(ctx.agent.context.history.map((m) => m.role)).toEqual(['user', 'user', 'user']);
   });
 
   it('keeps a deferred system reminder behind a partially resolved tool exchange across compaction', async () => {
@@ -1483,11 +1475,7 @@ describe('FullCompaction', () => {
     // Compaction drops the partially-resolved tool exchange and the deferred
     // reminder (initial context is rebuilt every turn); only real user
     // messages and the compaction summary remain.
-    expect(ctx.agent.context.history.map((m) => m.role)).toEqual([
-      'user',
-      'user',
-      'user',
-    ]);
+    expect(ctx.agent.context.history.map((m) => m.role)).toEqual(['user', 'user', 'user']);
     expect(ctx.agent.context.history.at(-1)?.origin).toEqual({ kind: 'compaction_summary' });
 
     // The dropped tool calls no longer exist, so a late tool result is an orphan
@@ -1502,11 +1490,7 @@ describe('FullCompaction', () => {
       },
     });
 
-    expect(ctx.agent.context.history.map((m) => m.role)).toEqual([
-      'user',
-      'user',
-      'user',
-    ]);
+    expect(ctx.agent.context.history.map((m) => m.role)).toEqual(['user', 'user', 'user']);
   });
 
   it('rejects manual compaction with compaction.unable when history is empty', async () => {
@@ -1683,7 +1667,9 @@ describe('FullCompaction', () => {
     const [compactionCall, answerCall] = ctx.llmCalls;
     expect(messageText(compactionCall?.history.at(-1))).toContain('first-person handoff note');
     expect(
-      answerCall?.history.map(messageText).some((text) => text.includes('Reserved compacted summary.')),
+      answerCall?.history
+        .map(messageText)
+        .some((text) => text.includes('Reserved compacted summary.')),
     ).toBe(true);
     await ctx.expectResumeMatches();
   });
@@ -1718,10 +1704,14 @@ describe('FullCompaction', () => {
       'user',
     ]);
     expect(
-      answerCall?.history.map(messageText).some((text) => text.includes('Oversized prompt summary.')),
+      answerCall?.history
+        .map(messageText)
+        .some((text) => text.includes('Oversized prompt summary.')),
     ).toBe(true);
     expect(
-      answerCall?.history.map(messageText).some((text) => text.includes('keep-this-pending-verbatim')),
+      answerCall?.history
+        .map(messageText)
+        .some((text) => text.includes('keep-this-pending-verbatim')),
     ).toBe(true);
     await ctx.expectResumeMatches();
   });
@@ -1758,7 +1748,9 @@ describe('FullCompaction', () => {
       'user',
     ]);
     expect(
-      answerCall?.history.map(messageText).some((text) => text.includes('Ratio compacted summary.')),
+      answerCall?.history
+        .map(messageText)
+        .some((text) => text.includes('Ratio compacted summary.')),
     ).toBe(true);
     expect(
       answerCall?.history.map(messageText).some((text) => text.includes('ratio-pending-verbatim')),
@@ -1853,7 +1845,11 @@ describe('FullCompaction', () => {
       if (messageText(history.at(-1)).includes('first-person handoff note')) {
         return textResult(`Still too large summary ${String(callCount)}.`);
       }
-      throw new APIContextOverflowError(400, 'Context length exceeded', `req-overflow-${String(callCount)}`);
+      throw new APIContextOverflowError(
+        400,
+        'Context length exceeded',
+        `req-overflow-${String(callCount)}`,
+      );
     };
     const ctx = testAgent({ generate });
     ctx.configure({
@@ -1874,7 +1870,8 @@ describe('FullCompaction', () => {
           reason: 'failed',
           error: expect.objectContaining({
             code: 'context.overflow',
-            message: 'Compaction failed to bring the context under the model window after 3 attempts.',
+            message:
+              'Compaction failed to bring the context under the model window after 3 attempts.',
           }),
         }),
       }),
@@ -2420,6 +2417,60 @@ describe('FullCompaction', () => {
     await ctx.expectResumeMatches();
   });
 
+  it('skips retention plan for manual compaction even when the flag is enabled', async () => {
+    const ctx = testAgent({
+      experimentalFlags: new FlagResolver({
+        KIMI_CODE_EXPERIMENTAL_RETENTION_PLAN_COMPACTION: 'true',
+      }),
+    });
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    ctx.appendExchange(2, 'old user two', 'old assistant two', 40);
+
+    const compacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => resolve());
+    });
+
+    ctx.mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+    await compacted;
+
+    expect(ctx.llmCalls.length).toBe(1);
+    const lastUserMessage = ctx.llmCalls[0]!.history.at(-1);
+    expect(messageText(lastUserMessage)).not.toContain('retention plan');
+  });
+
+  it('runs retention plan for auto compaction when the flag is enabled', async () => {
+    const ctx = testAgent({
+      experimentalFlags: new FlagResolver({
+        KIMI_CODE_EXPERIMENTAL_RETENTION_PLAN_COMPACTION: 'true',
+      }),
+    });
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    ctx.appendExchange(2, 'old user two', 'old assistant two', 40);
+
+    const compacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => resolve());
+    });
+
+    ctx.mockNextResponse({ type: 'text', text: '## Current Task\nAudit APK.' });
+    ctx.mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    ctx.agent.fullCompaction.begin({ source: 'auto', instruction: undefined });
+    await compacted;
+
+    expect(ctx.llmCalls.length).toBe(2);
+    const summaryCall = ctx.llmCalls[1]!;
+    const lastUserMessage = summaryCall.history.at(-1);
+    expect(messageText(lastUserMessage)).toContain('retention plan');
+    expect(messageText(lastUserMessage)).toContain('## Current Task');
+  });
 });
 
 afterEach(() => {

@@ -63,6 +63,7 @@ function skillToolAgent(skills: AgentSkillRegistry, methods: SkillToolMethods): 
     skills: {
       registry: skills,
       recordActivation: methods.recordSkillActivation,
+      assertSkillAllowed: () => {},
     },
     context: {
       appendSystemReminder: methods.recordSystemReminder,

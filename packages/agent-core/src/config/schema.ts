@@ -1,7 +1,9 @@
-import { HOOK_EVENT_TYPES } from '../session/hooks/types';
+import { z } from 'zod';
+
 import { parsePattern } from '#/agent/permission/matches-rule';
 import { ErrorCodes, KimiError } from '#/errors';
-import { z } from 'zod';
+
+import { HOOK_EVENT_TYPES } from '../session/hooks/types';
 
 export const ProviderTypeSchema = z.enum([
   'anthropic',
@@ -279,7 +281,14 @@ const McpServerConfigDiscriminatedSchema = z.discriminatedUnion('transport', [
 export const McpServerConfigSchema = z.preprocess((raw) => {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
   const obj = raw as Record<string, unknown>;
-  if ('transport' in obj) return obj;
+  if ('transport' in obj) {
+    // Normalize legacy/alias transports so old mcp.json files keep working.
+    const transport = obj['transport'];
+    if (transport === 'streamable-http') {
+      return { ...obj, transport: 'http' };
+    }
+    return obj;
+  }
   if (typeof obj['command'] === 'string') return { ...obj, transport: 'stdio' };
   if (typeof obj['url'] === 'string') return { ...obj, transport: 'http' };
   return obj;
@@ -368,9 +377,13 @@ export function validateConfig(config: unknown): KimiConfig {
   try {
     return KimiConfigSchema.parse(config);
   } catch (error) {
-    throw new KimiError(ErrorCodes.CONFIG_INVALID, `Invalid configuration: ${formatConfigValidationError(error)}`, {
-      cause: error,
-    });
+    throw new KimiError(
+      ErrorCodes.CONFIG_INVALID,
+      `Invalid configuration: ${formatConfigValidationError(error)}`,
+      {
+        cause: error,
+      },
+    );
   }
 }
 

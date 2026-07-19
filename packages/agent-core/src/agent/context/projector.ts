@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { ContentPart, Message, TextPart } from '@moonshot-ai/kosong';
 
 import { ErrorCodes, KimiError } from '../../errors';
+import { sanitizeImageUrlPart } from '../../utils/image-payload';
 import { renderToolResultForModel } from './tool-result-render';
 import type { ContextMessage } from './types';
 
@@ -85,7 +86,11 @@ export type ProjectionAnomaly =
    * `synthesizeMissing`), false when it closed a mid-history orphan whose result
    * was lost (a genuine defect worth investigating).
    */
-  | { readonly kind: 'tool_result_synthesized'; readonly toolCallId: string; readonly trailing: boolean }
+  | {
+      readonly kind: 'tool_result_synthesized';
+      readonly toolCallId: string;
+      readonly trailing: boolean;
+    }
   /** A result with no matching call anywhere was dropped (wire exits only). */
   | { readonly kind: 'orphan_tool_result_dropped'; readonly toolCallId: string }
   /** A tool call whose id already appeared earlier was dropped (strict-resend only). */
@@ -343,11 +348,7 @@ function mergeAdjacentUserMessages(
     if (message === null) continue;
 
     const previous = out.at(-1);
-    if (
-      canMergeUserMessage(message) &&
-      previous !== undefined &&
-      canMergeUserMessage(previous)
-    ) {
+    if (canMergeUserMessage(message) && previous !== undefined && canMergeUserMessage(previous)) {
       out[out.length - 1] = mergeTwoUserMessages(previous, message);
       continue;
     }
@@ -367,7 +368,14 @@ function prepareMessageForProjection(
   // placeholder, trailing note — exactly here, at the projection boundary.
   const source =
     message.role === 'tool'
-      ? { ...message, content: renderToolResultForModel({ output: message.content, note: message.note, isError: message.isError }) }
+      ? {
+          ...message,
+          content: renderToolResultForModel({
+            output: message.content,
+            note: message.note,
+            isError: message.isError,
+          }),
+        }
       : message;
 
   let content: ContentPart[] | undefined;
@@ -440,7 +448,11 @@ function stripContextMetadata(message: ContextMessage): Message {
   return {
     role: message.role,
     name: message.name,
-    content: message.content.map((p) => ({ ...p })) as ContentPart[],
+    // Last line of defense against image parts whose payload is not a real
+    // image (e.g. recorded by an older version, or injected via the SDK):
+    // one such part makes every provider request fail with a 400, so it is
+    // downgraded to a text notice at projection time.
+    content: message.content.map((p) => sanitizeImageUrlPart({ ...p })) as ContentPart[],
     toolCalls: message.toolCalls.map((tc) => ({ ...tc })),
     toolCallId: message.toolCallId,
     partial: message.partial,
@@ -494,18 +506,13 @@ const MEDIA_DEGRADED_PLACEHOLDERS = {
 export const MEDIA_STRIPPED_PLACEHOLDERS = {
   image_url:
     '[image omitted for provider compatibility; re-read the file to view it or get conversion guidance]',
-  audio_url:
-    '[audio omitted for provider compatibility; re-read the file to hear it]',
-  video_url:
-    '[video omitted for provider compatibility; re-read the file to view it]',
+  audio_url: '[audio omitted for provider compatibility; re-read the file to hear it]',
+  video_url: '[video omitted for provider compatibility; re-read the file to view it]',
 } as const;
 
 type MediaPlaceholderSet = typeof MEDIA_DEGRADED_PLACEHOLDERS | typeof MEDIA_STRIPPED_PLACEHOLDERS;
 
-type DegradableMediaPart = Extract<
-  ContentPart,
-  { readonly type: keyof MediaPlaceholderSet }
->;
+type DegradableMediaPart = Extract<ContentPart, { readonly type: keyof MediaPlaceholderSet }>;
 
 interface MediaContainer {
   readonly url: string;
@@ -530,9 +537,7 @@ const MEDIA_CONTAINER_KEY_CACHE = new WeakMap<
   Partial<Record<DegradableMediaPart['type'], string>>
 >();
 
-function isDegradableMediaPart(
-  part: ContentPart,
-): part is DegradableMediaPart {
+function isDegradableMediaPart(part: ContentPart): part is DegradableMediaPart {
   return part.type in MEDIA_DEGRADED_PLACEHOLDERS;
 }
 

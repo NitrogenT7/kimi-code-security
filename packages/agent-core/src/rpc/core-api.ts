@@ -1,6 +1,9 @@
+import type { ContentPart } from '@moonshot-ai/kosong';
+import type { SessionWarning } from '@moonshot-ai/protocol';
+
+import type { BackgroundTaskInfo } from '#/agent/background';
 import type { AgentConfigData } from '#/agent/config';
 import type { AgentContextData } from '#/agent/context';
-import type { BackgroundTaskInfo } from '#/agent/background';
 import type { CronTaskSnapshot } from '#/agent/cron';
 import type {
   GoalBudgetLimits,
@@ -17,13 +20,12 @@ import type { SwarmModeTrigger } from '#/agent/swarm';
 import type { ToolInfo } from '#/agent/tool';
 import type { KimiConfig, KimiConfigPatch, McpServerConfig } from '#/config';
 import type { ExperimentalFeatureState } from '#/flags';
+import type { GoalTemplateDetail, GoalTemplateSummary } from '#/goal-template';
+import type { GlobalMcpServerConfig } from '#/mcp/global-config';
+import type { PluginCommandDef, PluginInfo, PluginSummary, ReloadSummary } from '#/plugin';
 import type { ResumeSessionResult } from '#/rpc/resumed';
 import type { SessionMeta } from '#/session';
-import type { GlobalMcpServerConfig } from '#/mcp/global-config';
-import type { ContentPart } from '@moonshot-ai/kosong';
-import type { SessionWarning } from '@moonshot-ai/protocol';
 
-import type { PluginCommandDef, PluginInfo, PluginSummary, ReloadSummary } from '#/plugin';
 import type { UsageStatus } from './events';
 import type { WithAgentId, WithSessionId } from './types';
 
@@ -288,6 +290,10 @@ export interface SkillSummary {
   readonly isSubSkill?: boolean | undefined;
 }
 
+export interface GetGoalTemplatePayload {
+  readonly name: string;
+}
+
 export interface ActivateSkillPayload {
   readonly name: string;
   readonly args?: string | undefined;
@@ -306,7 +312,7 @@ export interface ActivatePluginCommandPayload {
 export interface McpServerInfo {
   readonly name: string;
   readonly transport: 'stdio' | 'http' | 'sse';
-  readonly status: 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
+  readonly status: 'registered' | 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
   readonly toolCount: number;
   readonly error?: string;
 }
@@ -317,6 +323,14 @@ export interface McpStartupMetrics {
 
 export interface ReconnectMcpServerPayload {
   readonly name: string;
+}
+
+export interface LoadMcpGroupPayload {
+  readonly name: string;
+}
+
+export interface SetMcpGroupModePayload {
+  readonly groupName: string | null;
 }
 
 export type { GlobalMcpServerConfig } from '#/mcp/global-config';
@@ -418,6 +432,8 @@ export type {
 
 export interface CreateGoalPayload {
   readonly objective: string;
+  readonly purpose?: string;
+  readonly completionCriterion?: string;
   readonly replace?: boolean;
 }
 
@@ -492,10 +508,14 @@ export interface SessionAPI extends AgentAPIWithId {
   updateSessionMetadata: (payload: UpdateSessionMetadataPayload) => void;
   getSessionMetadata: (payload: EmptyPayload) => SessionMeta;
   listSkills: (payload: EmptyPayload) => readonly SkillSummary[];
+  listGoalTemplates: (payload: EmptyPayload) => readonly GoalTemplateSummary[];
+  getGoalTemplate: (payload: GetGoalTemplatePayload) => GoalTemplateDetail;
   listPluginCommands: (payload: EmptyPayload) => readonly PluginCommandDef[];
   listMcpServers: (payload: EmptyPayload) => readonly McpServerInfo[];
   getMcpStartupMetrics: (payload: EmptyPayload) => McpStartupMetrics;
   reconnectMcpServer: (payload: ReconnectMcpServerPayload) => void;
+  loadMcpGroup: (payload: LoadMcpGroupPayload) => void;
+  setMcpGroupMode: (payload: SetMcpGroupModePayload) => void;
   generateAgentsMd: (payload: EmptyPayload) => void;
   getSessionWarnings: (payload: EmptyPayload) => readonly SessionWarning[];
   waitForBackgroundTasksOnPrint: (payload: EmptyPayload) => void;
@@ -516,9 +536,7 @@ export interface CoreAPI extends SessionAPIWithId {
   addGlobalMcpServer: (payload: PutGlobalMcpServerPayload) => readonly GlobalMcpServerConfig[];
   updateGlobalMcpServer: (payload: PutGlobalMcpServerPayload) => readonly GlobalMcpServerConfig[];
   removeGlobalMcpServer: (payload: GlobalMcpServerNamePayload) => readonly GlobalMcpServerConfig[];
-  beginGlobalMcpServerAuth: (
-    payload: GlobalMcpServerNamePayload,
-  ) => BeginGlobalMcpServerAuthResult;
+  beginGlobalMcpServerAuth: (payload: GlobalMcpServerNamePayload) => BeginGlobalMcpServerAuthResult;
   completeGlobalMcpServerAuth: (payload: CompleteGlobalMcpServerAuthPayload) => void;
   cancelGlobalMcpServerAuth: (payload: CancelGlobalMcpServerAuthPayload) => void;
   resetGlobalMcpServerAuth: (payload: GlobalMcpServerNamePayload) => void;

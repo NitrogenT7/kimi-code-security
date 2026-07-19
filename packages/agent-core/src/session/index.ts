@@ -1,7 +1,8 @@
 import { homedir } from 'node:os';
-import { join } from 'pathe';
+
 import type { Kaos } from '@moonshot-ai/kaos';
 import type { SessionWarning } from '@moonshot-ai/protocol';
+import { join } from 'pathe';
 
 import { ErrorCodes, KimiError } from '#/errors';
 import { getRootLogger, log } from '#/logging/logger';
@@ -11,7 +12,6 @@ import { proxyWithExtraPayload } from '#/rpc/types';
 
 import { Agent, type AgentOptions, type AgentType } from '../agent';
 import { renderPluginSessionStartReminder } from '../agent/injection/plugin-session-start';
-import { HookEngine, type HookDef } from './hooks';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
 import {
   appendWorkspaceAdditionalDir,
@@ -26,8 +26,11 @@ import {
   type WorkspaceAdditionalDirsLoadResult,
 } from '../config';
 import { makeErrorPayload } from '../errors';
+import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
+import { GoalTemplateRegistry } from '../goal-template';
 import {
   McpConnectionManager,
+  McpGroupRegistry,
   McpOAuthService,
   type McpServerEntry,
   type SessionMcpConfig,
@@ -40,7 +43,6 @@ import {
   prepareSystemPromptContext,
   type ResolvedAgentProfile,
 } from '../profile';
-import type { ProviderManager } from './provider-manager';
 import {
   registerBuiltinSkills,
   SessionSkillRegistry,
@@ -50,12 +52,13 @@ import {
   type SkillSummary,
 } from '../skill';
 import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
-import { SessionSubagentHost } from './subagent-host';
+import { ImageLimits } from '../tools/support/image-limits';
 import { sessionMediaOriginalsDir } from '../tools/support/image-originals';
 import type { ToolServices } from '../tools/support/services';
-import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
-import { ImageLimits } from '../tools/support/image-limits';
 import { abortError } from '../utils/abort';
+import { HookEngine, type HookDef } from './hooks';
+import type { ProviderManager } from './provider-manager';
+import { SessionSubagentHost } from './subagent-host';
 
 export interface SessionOptions {
   readonly kaos: Kaos;
@@ -72,6 +75,7 @@ export interface SessionOptions {
   readonly hooks?: readonly HookDef[];
   readonly permissionRules?: readonly PermissionRule[];
   readonly skills?: SessionSkillConfig;
+  readonly goalTemplates?: SessionGoalTemplateConfig;
   readonly mcpConfig?: SessionMcpConfig;
   readonly telemetry?: TelemetryClient | undefined;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
@@ -98,6 +102,11 @@ export interface SessionSkillConfig {
   readonly pluginSkillRoots?: readonly SkillRoot[];
   readonly mergeAllAvailableSkills?: boolean;
   readonly builtinDir?: string;
+}
+
+export interface SessionGoalTemplateConfig {
+  readonly userHomeDir?: string;
+  readonly extraDirs?: readonly string[];
 }
 
 export interface AgentMeta {
@@ -172,8 +181,10 @@ export class Session {
   readonly rpc: SDKSessionRPC;
   readonly telemetry: TelemetryClient;
   readonly skills: SessionSkillRegistry;
+  readonly goalTemplates: GoalTemplateRegistry;
   readonly agents: Map<string, AgentEntry> = new Map();
   readonly mcp: McpConnectionManager;
+  readonly mcpGroupRegistry: McpGroupRegistry | undefined;
   readonly log: Logger;
   private readonly logHandle: SessionLogHandle | undefined;
   readonly hookEngine: HookEngine;
@@ -207,9 +218,9 @@ export class Session {
       options.id === undefined
         ? undefined
         : getRootLogger().attachSession({
-          sessionId: options.id,
-          sessionDir: options.homedir,
-        });
+            sessionId: options.id,
+            sessionDir: options.homedir,
+          });
     this.log =
       this.logHandle?.logger ??
       (options.id === undefined ? log : log.createChild({ sessionId: options.id }));
@@ -228,15 +239,17 @@ export class Session {
     this.skills = new SessionSkillRegistry({
       sessionId: options.id,
     });
+    this.goalTemplates = new GoalTemplateRegistry();
     this.mcp = new McpConnectionManager({
       oauthService: new McpOAuthService({ kimiHomeDir: options.kimiHomeDir }),
       log: this.log,
       stdioCwd: options.kaos.getcwd(),
     });
+    this.mcpGroupRegistry = options.mcpConfig?.groupRegistry;
     this.mcp.onStatusChange((entry) => {
       this.onMcpServerStatusChange(entry);
     });
-    this.skillsReady = this.loadSkills()
+    this.skillsReady = Promise.all([this.loadSkills(), this.loadGoalTemplates()])
       .catch((error: unknown) => {
         this.log.error('skills load failed', error);
       })
@@ -247,7 +260,6 @@ export class Session {
       this.emitInitialMcpLoadError(error);
     });
   }
-
 
   setToolKaos(kaos: Kaos) {
     this.toolKaos = kaos;
@@ -280,7 +292,10 @@ export class Session {
     const systemKaos = this.systemContextKaos(cwd);
     if (persist) {
       const result = await appendWorkspaceAdditionalDir(systemKaos, cwd, path, this.additionalDirs);
-      const additionalDirs = normalizeAdditionalDirs([...this.additionalDirs, ...result.additionalDirs]);
+      const additionalDirs = normalizeAdditionalDirs([
+        ...this.additionalDirs,
+        ...result.additionalDirs,
+      ]);
       await this.setAdditionalDirs(additionalDirs);
       this.notifyAdditionalDirAdded(path, true, result.configPath);
       return { ...result, additionalDirs, persisted: true };
@@ -334,9 +349,12 @@ export class Session {
   }
 
   async createMain() {
-    const { agent } = await this.createAgent({ type: 'main' }, {
-      profile: DEFAULT_AGENT_PROFILES['agent'],
-    });
+    const { agent } = await this.createAgent(
+      { type: 'main' },
+      {
+        profile: DEFAULT_AGENT_PROFILES['agent'],
+      },
+    );
     if (this.options.drainAgentTasksOnStop) {
       agent.printDrainAgentTasksOnStop = true;
     }
@@ -376,9 +394,7 @@ export class Session {
 
   async close(): Promise<void> {
     try {
-      await Promise.allSettled(
-        Array.from(this.readyAgents(), async (agent) => agent.cron?.stop()),
-      );
+      await Promise.allSettled(Array.from(this.readyAgents(), async (agent) => agent.cron?.stop()));
       await this.cancelActiveTurnsOnClose();
       await this.stopBackgroundTasksOnExit();
       await this.flushMetadata();
@@ -394,9 +410,7 @@ export class Session {
 
   async closeForReload(): Promise<void> {
     try {
-      await Promise.allSettled(
-        Array.from(this.readyAgents(), async (agent) => agent.cron?.stop()),
-      );
+      await Promise.allSettled(Array.from(this.readyAgents(), async (agent) => agent.cron?.stop()));
       await this.flushMetadata();
     } finally {
       try {
@@ -468,9 +482,7 @@ export class Session {
       Array.from(this.readyAgents(), async (agent) => {
         const activeTasks = agent.background.list(true);
         await Promise.all(
-          activeTasks.map((task) =>
-            agent.background.suppressTerminalNotification(task.taskId),
-          ),
+          activeTasks.map((task) => agent.background.suppressTerminalNotification(task.taskId)),
         );
         await agent.background.stopAll('Session closed');
       }),
@@ -662,10 +674,7 @@ export class Session {
    * an agent. Fresh creation and resume-of-an-incomplete-wire both route
    * through here so the two paths cannot drift apart.
    */
-  private async bootstrapAgentProfile(
-    agent: Agent,
-    profile: ResolvedAgentProfile,
-  ): Promise<void> {
+  private async bootstrapAgentProfile(agent: Agent, profile: ResolvedAgentProfile): Promise<void> {
     const context = await prepareSystemPromptContext(
       this.systemContextKaos(agent.kaos.getcwd()),
       this.options.kimiHomeDir,
@@ -835,6 +844,11 @@ export class Session {
     return this.skills.listSkills().map(summarizeSkill);
   }
 
+  async listGoalTemplates() {
+    await this.skillsReady;
+    return this.goalTemplates.listSummaries();
+  }
+
   listPluginCommands(): readonly PluginCommandDef[] {
     return this.pluginCommands;
   }
@@ -856,9 +870,37 @@ export class Session {
     registerBuiltinSkills(this.skills);
   }
 
+  private async loadGoalTemplates(): Promise<void> {
+    await this.goalTemplates.loadRoots(
+      {
+        userHomeDir: this.options.goalTemplates?.userHomeDir ?? homedir(),
+        workDir: this.options.kaos.getcwd(),
+      },
+      this.options.goalTemplates?.extraDirs,
+    );
+  }
+
   private async loadMcpServers(): Promise<void> {
     const servers = this.options.mcpConfig?.servers;
     if (servers === undefined || Object.keys(servers).length === 0) return;
+
+    const hasGroups =
+      this.options.mcpConfig?.groups !== undefined &&
+      Object.keys(this.options.mcpConfig.groups).length > 0;
+
+    if (hasGroups) {
+      this.mcp.registerLazyServers(servers);
+      const entries = this.mcp.list();
+      const registeredCount = entries.filter((entry) => entry.status === 'registered').length;
+      const disabledCount = entries.filter((entry) => entry.status === 'disabled').length;
+      this.telemetry.track('mcp_registered', {
+        registered_count: registeredCount,
+        disabled_count: disabledCount,
+        total_count: entries.length,
+      });
+      return;
+    }
+
     await this.mcp.connectAll(servers);
     const entries = this.mcp.list().filter((entry) => entry.status !== 'disabled');
     const totalCount = entries.length;
@@ -935,11 +977,13 @@ export class Session {
       // compression captions live with the session, not the agent.
       mediaOriginalsDir: sessionMediaOriginalsDir(this.options.homedir),
       skills: this.skills,
+      goalTemplates: this.goalTemplates,
       rpc: proxyWithExtraPayload(this.rpc, { agentId: id }),
       modelProvider: this.options.providerManager,
       hookEngine: config.hookEngine ?? this.hookEngine,
       subagentHost: config.subagentHost ?? new SessionSubagentHost(this, id),
       mcp: this.mcp,
+      mcpGroupRegistry: this.mcpGroupRegistry,
       permission: this.permissionOptions(parentAgentId, config.permission),
       telemetry: this.telemetry,
       log: this.log.createChild({ agentId: id }),
@@ -990,10 +1034,7 @@ export class Session {
     return entry;
   }
 
-  private resumeAgent(
-    id: string,
-    stack: readonly string[] = [],
-  ): Promise<ResumedAgent> {
+  private resumeAgent(id: string, stack: readonly string[] = []): Promise<ResumedAgent> {
     if (stack.includes(id)) {
       throw new KimiError(
         ErrorCodes.SESSION_STATE_INVALID,
@@ -1021,9 +1062,7 @@ export class Session {
 
     const parentAgentId = meta.parentAgentId ?? null;
     const parent =
-      parentAgentId === null
-        ? undefined
-        : await this.resumeAgent(parentAgentId, [...stack, id]);
+      parentAgentId === null ? undefined : await this.resumeAgent(parentAgentId, [...stack, id]);
 
     try {
       const agent = this.instantiateAgent(

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildReplay } from '../../../src';
+import type { ContextMessage } from '../../../src/agent/context';
 import {
   AGENT_WIRE_PROTOCOL_VERSION,
   InMemoryAgentRecordPersistence,
   type AgentRecord,
 } from '../../../src/agent/records';
-import type { ContextMessage } from '../../../src/agent/context';
 import { testAgent } from '../harness/agent';
 
 describe('AgentRecords persistence metadata', () => {
@@ -43,10 +43,7 @@ describe('AgentRecords persistence metadata', () => {
     });
     await records.flush();
 
-    expect(persistence.records.map((record) => record.type)).toEqual([
-      'metadata',
-      'turn.prompt',
-    ]);
+    expect(persistence.records.map((record) => record.type)).toEqual(['metadata', 'turn.prompt']);
   });
 
   it('rejects replaying a non-empty stream without metadata', async () => {
@@ -168,10 +165,13 @@ describe('AgentRecords persistence metadata', () => {
     const summary =
       '<system>Read image file. Mime type: image/png. Size: 70 bytes. ' +
       'Original dimensions: 4x2 pixels.</system>';
+    // Real PNG magic bytes: projection sniffs image payloads and downgrades
+    // impostors, so a verbatim-passthrough fixture must be a real image.
+    const pngB64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
     const legacyOutput = [
       { type: 'text', text: summary },
       { type: 'text', text: '<image path="/tmp/a.png">' },
-      { type: 'image_url', imageUrl: { url: 'data:image/png;base64,A' } },
+      { type: 'image_url', imageUrl: { url: `data:image/png;base64,${pngB64}` } },
       { type: 'text', text: '</image>' },
     ];
     const persistence = new RecordingInMemoryAgentRecordPersistence([
@@ -451,18 +451,24 @@ describe('agent replay range build', () => {
     );
     const persistence = new InMemoryAgentRecordPersistence([
       { type: 'metadata', protocol_version: AGENT_WIRE_PROTOCOL_VERSION, created_at: 1 },
-      ...beforeClearMessages.map((message) => ({ type: 'context.append_message' as const, message })),
+      ...beforeClearMessages.map((message) => ({
+        type: 'context.append_message' as const,
+        message,
+      })),
       { type: 'context.clear' },
-      ...afterClearMessages.map((message) => ({ type: 'context.append_message' as const, message })),
+      ...afterClearMessages.map((message) => ({
+        type: 'context.append_message' as const,
+        message,
+      })),
     ]);
 
     const replay = await buildReplay(persistence, { count: 10 });
 
     expect(replay).toHaveLength(10);
     expect(replay).toEqual(
-      afterClearMessages.slice(-10).map((message) =>
-        expect.objectContaining({ type: 'message', message }),
-      ),
+      afterClearMessages
+        .slice(-10)
+        .map((message) => expect.objectContaining({ type: 'message', message })),
     );
   });
 

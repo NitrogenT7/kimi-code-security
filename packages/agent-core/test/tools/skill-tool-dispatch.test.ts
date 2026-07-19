@@ -55,6 +55,7 @@ function skillToolAgent(skills: AgentSkillRegistry, methods: SkillToolMethods): 
     skills: {
       registry: skills,
       recordActivation: methods.recordSkillActivation,
+      assertSkillAllowed: () => {},
     },
     context: {
       appendSystemReminder: methods.recordSystemReminder,
@@ -89,9 +90,7 @@ describe('SkillTool dispatch edges', () => {
 
     expect(result.output).toContain('loaded inline');
     expect(result.output).not.toContain('body of prompt-skill');
-    expect(methods.recordUserMessage.mock.calls[0]?.[0][0]?.text).toContain(
-      'body of prompt-skill',
-    );
+    expect(methods.recordUserMessage.mock.calls[0]?.[0][0]?.text).toContain('body of prompt-skill');
     expect(methods.recordUserMessage.mock.calls[0]?.[0][0]?.text).not.toContain(
       '<system-reminder>',
     );

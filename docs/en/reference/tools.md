@@ -74,9 +74,9 @@ Plan mode is a constrained working state: once entered, `Write` and `Edit` are r
 
 | Tool | Default Approval | Description |
 | --- | --- | --- |
-| `TodoList` | Auto-allow | Manage a task to-do list |
+| `TodoList` | Auto-allow | Manage a question-driven investigation list |
 
-**`TodoList`** maintains a visible subtask list across multi-step operations; state is stored within the Agent session. The `todos` parameter accepts an array where each item has a `title` and `status` (`pending` / `in_progress` / `done`). Omitting `todos` queries the current list; passing an empty array clears it.
+**`TodoList`** maintains a visible question list across multi-step investigations; state is stored within the Agent session. The `todos` parameter accepts an array where each item is a question object with `type` (`"question"`), `id`, `question`, `status` (`pending` / `investigating` / `resolved` / `inconclusive`), `confidence` (`low` / `medium` / `high`), and `depth` (`quick` / `deep`), plus optional `hypothesis`, `conclusion`, `evidence`, `blockers`, `parentId`, and `subQuestions` fields. Omitting `todos` queries the current list; passing an empty array clears it.
 
 ## Collaboration Tools
 

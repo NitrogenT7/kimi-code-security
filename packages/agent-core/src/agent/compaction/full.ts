@@ -1,10 +1,4 @@
 import {
-  ErrorCodes,
-  KimiError,
-  isKimiError,
-  toKimiErrorPayload,
-} from '#/errors';
-import {
   APIEmptyResponseError,
   inputTotal,
   isRetryableGenerateError,
@@ -19,40 +13,33 @@ import {
   isImageFormatError,
 } from '@moonshot-ai/kosong';
 
+import { ErrorCodes, KimiError, isKimiError, toKimiErrorPayload } from '#/errors';
+
 import type { Agent } from '..';
-import type { GenerateOptionsWithRequestLogFields } from '../llm-request-logger';
-import type { ContextMessage } from '../context/types';
-import { stripDynamicToolContext } from '../context/dynamic-tools';
 import { isAbortError } from '../../loop/errors';
-import {
-  findAPIStatusError,
-  retryBackoffDelays,
-  sleepForRetry,
-} from '../../loop/retry';
 import { LLMRequestTraceState } from '../../loop/llm';
-import {
-  renderTodoList,
-  TODO_STORE_KEY,
-  type TodoItem,
-} from '../../tools/builtin/state/todo-list';
+import { findAPIStatusError, retryBackoffDelays, sleepForRetry } from '../../loop/retry';
+import { renderTodoList, TODO_STORE_KEY, type TodoItem } from '../../tools/builtin/state/todo-list';
+import { applyCompletionBudget, resolveCompletionBudget } from '../../utils/completion-budget';
+import { renderPrompt } from '../../utils/render-prompt';
 import {
   estimateTokens,
   estimateTokensForMessage,
   estimateTokensForMessages,
   estimateTokensForTools,
 } from '../../utils/tokens';
-import {
-  applyCompletionBudget,
-  resolveCompletionBudget,
-} from '../../utils/completion-budget';import { renderPrompt } from '../../utils/render-prompt';
+import { stripDynamicToolContext } from '../context/dynamic-tools';
+import type { ContextMessage } from '../context/types';
+import type { GenerateOptionsWithRequestLogFields } from '../llm-request-logger';
 import compactionInstructionTemplate from './compaction-instruction.md?raw';
-import type { CompactionBeginData, CompactionResult } from './types';
+import { buildCompactionSummaryText, isRealUserInput } from './handoff';
+import retentionPlanInstructionTemplate from './retention-plan-instruction.md?raw';
 import {
   DEFAULT_COMPACTION_CONFIG,
   DefaultCompactionStrategy,
   type CompactionStrategy,
 } from './strategy';
-import { buildCompactionSummaryText, isRealUserInput } from './handoff';
+import type { CompactionBeginData, CompactionResult, CompactionSource } from './types';
 
 export const MAX_COMPACTION_RETRY_ATTEMPTS = 5;
 
@@ -101,15 +88,12 @@ export class FullCompaction {
   ) {
     this.strategy =
       strategy ??
-      new DefaultCompactionStrategy(
-        () => this.getEffectiveMaxContextTokens(),
-        {
-          ...DEFAULT_COMPACTION_CONFIG,
-          reservedContextSize:
-            agent.kimiConfig?.loopControl?.reservedContextSize ??
-            DEFAULT_COMPACTION_CONFIG.reservedContextSize,
-        },
-      );
+      new DefaultCompactionStrategy(() => this.getEffectiveMaxContextTokens(), {
+        ...DEFAULT_COMPACTION_CONFIG,
+        reservedContextSize:
+          agent.kimiConfig?.loopControl?.reservedContextSize ??
+          DEFAULT_COMPACTION_CONFIG.reservedContextSize,
+      });
   }
 
   get isCompacting(): boolean {
@@ -178,7 +162,10 @@ export class FullCompaction {
       return;
     }
     if (this.agent.context.history.length === 0) {
-      throw new KimiError(ErrorCodes.COMPACTION_UNABLE, 'No messages to compact in current history.');
+      throw new KimiError(
+        ErrorCodes.COMPACTION_UNABLE,
+        'No messages to compact in current history.',
+      );
     }
     // Manual (SDK/REST) compaction must not start while a turn is running: the
     // turn keeps mutating the context (streaming content, appending messages)
@@ -301,9 +288,13 @@ export class FullCompaction {
     const maxCompactions = this.strategy.maxCompactionPerTurn;
     if (this.compactionCountInTurn >= maxCompactions) {
       if (throwOnLimit) {
-        throw new KimiError(ErrorCodes.CONTEXT_OVERFLOW, `Compaction limit exceeded (${String(maxCompactions)})`, {
-          details: { maxCompactions },
-        });
+        throw new KimiError(
+          ErrorCodes.CONTEXT_OVERFLOW,
+          `Compaction limit exceeded (${String(maxCompactions)})`,
+          {
+            details: { maxCompactions },
+          },
+        );
       }
       return false;
     }
@@ -380,10 +371,66 @@ export class FullCompaction {
     }
   }
 
-  private buildInstruction(customInstruction: string | undefined): string {
-    return renderPrompt(compactionInstructionTemplate, {
-      customInstruction: customInstruction?.trim() ?? '',
-    }).trimEnd();
+  private buildInstruction(customInstruction: string | undefined, retentionPlan?: string): string {
+    return buildCompactionInstruction(customInstruction, retentionPlan).trimEnd();
+  }
+
+  /**
+   * Stage 1 of retention-plan compaction: ask the model to produce a
+   * retention plan for what should be kept. The plan is then injected into
+   * the compaction instruction used in stage 2 (the summarizer call).
+   *
+   * Guardrails:
+   * - Only runs for `auto` compaction (manual compaction already carries the
+   *   user's own instruction).
+   * - Gated behind the `retention_plan_compaction` experimental flag.
+   * - Any failure falls back to standard compaction without a plan.
+   */
+  private async generateRetentionPlan(
+    signal: AbortSignal,
+    historyForModel: readonly ContextMessage[],
+    source: CompactionSource,
+  ): Promise<string | undefined> {
+    if (source !== 'auto') {
+      return undefined;
+    }
+    if (!this.agent.experimentalFlags.enabled('retention_plan_compaction')) {
+      return undefined;
+    }
+
+    const provider = applyCompletionBudget({
+      provider: this.agent.config.provider,
+      budget: { hardCap: RETENTION_PLAN_MAX_TOKENS },
+      capability: this.agent.config.modelCapabilities,
+    });
+
+    const messages = [
+      ...this.agent.context.project(historyForModel, {
+        synthesizeMissing: true,
+        dropOrphanResults: true,
+      }),
+      createUserMessage(RETENTION_PLAN_INSTRUCTION()),
+    ];
+
+    try {
+      const response = await this.agent.generate(
+        provider,
+        this.agent.config.systemPrompt,
+        [], // retention planning does not need tools
+        messages,
+        undefined,
+        { signal },
+      );
+      if (response.finishReason === 'truncated') {
+        return undefined;
+      }
+      return extractCompactionSummary(response);
+    } catch (error) {
+      this.agent.log.warn('retention plan generation failed; falling back to standard compaction', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
   }
 
   private postProcessSummary(summary: string): string {
@@ -432,7 +479,6 @@ export class FullCompaction {
         }),
         capability,
       });
-      const instruction = this.buildInstruction(data.instruction);
 
       const delays = retryBackoffDelays(MAX_COMPACTION_RETRY_ATTEMPTS);
       let usage: TokenUsage | null = null;
@@ -450,6 +496,12 @@ export class FullCompaction {
       // anchor). `originalHistory` itself stays untouched for the
       // prefix-race check and `compactedCount`.
       let historyForModel: readonly ContextMessage[] = stripDynamicToolContext(originalHistory);
+      // Stage 1: ask the model to produce a retention plan for what should be
+      // kept. The plan is injected into the compaction instruction used in
+      // stage 2 (the summarizer loop below). Undefined when the flag is off,
+      // the source is not `auto`, or planning failed.
+      const retentionPlan = await this.generateRetentionPlan(signal, historyForModel, data.source);
+      const instruction = this.buildInstruction(data.instruction, retentionPlan);
       let droppedCount = 0;
       let mediaStripAttempted = false;
       let overflowShrinkCount = 0;
@@ -547,8 +599,7 @@ export class FullCompaction {
             continue;
           }
           const shouldShrinkAfterEmptyOrTruncated =
-            error instanceof CompactionTruncatedError ||
-            error instanceof APIEmptyResponseError;
+            error instanceof CompactionTruncatedError || error instanceof APIEmptyResponseError;
           if (shouldShrinkAfterEmptyOrTruncated && historyForModel.length > 1) {
             // Each empty/truncated summary drops the oldest message and retries,
             // but without its own bound this would issue ~one request per message
@@ -634,9 +685,7 @@ export class FullCompaction {
         round: 1,
         thinking_effort: this.agent.config.thinkingEffort,
         trace_id: this.lastTraceId,
-        ...(usage === null
-          ? {}
-          : { input_tokens: inputTotal(usage), output_tokens: usage.output }),
+        ...(usage === null ? {} : { input_tokens: inputTotal(usage), output_tokens: usage.output }),
       });
       // Baseline the "nothing new since compaction" guard on the live counter
       // (== result.tokensAfter here, since nothing has been appended since
@@ -707,7 +756,9 @@ const MEDIA_PART_MARKERS = {
   video_url: '[video]',
 } as const;
 
-function isMediaPart(part: ContentPart): part is ContentPart & { type: keyof typeof MEDIA_PART_MARKERS } {
+function isMediaPart(
+  part: ContentPart,
+): part is ContentPart & { type: keyof typeof MEDIA_PART_MARKERS } {
   return part.type in MEDIA_PART_MARKERS;
 }
 
@@ -727,8 +778,9 @@ function replaceMediaPartsWithMarkers(
     changed = true;
     return {
       ...message,
-      content: message.content.map((part): ContentPart =>
-        isMediaPart(part) ? { type: 'text', text: MEDIA_PART_MARKERS[part.type] } : part,
+      content: message.content.map(
+        (part): ContentPart =>
+          isMediaPart(part) ? { type: 'text', text: MEDIA_PART_MARKERS[part.type] } : part,
       ),
     };
   });
@@ -740,9 +792,10 @@ function shrinkCompactionHistoryAfterOverflow<T extends Message>(
   attempt: number,
 ): T[] {
   if (messages.length <= 1) return messages.slice();
-  const ratio = COMPACTION_OVERFLOW_SHRINK_RATIOS[
-    Math.min(attempt - 1, COMPACTION_OVERFLOW_SHRINK_RATIOS.length - 1)
-  ]!;
+  const ratio =
+    COMPACTION_OVERFLOW_SHRINK_RATIOS[
+      Math.min(attempt - 1, COMPACTION_OVERFLOW_SHRINK_RATIOS.length - 1)
+    ]!;
   const tokenBudget = Math.floor(estimateTokensForMessages(messages) * ratio);
   return takeRecentMessagesWithinTokenBudget(messages, tokenBudget);
 }
@@ -785,9 +838,29 @@ function extractCompactionSummary(response: GenerateResult): string {
       : response.message.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
 
   if (summary.trim().length === 0) {
-    throw new APIEmptyResponseError(
-      'The compaction response did not contain a non-empty summary.',
-    );
+    throw new APIEmptyResponseError('The compaction response did not contain a non-empty summary.');
   }
   return summary;
+}
+
+export const COMPACTION_INSTRUCTION = (customInstruction = ''): string =>
+  renderPrompt(compactionInstructionTemplate, { customInstruction });
+
+export const RETENTION_PLAN_INSTRUCTION = (): string =>
+  renderPrompt(retentionPlanInstructionTemplate, {});
+
+// Small completion cap for the retention-plan stage so the planning call
+// stays cheap and does not itself bloat the context window.
+const RETENTION_PLAN_MAX_TOKENS = 2048;
+
+export function buildCompactionInstruction(
+  customInstruction: string | undefined,
+  retentionPlan: string | undefined,
+): string {
+  const base = customInstruction?.trim() ?? '';
+  if (!retentionPlan || retentionPlan.trim().length === 0) {
+    return COMPACTION_INSTRUCTION(base);
+  }
+  const combined = `${base.length > 0 ? `${base}\n\n` : ''}Use the following retention plan when deciding what to keep in the summary:\n\n${retentionPlan.trim()}`;
+  return COMPACTION_INSTRUCTION(combined);
 }

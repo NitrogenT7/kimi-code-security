@@ -16,6 +16,8 @@ import type {
   CreateGoalInput,
   GetCronTasksResult,
   GoalSnapshot,
+  GoalTemplateDetail,
+  GoalTemplateSummary,
   GoalToolResult,
   JsonObject,
   McpGroupInfo,
@@ -473,6 +475,16 @@ export class Session {
     return this.rpc.cancelGoal({ sessionId: this.id });
   }
 
+  async listGoalTemplates(): Promise<readonly GoalTemplateSummary[]> {
+    this.ensureOpen();
+    return this.rpc.listGoalTemplates({ sessionId: this.id });
+  }
+
+  async getGoalTemplate(name: string): Promise<GoalTemplateDetail> {
+    this.ensureOpen();
+    return this.rpc.getGoalTemplate({ sessionId: this.id, name });
+  }
+
   /**
    * Enumerate the cron tasks scheduled in this session. Hosts running a
    * bounded session lifetime (e.g. `kimi -p`) poll this to decide whether
@@ -499,8 +511,7 @@ export class Session {
   }
 
   /**
-   * List the MCP groups declared in mcp.json (`mcpGroups`). Rejects when the
-   * backing engine does not support MCP groups (the v1 in-process engine).
+   * List the MCP groups declared in mcp.json (`mcpGroups`).
    */
   async listMcpGroups(): Promise<readonly McpGroupInfo[]> {
     this.ensureOpen();
@@ -509,7 +520,7 @@ export class Session {
 
   /**
    * Connect every server in the named MCP group and mark it as the active
-   * group. Rejects when the engine does not support MCP groups.
+   * group.
    */
   async loadMcpGroup(name: string): Promise<void> {
     this.ensureOpen();

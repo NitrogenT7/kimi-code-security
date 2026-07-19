@@ -41,6 +41,8 @@ export const ErrorCodes = {
   GOAL_STATUS_INVALID: 'goal.status_invalid',
   GOAL_METADATA_RESERVED: 'goal.metadata_reserved',
   GOAL_NOT_RESUMABLE: 'goal.not_resumable',
+  GOAL_NOT_REWRITABLE: 'goal.not_rewritable',
+  GOAL_TEMPLATE_NOT_FOUND: 'goal.template_not_found',
 
   MODEL_NOT_CONFIGURED: 'model.not_configured',
   MODEL_CONFIG_INVALID: 'model.config_invalid',
@@ -272,6 +274,18 @@ export const KIMI_ERROR_INFO = {
     public: true,
     action: 'Only paused goals can be resumed.',
   },
+  'goal.not_rewritable': {
+    title: 'Goal content is no longer rewritable',
+    retryable: false,
+    public: true,
+    action: 'Goal content can only be rewritten during the first turn.',
+  },
+  'goal.template_not_found': {
+    title: 'Goal template not found',
+    retryable: false,
+    public: true,
+    action: 'Check the template name and ensure the .goal/ or ~/.goal/ directory contains it.',
+  },
 
   'model.not_configured': {
     title: 'No model configured',
@@ -370,7 +384,8 @@ export const KIMI_ERROR_INFO = {
     title: 'Unable to compact',
     retryable: false,
     public: true,
-    action: 'The current history has no prefix that can be compacted (e.g. only a pending user message). Start a new turn or session instead.',
+    action:
+      'The current history has no prefix that can be compacted (e.g. only a pending user message). Start a new turn or session instead.',
   },
 
   'task.task_id_empty': {
@@ -440,7 +455,8 @@ export const KIMI_ERROR_INFO = {
     title: 'Git Bash not found',
     retryable: false,
     public: true,
-    action: 'Install Git for Windows from https://gitforwindows.org/ or set KIMI_SHELL_PATH to a bash.exe.',
+    action:
+      'Install Git for Windows from https://gitforwindows.org/ or set KIMI_SHELL_PATH to a bash.exe.',
   },
 
   not_implemented: {

@@ -1,16 +1,16 @@
 import type { ContentPart, ThinkingEffort, TokenUsage } from '@moonshot-ai/kosong';
 
 import type { LoopRecordedEvent } from '../../loop';
-import type { GoalActor, GoalBudgetLimits, GoalStatus } from '../goal';
 import type { MCPToolDefinition } from '../../mcp/types';
 import type { ToolStoreUpdate } from '../../tools/store';
 import type { CompactionBeginData, CompactionResult } from '../compaction';
 import type { AgentConfigUpdateData } from '../config';
 import type { ContextMessage, PromptOrigin } from '../context';
+import type { GoalActor, GoalBudgetLimits, GoalStatus } from '../goal';
 import type { PermissionApprovalResultRecord, PermissionMode } from '../permission';
+import type { SwarmModeTrigger } from '../swarm';
 import type { McpToolCollision, UserToolRegistration } from '../tool';
 import type { UsageRecordScope } from '../usage';
-import type { SwarmModeTrigger } from '../swarm';
 
 /** One entry of a tools table as sent in a request's top-level `tools[]`. */
 export interface LlmRequestToolSchema {
@@ -105,10 +105,14 @@ export interface AgentRecordEvents {
   'goal.create': {
     goalId: string;
     objective: string;
+    purpose?: string;
     completionCriterion?: string;
   };
   'goal.update': {
     status?: GoalStatus;
+    objective?: string;
+    purpose?: string;
+    completionCriterion?: string;
     tokensUsed?: number;
     turnsUsed?: number;
     wallClockMs?: number;

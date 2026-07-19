@@ -9,8 +9,8 @@ import { project } from '../../src/agent/context/projector';
 import type { ContextMessage } from '../../src/agent/context/types';
 import { buildImageCompressionCaption } from '../../src/tools/support/image-compress';
 import { estimateTokensForMessages } from '../../src/utils/tokens';
-import { createFakeKaos } from '../tools/fixtures/fake-kaos';
 import { recordingTelemetry, type TelemetryRecord } from '../fixtures/telemetry';
+import { createFakeKaos } from '../tools/fixtures/fake-kaos';
 import { testAgent } from './harness/agent';
 
 describe('Agent context', () => {
@@ -19,7 +19,10 @@ describe('Agent context', () => {
     ctx.configure();
 
     ctx.agent.context.appendUserMessage([{ type: 'text', text: 'hello' }]);
-    ctx.agent.context.appendSystemReminder('Remember this.', { kind: 'injection', variant: 'host' });
+    ctx.agent.context.appendSystemReminder('Remember this.', {
+      kind: 'injection',
+      variant: 'host',
+    });
     ctx.dispatch({
       type: 'context.append_loop_event',
       event: { type: 'step.begin', uuid: 'origin-step', turnId: '', step: 1 },
@@ -881,12 +884,15 @@ describe('Agent context', () => {
 
     // Notification arrives in the gap between step.begin and tool.call, when no
     // tool result is yet pending, so it is pushed directly into history.
-    ctx.agent.context.appendUserMessage([{ type: 'text', text: '<notification>bg done</notification>' }], {
-      kind: 'background_task',
-      taskId: 'task-1',
-      status: 'completed',
-      notificationId: 'task:task-1:completed',
-    });
+    ctx.agent.context.appendUserMessage(
+      [{ type: 'text', text: '<notification>bg done</notification>' }],
+      {
+        kind: 'background_task',
+        taskId: 'task-1',
+        status: 'completed',
+        notificationId: 'task:task-1:completed',
+      },
+    );
 
     ctx.dispatch({
       type: 'context.append_loop_event',
@@ -1334,7 +1340,6 @@ describe('Agent context', () => {
       }),
     ]);
   });
-
 });
 
 describe('Agent context notification projection', () => {
@@ -1464,6 +1469,52 @@ describe('Agent context notification projection', () => {
     expect(textOf(messages[0]!)).toBe('First real prompt\n\nSecond real prompt');
     expect(textOf(messages[1]!)).toBe('No origin prompt');
     expect(textOf(messages[2]!)).toBe('Third real prompt');
+  });
+});
+
+describe('project image_url sanitization', () => {
+  // A failing screenshot tool once base64-encoded its error message and
+  // labelled it image/png; the provider then 400'd every subsequent request,
+  // bricking the session. Projection is the last line of defense.
+  const ERROR_TEXT_B64 = Buffer.from(
+    'Failed to take take screenshot. Capturing failed.\n',
+    'utf8',
+  ).toString('base64');
+  const PNG_B64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
+
+  function toolMessage(parts: ContextMessage['content']): ContextMessage {
+    return { role: 'tool', toolCallId: 'call-1', content: parts, toolCalls: [] };
+  }
+
+  it('downgrades an image part whose payload is text to a text notice', () => {
+    const messages = project([
+      toolMessage([
+        { type: 'text', text: 'screenshot result:' },
+        { type: 'image_url', imageUrl: { url: `data:image/png;base64,${ERROR_TEXT_B64}` } },
+      ]),
+    ]);
+    const content = messages[0]!.content;
+    expect(content.every((p) => p.type === 'text')).toBe(true);
+    expect(textOf(messages[0]!)).toContain('image_url dropped');
+    expect(textOf(messages[0]!)).toContain('Failed to take take screenshot. Capturing failed.');
+  });
+
+  it('keeps an image part whose payload sniffs as a real image', () => {
+    const messages = project([
+      toolMessage([{ type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}` } }]),
+    ]);
+    expect(messages[0]!.content).toEqual([
+      { type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}` } },
+    ]);
+  });
+
+  it('leaves remote image URLs untouched', () => {
+    const messages = project([
+      toolMessage([{ type: 'image_url', imageUrl: { url: 'https://example.com/img.png' } }]),
+    ]);
+    expect(messages[0]!.content).toEqual([
+      { type: 'image_url', imageUrl: { url: 'https://example.com/img.png' } },
+    ]);
   });
 });
 

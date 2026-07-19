@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
 import { ErrorCodes, KimiError } from '#/errors';
+
 import type { Agent } from '..';
+import { type TelemetryProperties } from '../../telemetry';
 import type { AgentRecordOf } from '../records/types';
-import {
-  type TelemetryProperties,
-} from '../../telemetry';
 
 /**
  * Durable goal-mode state owned by {@link GoalMode}.
@@ -116,6 +115,7 @@ export interface GoalBudgetLimits {
 interface GoalState {
   goalId: string;
   objective: string;
+  purpose?: string;
   completionCriterion?: string;
   status: GoalStatus;
   turnsUsed: number;
@@ -152,6 +152,7 @@ export interface GoalBudgetReport {
 export interface GoalSnapshot {
   readonly goalId: string;
   readonly objective: string;
+  readonly purpose?: string;
   readonly completionCriterion?: string;
   readonly status: GoalStatus;
   readonly turnsUsed: number;
@@ -197,6 +198,7 @@ export interface GoalChange {
 
 export interface CreateGoalInput {
   readonly objective: string;
+  readonly purpose?: string;
   readonly completionCriterion?: string;
   readonly replace?: boolean;
 }
@@ -227,8 +229,7 @@ interface GoalReasonInput {
 export class GoalMode {
   private state: GoalState | undefined;
 
-  constructor(private readonly agent: Agent) {
-  }
+  constructor(private readonly agent: Agent) {}
 
   /**
    * Reconciles replayed goal state with runtime reality on agent resume.
@@ -266,6 +267,7 @@ export class GoalMode {
     const state: GoalState = {
       goalId: record.goalId,
       objective: record.objective,
+      purpose: record.purpose,
       completionCriterion: record.completionCriterion,
       status: 'active',
       turnsUsed: 0,
@@ -291,6 +293,10 @@ export class GoalMode {
       state.wallClockResumedAt = undefined;
       state.terminalReason = status === 'active' ? undefined : record.reason;
     }
+    if (record.objective !== undefined) state.objective = record.objective;
+    if (record.purpose !== undefined) state.purpose = record.purpose;
+    if (record.completionCriterion !== undefined)
+      state.completionCriterion = record.completionCriterion;
     if (record.turnsUsed !== undefined) state.turnsUsed = record.turnsUsed;
     if (record.tokensUsed !== undefined) state.tokensUsed = record.tokensUsed;
     if (record.wallClockMs !== undefined) {
@@ -303,20 +309,21 @@ export class GoalMode {
     this.agent.replayBuilder.push({
       type: 'goal_updated',
       snapshot: this.toSnapshot(state),
-      change: status === 'complete'
-        ? {
-            kind: 'completion',
-            status,
-            reason: record.reason,
-            stats: this.statsOf(state),
-            actor: record.actor,
-          }
-        : {
-            kind: 'lifecycle',
-            status,
-            reason: record.reason,
-            actor: record.actor,
-          },
+      change:
+        status === 'complete'
+          ? {
+              kind: 'completion',
+              status,
+              reason: record.reason,
+              stats: this.statsOf(state),
+              actor: record.actor,
+            }
+          : {
+              kind: 'lifecycle',
+              status,
+              reason: record.reason,
+              actor: record.actor,
+            },
     });
   }
 
@@ -379,9 +386,11 @@ export class GoalMode {
     }
 
     const completionCriterion = normalizeCompletionCriterion(input.completionCriterion);
+    const purpose = normalizePurpose(input.purpose);
     const state: GoalState = {
       goalId: randomUUID(),
       objective,
+      purpose,
       completionCriterion,
       status: 'active',
       turnsUsed: 0,
@@ -396,6 +405,7 @@ export class GoalMode {
       type: 'goal.create',
       goalId: state.goalId,
       objective: state.objective,
+      purpose: state.purpose,
       completionCriterion: state.completionCriterion,
     });
     this.trackGoalCreated(actor, input.replace === true);
@@ -473,6 +483,63 @@ export class GoalMode {
     this.track('goal_budget_set', {
       actor,
       ...budgetTelemetryProperties(input.budgetLimits),
+    });
+    return this.toSnapshot(state);
+  }
+
+  /**
+   * Rewrites a lightweight goal into the four-element commander's-intent format
+   * during the first turn. This is how `/goal <text>` becomes a structured goal:
+   * the model calls UpdateGoal with the objective reformatted as
+   * [Purpose] / [Key Tasks] / [End State] / [Constraints], plus extracted
+   * `purpose` and `completionCriterion`.
+   *
+   * Guardrails:
+   * - Only allowed while the goal is `active`.
+   * - Only allowed during the first turn (`turnsUsed <= 1`) so the model cannot
+   *   drift the goal after work has begun.
+   * - Empty strings are normalized to `undefined` to keep the state clean.
+   */
+  async rewriteGoalContent(
+    input: {
+      objective?: string;
+      purpose?: string;
+      completionCriterion?: string;
+    },
+    actor: GoalActor = 'model',
+  ): Promise<GoalSnapshot> {
+    const state = this.requireState();
+    if (state.status !== 'active') {
+      throw new KimiError(
+        ErrorCodes.GOAL_STATUS_INVALID,
+        `Cannot rewrite goal content in status "${state.status}"`,
+      );
+    }
+    if (state.turnsUsed > 1) {
+      throw new KimiError(
+        ErrorCodes.GOAL_NOT_REWRITABLE,
+        'Goal content can only be rewritten during the first turn',
+      );
+    }
+
+    const objective = normalizeObjective(input.objective);
+    const purpose = normalizePurpose(input.purpose);
+    const completionCriterion = normalizeCompletionCriterion(input.completionCriterion);
+
+    if (objective !== undefined) state.objective = objective;
+    if (purpose !== undefined) state.purpose = purpose;
+    if (completionCriterion !== undefined) state.completionCriterion = completionCriterion;
+
+    this.persistState(state);
+    this.appendGoalUpdate({
+      objective: state.objective,
+      purpose: state.purpose,
+      completionCriterion: state.completionCriterion,
+      actor,
+    });
+    this.track('goal_content_rewritten', {
+      actor,
+      turns_used: state.turnsUsed,
     });
     return this.toSnapshot(state);
   }
@@ -594,10 +661,7 @@ export class GoalMode {
 
   // --- Internals ---------------------------------------------------------
 
-  private clearInternal(
-    actor: GoalActor,
-    opts: { emit?: boolean; track?: boolean } = {},
-  ): void {
+  private clearInternal(actor: GoalActor, opts: { emit?: boolean; track?: boolean } = {}): void {
     const state = this.state;
     if (state === undefined) return; // idempotent
     this.persistState(undefined, { silent: opts.emit === false });
@@ -624,19 +688,14 @@ export class GoalMode {
     });
   }
 
-  private appendGoalUpdate(
-    update: Omit<AgentRecordOf<'goal.update'>, 'type' | 'time'>,
-  ): void {
+  private appendGoalUpdate(update: Omit<AgentRecordOf<'goal.update'>, 'type' | 'time'>): void {
     this.agent.records.logRecord({
       type: 'goal.update',
       ...update,
     });
   }
 
-  private trackGoalCreated(
-    actor: GoalActor,
-    replace: boolean,
-  ): void {
+  private trackGoalCreated(actor: GoalActor, replace: boolean): void {
     this.track('goal_created', {
       actor,
       replace,
@@ -647,10 +706,7 @@ export class GoalMode {
     this.agent.telemetry.track(event, properties);
   }
 
-  private applyStatus(
-    state: GoalState,
-    status: GoalStatus,
-  ): void {
+  private applyStatus(state: GoalState, status: GoalStatus): void {
     // Fold the live wall-clock interval into the running total when leaving
     // `active`, and anchor a fresh interval when entering it, so `wallClockMs`
     // stays a correct, persistable total across pause/resume/complete.
@@ -672,7 +728,6 @@ export class GoalMode {
     }
     return state;
   }
-
 
   /**
    * Updates in-memory goal state and (unless `silent`) emits a `goal.updated`
@@ -706,6 +761,7 @@ export class GoalMode {
     return {
       goalId: state.goalId,
       objective: state.objective,
+      purpose: state.purpose,
       completionCriterion: state.completionCriterion,
       status: state.status,
       turnsUsed: state.turnsUsed,
@@ -729,10 +785,7 @@ function liveWallClockMs(state: GoalState, now: number = Date.now()): number {
   return state.wallClockMs;
 }
 
-function computeBudgetReport(
-  state: GoalState,
-  now: number = Date.now(),
-): GoalBudgetReport {
+function computeBudgetReport(state: GoalState, now: number = Date.now()): GoalBudgetReport {
   const limits = state.budgetLimits;
   const tokenBudget = limits.tokenBudget ?? null;
   const turnBudget = limits.turnBudget ?? null;
@@ -741,8 +794,7 @@ function computeBudgetReport(
 
   const tokenBudgetReached = tokenBudget !== null && state.tokensUsed >= tokenBudget;
   const turnBudgetReached = turnBudget !== null && state.turnsUsed >= turnBudget;
-  const wallClockBudgetReached =
-    wallClockBudgetMs !== null && wallClockMs >= wallClockBudgetMs;
+  const wallClockBudgetReached = wallClockBudgetMs !== null && wallClockMs >= wallClockBudgetMs;
 
   return {
     tokenBudget,
@@ -767,10 +819,20 @@ function budgetTelemetryProperties(limits: GoalBudgetLimits): TelemetryPropertie
   };
 }
 
+function normalizeObjective(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed?.length ? trimmed : undefined;
+}
+
 function normalizeCompletionCriterion(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   if (!trimmed?.length) return undefined;
   return trimmed.length > MAX_GOAL_COMPLETION_CRITERION_LENGTH
     ? trimmed.slice(0, MAX_GOAL_COMPLETION_CRITERION_LENGTH)
     : trimmed;
+}
+
+function normalizePurpose(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed?.length ? trimmed : undefined;
 }

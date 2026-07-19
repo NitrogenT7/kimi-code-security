@@ -6,12 +6,11 @@
 
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'pathe';
-import { setTimeout as delay } from 'node:timers/promises';
 import { Readable, type Writable } from 'node:stream';
+import { setTimeout as delay } from 'node:timers/promises';
 
-import type { Kaos, KaosProcess } from '@moonshot-ai/kaos';
 import { createControlledPromise } from '@antfu/utils';
+import type { Kaos, KaosProcess } from '@moonshot-ai/kaos';
 import {
   APIConnectionError,
   APIEmptyResponseError,
@@ -24,32 +23,47 @@ import {
   type ModelCapability,
   type ToolCall,
 } from '@moonshot-ai/kosong';
+import { join } from 'pathe';
 import { describe, expect, it, vi } from 'vitest';
 
-import { HookEngine } from '../../src/session/hooks';
-import { abortError } from '../../src/utils/abort';
 import type { AgentOptions, AgentRecord, AgentRecordPersistence } from '../../src/agent';
 import { ProcessBackgroundTask } from '../../src/agent/background';
 import { InMemoryAgentRecordPersistence } from '../../src/agent/records';
 import { ErrorCodes, KimiError } from '../../src/errors';
 import type { Logger, LogPayload } from '../../src/logging';
+import { HookEngine } from '../../src/session/hooks';
 import type {
   QueuedSubagentRunResult,
   QueuedSubagentTask,
   SessionSubagentHost,
 } from '../../src/session/subagent-host';
+import { abortError } from '../../src/utils/abort';
 import { recordingTelemetry, type TelemetryRecord } from '../fixtures/telemetry';
+import { executeTool } from '../tools/fixtures/execute-tool';
 import { createFakeKaos } from '../tools/fixtures/fake-kaos';
+import { agentTask } from './background/helpers';
 import {
   createCommandKaos,
   testAgent,
   type TestAgentContext,
   type TestAgentOptions,
 } from './harness/agent';
-import { executeTool } from '../tools/fixtures/execute-tool';
-import { agentTask } from './background/helpers';
 
 type GenerateFn = NonNullable<AgentOptions['generate']>;
+
+// Image fixtures must carry real magic bytes: projection sniffs image_url
+// payloads and downgrades impostors to a text notice (see utils/image-payload).
+const PNG_B64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
+const JPEG_B64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString('base64');
+function ftypImageB64(brand: string): string {
+  const buf = Buffer.alloc(16);
+  buf.writeUInt32BE(16, 0);
+  buf.write('ftyp', 4, 'latin1');
+  buf.write(brand, 8, 'latin1');
+  return buf.toString('base64');
+}
+const AVIF_B64 = ftypImageB64('avif');
+const HEIC_B64 = ftypImageB64('heic');
 
 interface CapturedLogEntry {
   readonly level: 'error' | 'warn' | 'info' | 'debug';
@@ -59,10 +73,9 @@ interface CapturedLogEntry {
 
 function captureLogs(): { logger: Logger; entries: CapturedLogEntry[] } {
   const entries: CapturedLogEntry[] = [];
-  const capture =
-    (level: CapturedLogEntry['level']) => (message: string, payload?: LogPayload) => {
-      entries.push({ level, message, payload });
-    };
+  const capture = (level: CapturedLogEntry['level']) => (message: string, payload?: LogPayload) => {
+    entries.push({ level, message, payload });
+  };
   const logger: Logger = {
     error: capture('error'),
     warn: capture('warn'),
@@ -108,7 +121,7 @@ describe('Agent turn flow', () => {
       ctx.agent.context.appendUserMessage(
         [
           { type: 'text', text: `<image path="/workspace/${name}.png">` },
-          { type: 'image_url', imageUrl: { url: `data:image/png;base64,${name}AAA` } },
+          { type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}${name}AAA` } },
           { type: 'text', text: '</image>' },
         ],
         { kind: 'user' },
@@ -127,9 +140,9 @@ describe('Agent turn flow', () => {
     const retryParts = histories[1]!.flatMap((message) => message.content);
     const retryImages = retryParts.filter((part) => part.type === 'image_url');
     expect(retryImages).toHaveLength(2);
-    expect(
-      retryImages.map((part) => (part.type === 'image_url' ? part.imageUrl.url : '')),
-    ).toEqual(['data:image/png;base64,bAAA', 'data:image/png;base64,cAAA']);
+    expect(retryImages.map((part) => (part.type === 'image_url' ? part.imageUrl.url : ''))).toEqual(
+      [`data:image/png;base64,${PNG_B64}bAAA`, `data:image/png;base64,${PNG_B64}cAAA`],
+    );
     const retryText = retryParts
       .filter((part) => part.type === 'text')
       .map((part) => part.text)
@@ -174,8 +187,8 @@ describe('Agent turn flow', () => {
     await ctx.rpc.prompt({
       input: [
         { type: 'text', text: 'what is in these images?' },
-        { type: 'image_url', imageUrl: { url: 'data:image/avif;base64,QUJD' } },
-        { type: 'image_url', imageUrl: { url: 'data:image/jpg;base64,REVG' } },
+        { type: 'image_url', imageUrl: { url: `data:image/avif;base64,${AVIF_B64}` } },
+        { type: 'image_url', imageUrl: { url: `data:image/jpg;base64,${JPEG_B64}` } },
       ],
     });
     await ctx.untilTurnEnd();
@@ -185,7 +198,7 @@ describe('Agent turn flow', () => {
     const sentParts = histories[0]!.flatMap((message) => message.content);
     const sentImages = sentParts.filter((part) => part.type === 'image_url');
     expect(sentImages).toEqual([
-      { type: 'image_url', imageUrl: { url: 'data:image/jpeg;base64,REVG' } },
+      { type: 'image_url', imageUrl: { url: `data:image/jpeg;base64,${JPEG_B64}` } },
     ]);
     const sentText = sentParts
       .filter((part) => part.type === 'text')
@@ -203,7 +216,7 @@ describe('Agent turn flow', () => {
 
     // Steer input enters the history the same way and gets the same gate.
     await ctx.rpc.steer({
-      input: [{ type: 'image_url', imageUrl: { url: 'data:image/heic;base64,QUJD' } }],
+      input: [{ type: 'image_url', imageUrl: { url: `data:image/heic;base64,${HEIC_B64}` } }],
     });
     await ctx.untilTurnEnd();
 
@@ -243,8 +256,7 @@ describe('Agent turn flow', () => {
     const mislabeledParts = histories[2]!.flatMap((message) => message.content);
     expect(
       mislabeledParts.some(
-        (part) =>
-          part.type === 'image_url' && part.imageUrl.url.includes(avif.toString('base64')),
+        (part) => part.type === 'image_url' && part.imageUrl.url.includes(avif.toString('base64')),
       ),
     ).toBe(false);
     expect(
@@ -272,7 +284,7 @@ describe('Agent turn flow', () => {
       ctx.agent.context.appendUserMessage(
         [
           { type: 'text', text: '<image path="/workspace/old.avif">' },
-          { type: 'image_url', imageUrl: { url: 'data:image/avif;base64,QUJD' } },
+          { type: 'image_url', imageUrl: { url: `data:image/avif;base64,${AVIF_B64}` } },
           { type: 'text', text: '</image>' },
         ],
         { kind: 'user' },
@@ -295,7 +307,7 @@ describe('Agent turn flow', () => {
 
     const OVERSIZED_IMAGE = {
       id: 'oversized-image',
-      url: 'data:image/png;base64,T1ZFUlNJWkVE',
+      url: `data:image/png;base64,${PNG_B64}T1ZFUlNJWkVE`,
     } as const;
 
     async function runStickyStripRecovery(recoveryImage: {
@@ -380,8 +392,12 @@ describe('Agent turn flow', () => {
       await ctx.untilTurnEnd();
 
       expect(attempts).toBe(2);
-      expect(histories[0]!.flatMap((m) => m.content).some((p) => p.type === 'image_url')).toBe(true);
-      expect(histories[1]!.flatMap((m) => m.content).some((p) => p.type === 'image_url')).toBe(false);
+      expect(histories[0]!.flatMap((m) => m.content).some((p) => p.type === 'image_url')).toBe(
+        true,
+      );
+      expect(histories[1]!.flatMap((m) => m.content).some((p) => p.type === 'image_url')).toBe(
+        false,
+      );
       // Read-side only: the real history keeps the poisoned image.
       expect(
         ctx.agent.context.history.flatMap((m) => m.content).some((p) => p.type === 'image_url'),
@@ -475,7 +491,7 @@ describe('Agent turn flow', () => {
     it('keeps different media produced after the strip snapshot visible on the next model step', async () => {
       const recoveryImage = {
         id: 'smaller-copy',
-        url: 'data:image/png;base64,U01BTExFUl9DT1BZ',
+        url: `data:image/png;base64,${PNG_B64}`,
       } as const;
 
       const histories = await runStickyStripRecovery(recoveryImage);
@@ -620,7 +636,9 @@ describe('Agent turn flow', () => {
       stderr: Readable.from([]),
       pid: 4242,
       exitCode: null,
-      wait: vi.fn().mockReturnValue(new Promise<number>(() => {})) as unknown as KaosProcess['wait'],
+      wait: vi
+        .fn()
+        .mockReturnValue(new Promise<number>(() => {})) as unknown as KaosProcess['wait'],
       kill: vi.fn().mockResolvedValue(undefined) as unknown as KaosProcess['kill'],
       dispose: vi.fn().mockResolvedValue(undefined) as unknown as KaosProcess['dispose'],
     };
@@ -649,7 +667,11 @@ describe('Agent turn flow', () => {
     const started = records.find((candidate) => candidate.event === 'turn_started');
     expect(started).toEqual({
       event: 'turn_started',
-      properties: expect.objectContaining({ mode: 'agent', provider_type: 'kimi', protocol: 'kimi' }),
+      properties: expect.objectContaining({
+        mode: 'agent',
+        provider_type: 'kimi',
+        protocol: 'kimi',
+      }),
     });
 
     const ended = records.find((candidate) => candidate.event === 'turn_ended');
@@ -962,16 +984,18 @@ describe('Agent turn flow', () => {
   });
 
   it('enters silent swarm mode when the agent calls AgentSwarm', async () => {
-    const runQueued = vi.fn(async <T>(
-      tasks: readonly QueuedSubagentTask<T>[],
-    ): Promise<Array<QueuedSubagentRunResult<T>>> => {
-      return tasks.map((task, index) => ({
-        task,
-        agentId: `agent-${String(index + 1)}`,
-        status: 'completed' as const,
-        result: `result ${String(index + 1)}`,
-      }));
-    });
+    const runQueued = vi.fn(
+      async <T>(
+        tasks: readonly QueuedSubagentTask<T>[],
+      ): Promise<Array<QueuedSubagentRunResult<T>>> => {
+        return tasks.map((task, index) => ({
+          task,
+          agentId: `agent-${String(index + 1)}`,
+          status: 'completed' as const,
+          result: `result ${String(index + 1)}`,
+        }));
+      },
+    );
     const subagentHost = mockSubagentHost({
       runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
     });
@@ -981,10 +1005,7 @@ describe('Agent turn flow', () => {
     ctx.configure({ tools: ['AgentSwarm'] });
     await ctx.rpc.setPermission({ mode: 'yolo' });
 
-    ctx.mockNextResponse(
-      { type: 'text', text: 'I will launch a swarm.' },
-      agentSwarmCall(),
-    );
+    ctx.mockNextResponse({ type: 'text', text: 'I will launch a swarm.' }, agentSwarmCall());
     ctx.mockNextResponse({ type: 'text', text: 'Swarm results reviewed.' });
 
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Use AgentSwarm' }] });
@@ -2154,7 +2175,14 @@ describe('Agent turn flow', () => {
 
   it('attributes api_error to the in-flight request trace on post-headers failures', async () => {
     const records: TelemetryRecord[] = [];
-    const generate: GenerateFn = async (_provider, _system, _tools, _history, _callbacks, options) => {
+    const generate: GenerateFn = async (
+      _provider,
+      _system,
+      _tools,
+      _history,
+      _callbacks,
+      options,
+    ) => {
       // Mirror kosong generate(): the trace id callback fires as soon as the
       // response headers arrive, before the stream body is drained — so a
       // mid-stream failure has a captured trace but none on the error itself.
@@ -2178,7 +2206,14 @@ describe('Agent turn flow', () => {
   it('omits trace_id from api_error when a later step fails before response headers', async () => {
     const records: TelemetryRecord[] = [];
     let calls = 0;
-    const generate: GenerateFn = async (_provider, _system, _tools, _history, _callbacks, options) => {
+    const generate: GenerateFn = async (
+      _provider,
+      _system,
+      _tools,
+      _history,
+      _callbacks,
+      options,
+    ) => {
       calls += 1;
       if (calls === 1) {
         options?.onTraceId?.('trace-step-1');
@@ -2227,7 +2262,14 @@ describe('Agent turn flow', () => {
   it('attributes turn-level telemetry to the failed request trace on error turns', async () => {
     const records: TelemetryRecord[] = [];
     let calls = 0;
-    const generate: GenerateFn = async (_provider, _system, _tools, _history, _callbacks, options) => {
+    const generate: GenerateFn = async (
+      _provider,
+      _system,
+      _tools,
+      _history,
+      _callbacks,
+      options,
+    ) => {
       calls += 1;
       if (calls === 1) {
         // Mirror kosong generate(): the trace id callback fires before the
@@ -2278,7 +2320,14 @@ describe('Agent turn flow', () => {
 
   it('does not reuse the previous step trace when beforeStep fails before a request', async () => {
     const records: TelemetryRecord[] = [];
-    const generate: GenerateFn = async (_provider, _system, _tools, _history, _callbacks, options) => {
+    const generate: GenerateFn = async (
+      _provider,
+      _system,
+      _tools,
+      _history,
+      _callbacks,
+      options,
+    ) => {
       options?.onTraceId?.('trace-step-1');
       return {
         id: 'mock-step-1',
@@ -2316,9 +2365,15 @@ describe('Agent turn flow', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'run' }] });
     await ctx.untilTurnEnd();
 
-    expect(records.find((record) => record.event === 'tool_call')?.properties?.['trace_id']).toBe('trace-step-1');
-    expect(records.find((record) => record.event === 'turn_interrupted')?.properties?.['trace_id']).toBeUndefined();
-    expect(records.find((record) => record.event === 'turn_ended')?.properties?.['trace_id']).toBeUndefined();
+    expect(records.find((record) => record.event === 'tool_call')?.properties?.['trace_id']).toBe(
+      'trace-step-1',
+    );
+    expect(
+      records.find((record) => record.event === 'turn_interrupted')?.properties?.['trace_id'],
+    ).toBeUndefined();
+    expect(
+      records.find((record) => record.event === 'turn_ended')?.properties?.['trace_id'],
+    ).toBeUndefined();
   });
 
   it('attributes turn-level telemetry to the last failed attempt after retries', async () => {
@@ -2326,7 +2381,13 @@ describe('Agent turn flow', () => {
     let calls = 0;
     const generate: GenerateFn = async () => {
       calls += 1;
-      throw new APIStatusError(429, 'rate limited', `req-${String(calls)}`, null, `trace-fail-${String(calls)}`);
+      throw new APIStatusError(
+        429,
+        'rate limited',
+        `req-${String(calls)}`,
+        null,
+        `trace-fail-${String(calls)}`,
+      );
     };
     const ctx = testAgent({
       generate,
@@ -2372,9 +2433,15 @@ describe('Agent turn flow', () => {
     await ctx.untilTurnEnd();
 
     expect(calls).toBe(2);
-    expect(records.find((record) => record.event === 'api_error')?.properties?.['trace_id']).toBeUndefined();
-    expect(records.find((record) => record.event === 'turn_interrupted')?.properties?.['trace_id']).toBeUndefined();
-    expect(records.find((record) => record.event === 'turn_ended')?.properties?.['trace_id']).toBeUndefined();
+    expect(
+      records.find((record) => record.event === 'api_error')?.properties?.['trace_id'],
+    ).toBeUndefined();
+    expect(
+      records.find((record) => record.event === 'turn_interrupted')?.properties?.['trace_id'],
+    ).toBeUndefined();
+    expect(
+      records.find((record) => record.event === 'turn_ended')?.properties?.['trace_id'],
+    ).toBeUndefined();
   });
 
   it('keeps transient retry handling with request-scoped OAuth auth', async () => {
@@ -2578,7 +2645,9 @@ describe('Agent turn flow', () => {
 
     await ctx.rpc.steer({ input: [{ type: 'text', text: 'Also mention the steer.' }] });
     expect(ctx.llmCalls).toHaveLength(1);
-    expect(ctx.newEvents()).toMatchInlineSnapshot(`[wire] turn.steer   { "input": [ { "type": "text", "text": "Also mention the steer." } ], "origin": { "kind": "user" }, "time": "<time>" }`);
+    expect(ctx.newEvents()).toMatchInlineSnapshot(
+      `[wire] turn.steer   { "input": [ { "type": "text", "text": "Also mention the steer." } ], "origin": { "kind": "user" }, "time": "<time>" }`,
+    );
 
     ctx.mockNextResponse({ type: 'text', text: 'Approved, and I saw the steer.' });
     approval.respond({

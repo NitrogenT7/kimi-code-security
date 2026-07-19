@@ -1,9 +1,13 @@
 import type { McpServerConfig } from '#/config/schema';
 
 import { loadMcpServers } from './config-loader';
+import { loadMcpGroups, type McpGroup } from './group-config';
+import { McpGroupRegistry } from './group-registry';
 
 export interface SessionMcpConfig {
   readonly servers: Record<string, McpServerConfig>;
+  readonly groups?: Record<string, McpGroup>;
+  readonly groupRegistry?: McpGroupRegistry;
 }
 
 export interface ResolveSessionMcpConfigInput {
@@ -19,7 +23,17 @@ export async function resolveSessionMcpConfig(
     homeDir: input.homeDir,
   });
   if (Object.keys(servers).length === 0) return undefined;
-  return { servers };
+
+  const groups = await loadMcpGroups({
+    cwd: input.cwd,
+    homeDir: input.homeDir,
+  });
+
+  return {
+    servers,
+    groups,
+    groupRegistry: new McpGroupRegistry(groups, servers),
+  };
 }
 
 export function mergeCallerMcpServers(
@@ -29,10 +43,14 @@ export function mergeCallerMcpServers(
   if (callerServers === undefined || Object.keys(callerServers).length === 0) {
     return base;
   }
+  const mergedServers = {
+    ...base?.servers,
+    ...callerServers,
+  };
+  const groups = base?.groups ?? {};
   return {
-    servers: {
-      ...base?.servers,
-      ...callerServers,
-    },
+    servers: mergedServers,
+    groups,
+    groupRegistry: new McpGroupRegistry(groups, mergedServers),
   };
 }

@@ -32,6 +32,15 @@ export const FLAG_DEFINITIONS = [
     default: false,
     surface: 'core',
   },
+  {
+    id: 'retention_plan_compaction',
+    title: 'Retention-plan compaction',
+    description:
+      'Before full context compaction, ask the model to produce a retention plan so the summary preserves what matters for the current task.',
+    env: 'KIMI_CODE_EXPERIMENTAL_RETENTION_PLAN_COMPACTION',
+    default: false,
+    surface: 'core',
+  },
 ] as const satisfies readonly FlagDefinitionInput[];
 
 /** Literal union of registered flag ids. */

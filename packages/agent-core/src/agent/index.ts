@@ -1,28 +1,32 @@
-import { join } from 'pathe';
 import { randomUUID } from 'node:crypto';
 
-import { normalizeAdditionalDirs } from '../config';
+import type { Kaos } from '@moonshot-ai/kaos';
+import { generate, type ChatProvider } from '@moonshot-ai/kosong';
+import { join } from 'pathe';
+
 import { ErrorCodes, KimiError, makeErrorPayload } from '#/errors';
 import { log } from '#/logging/logger';
 import type { Logger } from '#/logging/types';
-import type { AgentAPI, AgentEvent, KimiConfig, SDKAgentRPC, UsageStatus } from '#/rpc';
-import { generate, type ChatProvider } from '@moonshot-ai/kosong';
-
 import type { EnabledPluginSessionStart, PluginCommandDef } from '#/plugin';
-import { expandCommandArguments } from '../plugin/commands';
-import type { PluginCommandOrigin } from './context';
+import type { AgentAPI, AgentEvent, KimiConfig, SDKAgentRPC, UsageStatus } from '#/rpc';
 
-import type { McpConnectionManager } from '../mcp';
+import { normalizeAdditionalDirs } from '../config';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
-import { ImageLimits } from '../tools/support/image-limits';
+import type { GoalTemplateRegistry } from '../goal-template';
+import type { McpConnectionManager, McpGroupRegistry } from '../mcp';
+import { expandCommandArguments } from '../plugin/commands';
 import {
   prepareSystemPromptContext,
   type PreparedSystemPromptContext,
   type ResolvedAgentProfile,
 } from '../profile';
+import { HookEngine } from '../session/hooks';
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionSubagentHost } from '../session/subagent-host';
 import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
+import { ImageLimits } from '../tools/support/image-limits';
+import type { ToolServices } from '../tools/support/services';
+import { resolveCompletionBudget } from '../utils/completion-budget';
 import type { PromisableMethods } from '../utils/types';
 import { BackgroundManager, BackgroundTaskPersistence } from './background';
 import {
@@ -31,12 +35,14 @@ import {
   type CompactionStrategy,
   type MicroCompactionConfig,
 } from './compaction';
-import { CronManager } from './cron';
 import { ConfigState } from './config';
+import type { PluginCommandOrigin } from './context';
 import { ContextMemory } from './context';
+import { CronManager } from './cron';
 import { GoalMode } from './goal';
-import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
+import { LlmRequestLogger, splitGenerateOptions } from './llm-request-logger';
+import { LlmRequestRecorder } from './llm-request-recorder';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
 import {
@@ -55,11 +61,6 @@ import { ToolManager } from './tool/index';
 import { TurnFlow } from './turn';
 import { KosongLLM } from './turn/kosong-llm';
 import { UsageRecorder } from './usage';
-import { LlmRequestLogger, splitGenerateOptions } from './llm-request-logger';
-import { LlmRequestRecorder } from './llm-request-recorder';
-import { resolveCompletionBudget } from '../utils/completion-budget';
-import type { Kaos } from '@moonshot-ai/kaos';
-import type { ToolServices } from '../tools/support/services';
 
 export type { AgentRecord, AgentRecordPersistence } from './records';
 export type { SwarmModeTrigger } from './swarm';
@@ -89,7 +90,9 @@ export interface AgentOptions {
   readonly modelProvider?: ModelProvider | undefined;
   readonly subagentHost?: SessionSubagentHost | undefined;
   readonly skills?: SkillRegistry;
+  readonly goalTemplates?: GoalTemplateRegistry;
   readonly mcp?: McpConnectionManager;
+  readonly mcpGroupRegistry?: McpGroupRegistry;
   readonly hookEngine?: HookEngine;
   readonly permission?: PermissionManagerOptions | undefined;
   readonly log?: Logger;
@@ -123,6 +126,7 @@ export class Agent {
   readonly modelProvider?: ModelProvider;
   readonly subagentHost?: SessionSubagentHost;
   readonly mcp?: McpConnectionManager;
+  readonly mcpGroupRegistry?: McpGroupRegistry;
   readonly hooks?: HookEngine;
   readonly log: Logger;
   readonly telemetry: TelemetryClient;
@@ -144,6 +148,9 @@ export class Agent {
   readonly swarmMode: SwarmMode;
   readonly usage: UsageRecorder;
   readonly skills: SkillManager | null;
+  readonly goalTemplates: GoalTemplateRegistry | null;
+  allowedSkillPrefixes: string[] | null = null;
+  mcpGroupMode: string | null = null;
   readonly tools: ToolManager;
   readonly background: BackgroundManager;
   readonly cron: CronManager | null;
@@ -171,7 +178,9 @@ export class Agent {
     readonly effort: string;
     readonly knownEfforts: string | undefined;
   }> = [];
-  private readonly systemPromptContextProvider?: (() => Promise<PreparedSystemPromptContext>) | undefined;
+  private readonly systemPromptContextProvider?:
+    | (() => Promise<PreparedSystemPromptContext>)
+    | undefined;
 
   constructor(options: AgentOptions) {
     this.type = options.type ?? 'main';
@@ -187,6 +196,7 @@ export class Agent {
     this.modelProvider = options.modelProvider;
     this.subagentHost = options.subagentHost;
     this.mcp = options.mcp;
+    this.mcpGroupRegistry = options.mcpGroupRegistry;
     this.hooks = options.hookEngine;
     this.log = options.log ?? log;
     this.telemetry = options.telemetry ?? noopTelemetryClient;
@@ -223,6 +233,7 @@ export class Agent {
     this.swarmMode = new SwarmMode(this);
     this.usage = new UsageRecorder(this);
     this.skills = options.skills ? new SkillManager(this, options.skills) : null;
+    this.goalTemplates = options.goalTemplates ?? null;
     this.tools = new ToolManager(this);
     this.background = new BackgroundManager(
       this,
@@ -456,11 +467,12 @@ export class Agent {
    */
   async refreshSystemPrompt(): Promise<void> {
     if (this.activeProfile === undefined) return;
-    const context = this.systemPromptContextProvider === undefined
-      ? await prepareSystemPromptContext(this.kaos, this.brandHome, {
-          additionalDirs: this.additionalDirs,
-        })
-      : await this.systemPromptContextProvider();
+    const context =
+      this.systemPromptContextProvider === undefined
+        ? await prepareSystemPromptContext(this.kaos, this.brandHome, {
+            additionalDirs: this.additionalDirs,
+          })
+        : await this.systemPromptContextProvider();
     this.updateSystemPromptFromProfile(this.activeProfile, context);
   }
 

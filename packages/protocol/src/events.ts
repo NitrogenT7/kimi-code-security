@@ -244,6 +244,8 @@ export type KimiErrorCode =
   | 'goal.status_invalid'
   | 'goal.metadata_reserved'
   | 'goal.not_resumable'
+  | 'goal.not_rewritable'
+  | 'goal.template_not_found'
   | 'goal.unsupported_agent'
   | 'model.not_configured'
   | 'model.config_invalid'
@@ -879,7 +881,7 @@ export interface McpServerStatusEvent {
 export interface McpServerStatusPayload {
   readonly name: string;
   readonly transport: 'stdio' | 'http' | 'sse';
-  readonly status: 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
+  readonly status: 'registered' | 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
   readonly toolCount: number;
   readonly error?: string;
 }
@@ -1160,6 +1162,8 @@ export const kimiErrorCodeSchema = z.enum([
   'goal.status_invalid',
   'goal.metadata_reserved',
   'goal.not_resumable',
+  'goal.not_rewritable',
+  'goal.template_not_found',
   'goal.unsupported_agent',
   'model.not_configured',
   'model.config_invalid',
@@ -1720,7 +1724,7 @@ export const toolListUpdatedEventSchema = z.object({
 export const mcpServerStatusPayloadSchema = z.object({
   name: z.string(),
   transport: z.enum(['stdio', 'http']),
-  status: z.enum(['pending', 'connected', 'failed', 'disabled', 'needs-auth']),
+  status: z.enum(['registered', 'pending', 'connected', 'failed', 'disabled', 'needs-auth']),
   toolCount: z.number(),
   error: z.string().optional(),
 }) satisfies z.ZodType<McpServerStatusPayload>;

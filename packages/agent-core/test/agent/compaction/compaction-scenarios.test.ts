@@ -16,12 +16,15 @@ import type { ContentPart, Message } from '@moonshot-ai/kosong';
 import { describe, expect, it } from 'vitest';
 
 import type { AgentOptions, AgentRecord } from '../../../src/agent';
-import { COMPACTION_ELISION_VARIANT, COMPACTION_SUMMARY_PREFIX } from '../../../src/agent/compaction';
+import {
+  COMPACTION_ELISION_VARIANT,
+  COMPACTION_SUMMARY_PREFIX,
+} from '../../../src/agent/compaction';
+import type { ContextMessage } from '../../../src/agent/context';
 import {
   AGENT_WIRE_PROTOCOL_VERSION,
   InMemoryAgentRecordPersistence,
 } from '../../../src/agent/records';
-import type { ContextMessage } from '../../../src/agent/context';
 import { FLAG_DEFINITIONS, FlagResolver } from '../../../src/flags';
 import { testAgent, type TestAgentContext } from '../harness/agent';
 
@@ -59,6 +62,9 @@ function summaryMessageText(ctx: TestAgentContext): string {
   );
   return summary?.content.map((part) => (part.type === 'text' ? part.text : '')).join('') ?? '';
 }
+
+// Real PNG magic bytes: projection sniffs image payloads and downgrades impostors.
+const PNG_B64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
 
 describe('compaction — guard tests', () => {
   it('repeated compaction folds the prior summary into the new one, never stacking two summaries', async () => {
@@ -420,7 +426,7 @@ describe('compaction — probe tests (high-risk scenarios)', () => {
     // Oldest user message: an image + long text that will overflow the budget.
     ctx.agent.context.appendUserMessage(
       [
-        { type: 'image_url', imageUrl: { url: 'data:image/png;base64,AAAA' } },
+        { type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}` } },
         { type: 'text', text: 'x'.repeat(120_000) }, // ~30k tokens of text
       ],
       { kind: 'user' },
@@ -449,7 +455,7 @@ describe('compaction — summarizer request media handling', () => {
     ctx.agent.context.appendUserMessage(
       [
         { type: 'text', text: '<image path="/workspace/shot.png">' },
-        { type: 'image_url', imageUrl: { url: 'data:image/png;base64,AAAA' } },
+        { type: 'image_url', imageUrl: { url: `data:image/png;base64,${PNG_B64}` } },
         { type: 'text', text: '</image>' },
       ],
       { kind: 'user' },
@@ -521,7 +527,8 @@ describe('compaction — head/tail user-message retention', () => {
 
     const markers = ctx.agent.context.history.filter(
       (message) =>
-        message.origin?.kind === 'injection' && message.origin.variant === COMPACTION_ELISION_VARIANT,
+        message.origin?.kind === 'injection' &&
+        message.origin.variant === COMPACTION_ELISION_VARIANT,
     );
     expect(markers).toHaveLength(1);
     const summaries = ctx.agent.context.history.filter(

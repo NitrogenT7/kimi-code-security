@@ -15,7 +15,6 @@ import {
 } from '@moonshot-ai/kosong';
 import { basename } from 'pathe';
 
-import type { Agent } from '..';
 import {
   ErrorCodes,
   type KimiErrorPayload,
@@ -23,6 +22,8 @@ import {
   makeErrorPayload,
   toKimiErrorPayload,
 } from '#/errors';
+
+import type { Agent } from '..';
 import { isAbortError, isMaxStepsExceededError } from '../../loop/errors';
 import {
   createLoopEventDispatcher,
@@ -35,6 +36,7 @@ import {
   type LoopTurnStopReason,
 } from '../../loop/index';
 import type { AgentEvent, TurnEndedEvent, TurnEndReason } from '../../rpc';
+import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../../session/hooks';
 import type { TelemetryPropertyValue } from '../../telemetry';
 import { gateImageFormatParts } from '../../tools/support/image-compress';
 import { abortable, isUserCancellation, userCancellationReason } from '../../utils/abort';
@@ -44,7 +46,6 @@ import {
   stripMediaPartsBySnapshot,
   type MediaStripSnapshot,
 } from '../context/projector';
-import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../../session/hooks';
 import { canonicalTelemetryArgs, isPlainRecord } from './canonical-args';
 import { ToolCallDeduplicator } from './tool-dedup';
 import { budgetToolResultForModel } from './tool-result-budget';
@@ -75,7 +76,10 @@ interface PromptHookEndResult {
 const LLM_NOT_SET_MESSAGE = 'LLM not set, send "/login" to login';
 
 /** Origin tag for the synthetic "continue" prompt that drives each goal turn. */
-const GOAL_CONTINUATION_ORIGIN: PromptOrigin = { kind: 'system_trigger', name: 'goal_continuation' };
+const GOAL_CONTINUATION_ORIGIN: PromptOrigin = {
+  kind: 'system_trigger',
+  name: 'goal_continuation',
+};
 const GOAL_RATE_LIMIT_PAUSE_REASON = 'Paused after provider rate limit';
 const GOAL_PROVIDER_CONNECTION_PAUSE_PREFIX = 'Paused after provider connection error';
 const GOAL_PROVIDER_AUTH_PAUSE_PREFIX = 'Paused after provider authentication error';
@@ -91,7 +95,8 @@ const GOAL_PROVIDER_FILTERED_PAUSE_REASON = 'Paused after provider safety policy
  */
 const GOAL_CONTINUATION_PROMPT = [
   'Continue working toward the active goal.',
-  'Keep the self-audit brief. Do not explore unrelated interpretations once the goal can be',
+  'Keep the self-audit brief. Before acting, re-read the four elements: Purpose, Key Tasks,',
+  'End State, and Constraints. Do not explore unrelated interpretations once the goal can be',
   'decided. If the objective is simple, already answered, impossible, unsafe, or contradictory,',
   'do not run another goal turn. Explain briefly if useful, then call UpdateGoal with `complete`',
   'or `blocked` in the same turn. Otherwise, weigh the objective and any completion criteria',
@@ -532,7 +537,11 @@ export class TurnFlow {
     const telemetryMode = this.telemetryMode();
     this.telemetryModeByTurn.set(turnId, telemetryMode);
     this.currentStepByTurn.set(turnId, 0);
-    this.agent.telemetry.track('turn_started', { turn_id: turnId, mode: telemetryMode, ...this.requestProtocolProps() });
+    this.agent.telemetry.track('turn_started', {
+      turn_id: turnId,
+      mode: telemetryMode,
+      ...this.requestProtocolProps(),
+    });
     this.agent.fullCompaction.resetForTurn();
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
@@ -546,7 +555,13 @@ export class TurnFlow {
     // sits just past the turn.ended boundary that consumers watch for.
     let errorEvent: AgentEvent | undefined;
     try {
-      const promptHookEnded = await this.applyUserPromptHook(turnId, input, origin, signal, startedAt);
+      const promptHookEnded = await this.applyUserPromptHook(
+        turnId,
+        input,
+        origin,
+        signal,
+        startedAt,
+      );
       if (promptHookEnded !== undefined) {
         ended = promptHookEnded.event;
         blockedByUserPromptHook = promptHookEnded.blocked;
@@ -575,14 +590,25 @@ export class TurnFlow {
       }
     } catch (error) {
       if (isAbortError(error)) {
-        ended = { type: 'turn.ended', turnId, reason: 'cancelled', durationMs: Date.now() - startedAt };
+        ended = {
+          type: 'turn.ended',
+          turnId,
+          reason: 'cancelled',
+          durationMs: Date.now() - startedAt,
+        };
       } else {
         const summary = summarizeTurnError(error, turnId);
         void this.agent.hooks?.fireAndForgetTrigger('StopFailure', {
           matcherValue: summary.name,
           inputData: { errorType: summary.name, errorMessage: summary.message },
         });
-        ended = { type: 'turn.ended', turnId, reason: 'failed', error: summary, durationMs: Date.now() - startedAt };
+        ended = {
+          type: 'turn.ended',
+          turnId,
+          reason: 'failed',
+          error: summary,
+          durationMs: Date.now() - startedAt,
+        };
         errorEvent = { type: 'error', ...summary };
         if (this.shouldTrackApiError(turnId)) {
           const classification = classifyApiError(error, summary);
@@ -681,7 +707,10 @@ export class TurnFlow {
       // or an abort that bypasses the step loop). `ended.reason` maps onto the
       // same interrupt-reason taxonomy the loop-event path uses; for a
       // `cancelled` end the signal's reason decides user_cancelled vs aborted.
-      const interruptReason = telemetryInterruptReason(ended.reason, isUserCancellation(signal.reason));
+      const interruptReason = telemetryInterruptReason(
+        ended.reason,
+        isUserCancellation(signal.reason),
+      );
       this.trackTurnInterrupted(
         turnId,
         this.currentStepByTurn.get(turnId) ?? this.currentStep,
@@ -732,7 +761,12 @@ export class TurnFlow {
       // The terminal turn.ended is emitted by runOneTurn (synchronously with the
       // activeTurn clear), not here, so the session is idle the moment it fires.
       return {
-        event: { type: 'turn.ended', turnId, reason: 'blocked', durationMs: Date.now() - startedAt },
+        event: {
+          type: 'turn.ended',
+          turnId,
+          reason: 'blocked',
+          durationMs: Date.now() - startedAt,
+        },
         blocked: true,
       };
     }
@@ -861,10 +895,9 @@ export class TurnFlow {
                   .list(true)
                   .some((task) => task.kind === 'agent');
                 if (hasActiveAgentTask) {
-                  await this.agent.background.waitForActiveTasks(
-                    (task) => task.kind === 'agent',
-                    { signal },
-                  );
+                  await this.agent.background.waitForActiveTasks((task) => task.kind === 'agent', {
+                    signal,
+                  });
                   this.flushSteerBuffer();
                   return { continue: true };
                 }
@@ -873,10 +906,7 @@ export class TurnFlow {
               // 2. After UpdateGoal marks a goal terminal, its tool result carries
               //    the final-message reminder. Let the model read that result and
               //    produce one user-facing outcome message before the turn ends.
-              if (
-                !goalOutcomeMessageContinuationUsed &&
-                goalOutcomeToolResultPending
-              ) {
+              if (!goalOutcomeMessageContinuationUsed && goalOutcomeToolResultPending) {
                 goalOutcomeMessageContinuationUsed = true;
                 goalOutcomeToolResultPending = false;
                 if (!hasStepBudgetRemaining(loopControl?.maxStepsPerTurn, ctx.stepNumber)) {
@@ -895,13 +925,10 @@ export class TurnFlow {
                 signal.throwIfAborted();
                 if (stopBlock !== undefined) {
                   stopHookContinuationUsed = true;
-                  this.agent.context.appendUserMessage(
-                    [{ type: 'text', text: stopBlock.reason }],
-                    {
-                      kind: 'system_trigger',
-                      name: 'stop_hook',
-                    },
-                  );
+                  this.agent.context.appendUserMessage([{ type: 'text', text: stopBlock.reason }], {
+                    kind: 'system_trigger',
+                    name: 'stop_hook',
+                  });
                   return { continue: true };
                 }
               }
@@ -912,11 +939,7 @@ export class TurnFlow {
               return { continue: false };
             },
             prepareToolExecution: async (ctx) => {
-              const cached = deduper.checkSameStep(
-                ctx.toolCall.id,
-                ctx.toolCall.name,
-                ctx.args,
-              );
+              const cached = deduper.checkSameStep(ctx.toolCall.id, ctx.toolCall.name, ctx.args);
               if (cached !== null) return { syntheticResult: cached };
               return undefined;
             },

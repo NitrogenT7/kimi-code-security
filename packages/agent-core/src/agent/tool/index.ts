@@ -3,22 +3,20 @@ import type { ChatProvider, Tool } from '@moonshot-ai/kosong';
 import picomatch from 'picomatch';
 
 import type { Agent } from '..';
-import {
-  collectLoadedDynamicToolNames,
-} from '../context/dynamic-tools';
 import { makeErrorPayload } from '../../errors';
 import type { ExecutableTool, ToolUpdate } from '../../loop';
-import { createMcpAuthTool } from '../../mcp/auth-tool';
 import type { McpConnectionManager, McpServerEntry } from '../../mcp';
+import { createMcpAuthTool } from '../../mcp/auth-tool';
 import { mcpResultToExecutableOutput } from '../../mcp/output';
 import { isMcpToolName, qualifyMcpToolName } from '../../mcp/tool-naming';
 import type { MCPClient, MCPToolDefinition } from '../../mcp/types';
 import { DEFAULT_AGENT_PROFILES } from '../../profile';
 import { resolveSubagentTimeoutMs } from '../../session/subagent-host';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
-import { fingerprint } from '../llm-request-logger';
 import * as b from '../../tools/builtin';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
+import { collectLoadedDynamicToolNames } from '../context/dynamic-tools';
+import { fingerprint } from '../llm-request-logger';
 import type {
   BuiltinTool,
   McpServerRegistrationResult,
@@ -147,10 +145,12 @@ export class ToolManager {
     const controller = new AbortController();
     if (commandId !== undefined) this.shellCommandControllers.set(commandId, controller);
     try {
-      const execution = await bash.resolveExecution({ command, timeout: SHELL_FOREGROUND_TIMEOUT_S });
+      const execution = await bash.resolveExecution({
+        command,
+        timeout: SHELL_FOREGROUND_TIMEOUT_S,
+      });
       if (!('execute' in execution)) {
-        const output =
-          typeof execution.output === 'string' ? execution.output : 'Command failed.';
+        const output = typeof execution.output === 'string' ? execution.output : 'Command failed.';
         this.agent.context.appendBashOutput('', output);
         return { stdout: '', stderr: output, isError: true };
       }
@@ -745,8 +745,7 @@ export class ToolManager {
         this.agent.cron && new b.CronCreateTool(this.agent.cron),
         this.agent.cron && new b.CronListTool(this.agent.cron),
         this.agent.cron && new b.CronDeleteTool(this.agent.cron),
-        this.agent.skills?.registry.listInvocableSkills().length &&
-          new b.SkillTool(this.agent),
+        this.agent.skills?.registry.listInvocableSkills().length && new b.SkillTool(this.agent),
         this.agent.subagentHost &&
           new b.AgentTool(
             this.agent.subagentHost,
@@ -755,7 +754,9 @@ export class ToolManager {
             {
               allowBackground,
               log: this.agent.log,
-              subagentTimeoutMs: resolveSubagentTimeoutMs(this.agent.kimiConfig?.subagent?.timeoutMs),
+              subagentTimeoutMs: resolveSubagentTimeoutMs(
+                this.agent.kimiConfig?.subagent?.timeoutMs,
+              ),
             },
           ),
         this.agent.subagentHost &&
@@ -766,6 +767,11 @@ export class ToolManager {
           ),
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
+        // MCPManager is main-agent-only: subagents should not load or manage MCP groups
+        // on their own; the main agent loads groups before dispatching work.
+        this.agent.type === 'main' &&
+          (this.agent.mcp !== undefined || this.agent.mcpGroupRegistry !== undefined) &&
+          new b.MCPManagerTool(this.agent),
       ]
         .filter((tool) => !!tool)
         .map((tool) => [tool.name, tool] as const),
@@ -858,9 +864,7 @@ export class ToolManager {
       }
     }
     const disclosure = this.progressiveDisclosure;
-    const enabledMcpNames = [...this.mcpTools.keys()].filter((name) =>
-      this.isMcpToolEnabled(name),
-    );
+    const enabledMcpNames = [...this.mcpTools.keys()].filter((name) => this.isMcpToolEnabled(name));
     // Progressive disclosure splits "the model can see this tool" from "the
     // core can execute it": the top-level request view stays the immutable
     // core set + select_tools, while loaded MCP tools join the executable
@@ -873,23 +877,27 @@ export class ToolManager {
         ? enabledMcpNames
         : enabledMcpNames.filter((name) => loadedSet.has(name));
     const selectToolsName = disclosure ? [b.SELECT_TOOLS_TOOL_NAME] : [];
-    return uniq([...this.enabledTools, ...selectToolsName, ...mcpNames])
-      .toSorted((a, b) => a.localeCompare(b))
-      // select_tools is exposed exclusively through the disclosure gate — a
-      // profile or setActiveTools listing the name explicitly must not
-      // surface it in inline mode (it was silently dropped back when
-      // registration itself was gated; keep that contract).
-      .filter((name) => disclosure || name !== b.SELECT_TOOLS_TOOL_NAME)
-      .map((name) => {
-        const tool =
-          this.userTools.get(name) ??
-          this.mcpTools.get(name)?.tool ??
-          this.builtinTools.get(name);
-        if (tool === undefined) return undefined;
-        // MCP entries are plain object literals, so the spread keeps the
-        // execution closure intact while adding the wire-strip marker.
-        return disclosure && this.mcpTools.has(name) ? { ...tool, deferred: true as const } : tool;
-      })
-      .filter((tool) => !!tool);
+    return (
+      uniq([...this.enabledTools, ...selectToolsName, ...mcpNames])
+        .toSorted((a, b) => a.localeCompare(b))
+        // select_tools is exposed exclusively through the disclosure gate — a
+        // profile or setActiveTools listing the name explicitly must not
+        // surface it in inline mode (it was silently dropped back when
+        // registration itself was gated; keep that contract).
+        .filter((name) => disclosure || name !== b.SELECT_TOOLS_TOOL_NAME)
+        .map((name) => {
+          const tool =
+            this.userTools.get(name) ??
+            this.mcpTools.get(name)?.tool ??
+            this.builtinTools.get(name);
+          if (tool === undefined) return undefined;
+          // MCP entries are plain object literals, so the spread keeps the
+          // execution closure intact while adding the wire-strip marker.
+          return disclosure && this.mcpTools.has(name)
+            ? { ...tool, deferred: true as const }
+            : tool;
+        })
+        .filter((tool) => !!tool)
+    );
   }
 }

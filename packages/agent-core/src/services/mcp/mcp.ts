@@ -32,13 +32,10 @@
  * name-as-id at the wire boundary. Both are 1:1 within a daemon process.
  */
 
+import type { McpServer, McpServerStatus, McpServerTransport } from '@moonshot-ai/protocol';
+
 import { createDecorator } from '../../di';
 import type { McpServerInfo } from '../../rpc';
-import type {
-  McpServer,
-  McpServerStatus,
-  McpServerTransport,
-} from '@moonshot-ai/protocol';
 
 // ---------------------------------------------------------------------------
 // Adapter helpers (MCP side of former adapter/tool-adapter.ts)
@@ -52,6 +49,7 @@ function mapMcpStatus(s: McpServerInfo['status']): McpServerStatus {
       return 'connecting';
     case 'failed':
       return 'error';
+    case 'registered':
     case 'disabled':
       return 'disconnected';
     case 'needs-auth':

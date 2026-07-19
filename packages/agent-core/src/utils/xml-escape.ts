@@ -16,3 +16,12 @@ export function escapeXmlAttr(input: string): string {
 export function escapeXmlTags(input: string): string {
   return input.replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
+
+/** Reverse {@link escapeXml} so replay can recover the original shell output. */
+export function unescapeXml(input: string): string {
+  return input
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&amp;', '&');
+}

@@ -1,5 +1,6 @@
 export * from './agent';
 export * from './session';
+export * from './goal-template';
 export * from './rpc';
 export * from './config';
 export * from './flags';
@@ -132,10 +133,7 @@ export {
   selectCompactionUserMessages,
   selectRecentUserMessages,
 } from './agent/compaction';
-export type {
-  PermissionApprovalResultRecord,
-  PermissionMode,
-} from './agent/permission';
+export type { PermissionApprovalResultRecord, PermissionMode } from './agent/permission';
 export type { UsageRecordScope } from './agent/usage';
 export type { ToolStoreUpdate } from './tools/store';
 export type {
