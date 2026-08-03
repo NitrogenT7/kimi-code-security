@@ -60,6 +60,9 @@ describe('server-v2 /api/v1 tools + mcp', () => {
       resolve: () => {
         throw new Error('modelResolver.resolve not exercised in this test');
       },
+      resolveWithProvider: () => {
+        throw new Error('modelResolver.resolveWithProvider not exercised in this test');
+      },
       findByName: () => [],
     };
     server = await startServer({

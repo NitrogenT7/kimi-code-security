@@ -31,7 +31,7 @@ import { IOAuthService } from '#/app/auth/auth';
 import { IConfigService } from '#/app/config/config';
 import { ErrorCodes, Error2 } from '#/errors';
 import { IEventService } from '#/app/event/event';
-import { IModelService, MODELS_SECTION, type ModelAlias } from '#/app/model/model';
+import { IModelService, MODELS_SECTION, primaryProviderName, type ModelAlias } from '#/app/model/model';
 import { IHostRequestHeaders } from '#/app/model/hostRequestHeaders';
 import {
   IProviderService,
@@ -109,7 +109,7 @@ export class ModelCatalogService implements IModelCatalogService {
 
   private providerTypeOf(alias: ModelAlias): ProviderType | undefined {
     const providerId =
-      alias.providerId ?? alias.provider ?? this.config.get<string>('defaultProvider');
+      alias.providerId ?? primaryProviderName(alias) ?? this.config.get<string>('defaultProvider');
     return this.providerService.get(providerId ?? '')?.type ?? alias.protocol;
   }
 
@@ -183,7 +183,7 @@ export class ModelCatalogService implements IModelCatalogService {
     );
     const models = (current.models ?? {}) as Record<string, ModelAlias>;
     const restModels = Object.fromEntries(
-      Object.entries(models).filter(([, alias]) => alias.provider !== providerId),
+      Object.entries(models).filter(([, alias]) => primaryProviderName(alias) !== providerId),
     );
     await this.config.replace(PROVIDERS_SECTION, restProviders);
     await this.config.replace(MODELS_SECTION, restModels);

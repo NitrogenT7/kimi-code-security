@@ -1,5 +1,12 @@
 # @moonshot-ai/agent-core-v2
 
+## 0.2.0
+
+### Minor Changes
+
+- Port provider failover pools to the v2 engine: a model alias with `provider = ["a", "b"]` now resolves to a failover model that cools down rate-limited endpoints session-wide and recovers them with the hourly 1-token probe, tuned through the same `[pool]` config section as the v1 engine.
+- 3efb987: Add security-research capabilities to the v2 engine: MCP groups with lazy loading, the MCPManager tool, and group-bound security subagent roles; four-element goals with templates; a question-driven TodoList with an InvestigationBoard; impostor image payload downgrading; and retention-plan compaction behind a flag.
+
 ## 0.1.1
 
 ### Patch Changes

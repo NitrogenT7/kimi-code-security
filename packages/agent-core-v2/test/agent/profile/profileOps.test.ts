@@ -23,6 +23,7 @@ import { InMemoryStorageService } from '#/persistence/backends/memory/inMemorySt
 import { IAppendLogStore } from '#/persistence/interface/appendLogStore';
 import { IFileSystemStorageService } from '#/persistence/interface/storage';
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
+import { ISessionProviderPoolService } from '#/session/providerPool/providerPool';
 import { ISessionSkillCatalog } from '#/session/sessionSkillCatalog/skillCatalog';
 import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
 import { IWireService } from '#/wire/wire';
@@ -59,6 +60,14 @@ function createModelResolverStub(): IModelResolver {
 
 function stubUnused<T>(): T {
   return { _serviceBrand: undefined } as unknown as T;
+}
+
+function createProviderPoolStub(): ISessionProviderPoolService {
+  return {
+    _serviceBrand: undefined,
+    health: undefined,
+    resolvePooledModel: () => undefined,
+  } as unknown as ISessionProviderPoolService;
 }
 
 function createSessionContextStub(): ISessionContext {
@@ -101,6 +110,7 @@ function buildHost(key: string): {
   host.stub(IHostFileSystem, stubUnused());
   host.stub(IBootstrapService, stubUnused());
   host.stub(ISessionContext, createSessionContextStub());
+  host.stub(ISessionProviderPoolService, createProviderPoolStub());
   host.stub(ISessionWorkspaceContext, stubUnused());
   host.stub(IAgentProfileCatalogService, stubUnused());
   host.stub(ISessionSkillCatalog, stubUnused());
@@ -348,6 +358,9 @@ describe('AgentProfileService (wire-backed config.update)', () => {
     modelResolver = {
       _serviceBrand: undefined,
       resolve: () => createRecordingModel(generationKwargs, thinkingEfforts),
+      resolveWithProvider: () => {
+        throw new Error('not exercised');
+      },
       findByName: () => [],
     };
     const host = buildHost('profile-thinking-keep');
@@ -374,6 +387,9 @@ describe('AgentProfileService (wire-backed config.update)', () => {
     modelResolver = {
       _serviceBrand: undefined,
       resolve: () => createRecordingModel(generationKwargs, thinkingEfforts),
+      resolveWithProvider: () => {
+        throw new Error('not exercised');
+      },
       findByName: () => [],
     };
     const host = buildHost('profile-thinking-effort-resolved');
@@ -399,6 +415,9 @@ describe('AgentProfileService (wire-backed config.update)', () => {
     modelResolver = {
       _serviceBrand: undefined,
       resolve: () => createRecordingModel(generationKwargs, thinkingEfforts),
+      resolveWithProvider: () => {
+        throw new Error('not exercised');
+      },
       findByName: () => [],
     };
     const host = buildHost('profile-thinking-effort-force');
@@ -429,6 +448,9 @@ describe('AgentProfileService (wire-backed config.update)', () => {
         alias === 'kimi-code'
           ? createRecordingModel([], kimiThinkingEfforts)
           : createRecordingModel([], otherThinkingEfforts, [], 'anthropic'),
+      resolveWithProvider: () => {
+        throw new Error('not exercised');
+      },
       findByName: () => [],
     };
     const host = buildHost('profile-thinking-effort-force-switch');
@@ -463,6 +485,9 @@ describe('AgentProfileService (wire-backed config.update)', () => {
           'anthropic',
           thinkingKeeps,
         ),
+      resolveWithProvider: () => {
+        throw new Error('not exercised');
+      },
       findByName: () => [],
     };
     const host = buildHost('profile-thinking-keep-anthropic');
@@ -495,6 +520,9 @@ describe('AgentProfileService (wire-backed config.update)', () => {
           thinkingKeeps,
           'kimi',
         ),
+      resolveWithProvider: () => {
+        throw new Error('not exercised');
+      },
       findByName: () => [],
     };
     const host = buildHost('profile-thinking-effort-force-anthropic');
@@ -517,6 +545,9 @@ describe('AgentProfileService (wire-backed config.update)', () => {
     modelResolver = {
       _serviceBrand: undefined,
       resolve: () => createRecordingModel(generationKwargs, thinkingEfforts),
+      resolveWithProvider: () => {
+        throw new Error('not exercised');
+      },
       findByName: () => [],
     };
     const host = buildHost('profile-thinking-keep-default');
@@ -536,6 +567,9 @@ describe('AgentProfileService (wire-backed config.update)', () => {
     modelResolver = {
       _serviceBrand: undefined,
       resolve: () => createRecordingModel(generationKwargs, thinkingEfforts),
+      resolveWithProvider: () => {
+        throw new Error('not exercised');
+      },
       findByName: () => [],
     };
     const host = buildHost('profile-thinking-keep-env-off');
@@ -563,6 +597,9 @@ describe('AgentProfileService (wire-backed config.update)', () => {
           'anthropic',
           thinkingKeeps,
         ),
+      resolveWithProvider: () => {
+        throw new Error('not exercised');
+      },
       findByName: () => [],
     };
     const host = buildHost('profile-thinking-keep-anthropic-config');
@@ -583,6 +620,9 @@ describe('AgentProfileService (wire-backed config.update)', () => {
     modelResolver = {
       _serviceBrand: undefined,
       resolve: () => createRecordingModel(generationKwargs, thinkingEfforts),
+      resolveWithProvider: () => {
+        throw new Error('not exercised');
+      },
       findByName: () => [],
     };
     const host = buildHost('profile-thinking-keep-off');
@@ -604,6 +644,9 @@ describe('AgentProfileService (wire-backed config.update)', () => {
     modelResolver = {
       _serviceBrand: undefined,
       resolve: () => createRecordingModel(generationKwargs, thinkingEfforts),
+      resolveWithProvider: () => {
+        throw new Error('not exercised');
+      },
       findByName: () => [],
     };
     const host = buildHost('profile-prompt-cache-key');
@@ -626,6 +669,9 @@ describe('AgentProfileService (wire-backed config.update)', () => {
       _serviceBrand: undefined,
       resolve: () =>
         createRecordingModel(generationKwargs, thinkingEfforts, providerOptions, 'anthropic'),
+      resolveWithProvider: () => {
+        throw new Error('not exercised');
+      },
       findByName: () => [],
     };
     const host = buildHost('profile-prompt-cache-key-anthropic');

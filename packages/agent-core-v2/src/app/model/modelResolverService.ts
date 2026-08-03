@@ -34,7 +34,7 @@ import { type ProtocolAdapterRegistry } from '#/app/protocol/protocolAdapterRegi
 
 import { IHostRequestHeaders } from './hostRequestHeaders';
 import type { ModelConfig } from './model';
-import { IModelService } from './model';
+import { IModelService, primaryProviderName } from './model';
 import {
   deriveProviderId,
   effectiveModelConfig,
@@ -77,13 +77,26 @@ export class ModelResolverService extends Disposable implements IModelResolver {
   }
 
   resolve(id: string): Model {
-    const configuredModel = this.models.get(id);
-    if (configuredModel === undefined) {
+    return this.resolveInternal(id, undefined);
+  }
+
+  resolveWithProvider(id: string, providerName: string): Model {
+    return this.resolveInternal(id, providerName);
+  }
+
+  private resolveInternal(id: string, providerOverride: string | undefined): Model {
+    const configured = this.models.get(id);
+    if (configured === undefined) {
       throw new Error2(
         ErrorCodes.CONFIG_INVALID,
         `Model "${id}" is not configured in config.toml.`,
       );
     }
+    // A pool endpoint pins the provider reference; `providerId` wins over the
+    // legacy `provider` field everywhere downstream (provider context, auth
+    // material), so the override needs no further plumbing.
+    const configuredModel =
+      providerOverride === undefined ? configured : { ...configured, providerId: providerOverride };
     const routingModel = effectiveModelConfig(configuredModel);
     const { providerConfig, providerName, resolvedBaseUrl: rawBaseUrl } =
       this.resolveProviderContext(id, routingModel);
@@ -212,7 +225,7 @@ export class ModelResolverService extends Disposable implements IModelResolver {
     readonly resolvedBaseUrl: string | undefined;
   } {
     const providerId =
-      model.providerId ?? model.provider ?? this.config.get<string>('defaultProvider');
+      model.providerId ?? primaryProviderName(model) ?? this.config.get<string>('defaultProvider');
     if (providerId !== undefined) {
       const providerConfig = this.providers.get(providerId);
       if (providerConfig === undefined) {

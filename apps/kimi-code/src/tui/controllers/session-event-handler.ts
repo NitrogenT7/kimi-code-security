@@ -30,6 +30,7 @@ import type {
   TurnStepStartedEvent,
   WarningEvent,
 } from '@moonshot-ai/kimi-code-sdk';
+import { primaryProviderName } from '@moonshot-ai/kimi-code-sdk';
 
 import { MoonLoader } from '../components/chrome/moon-loader';
 import { buildGoalMarker } from '../components/messages/goal-markers';
@@ -432,7 +433,7 @@ export class SessionEventHandler {
     const model = state.appState.availableModels[state.appState.model];
     if (model === undefined) return false;
     if (model.protocol === 'anthropic') return true;
-    return state.appState.availableProviders[model.provider]?.type === 'anthropic';
+    return state.appState.availableProviders[primaryProviderName(model) ?? '']?.type === 'anthropic';
   }
 
   private handleStepInterrupted(event: TurnStepInterruptedEvent): void {

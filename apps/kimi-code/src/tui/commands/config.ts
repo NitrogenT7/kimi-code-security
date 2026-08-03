@@ -1,5 +1,6 @@
 import {
   effectiveModelAlias,
+  primaryProviderName,
   type ExperimentalFeatureState,
   type ModelAlias,
   type PermissionMode,
@@ -61,7 +62,7 @@ function currentTuiConfig(host: SlashCommandHost): TuiConfig {
 }
 
 function effectiveModelForHost(host: SlashCommandHost, model: ModelAlias): ModelAlias {
-  const providerType = host.state.appState.availableProviders[model.provider]?.type;
+  const providerType = host.state.appState.availableProviders[primaryProviderName(model) ?? '']?.type;
   // Flat models (no named provider, e.g. inline base_url served by a v2
   // backend) have no provider entry to look up; their own protocol declaration
   // plays the provider-identity role, mirroring the resolver.
@@ -265,7 +266,7 @@ export async function handleEffortCommand(host: SlashCommandHost, args: string):
     return;
   }
   if (!segments.includes(arg)) {
-    const providerType = host.state.appState.availableProviders[effective.provider]?.type;
+    const providerType = host.state.appState.availableProviders[primaryProviderName(effective) ?? '']?.type;
     const protocol = effective.protocol ?? providerType;
     if (protocol !== 'anthropic') {
       host.showError(

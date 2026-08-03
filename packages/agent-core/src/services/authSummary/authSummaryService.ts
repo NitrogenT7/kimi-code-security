@@ -4,6 +4,7 @@
 
 import { Disposable, InstantiationType, registerSingleton } from '../../di';
 import type { KimiConfig } from '../../config';
+import { primaryProviderName } from '../../config';
 import type { AuthSummary } from '@moonshot-ai/protocol';
 import { createManagedAuthFacade, type ServicesAuthFacade } from '../auth/managedAuth';
 import { IEnvironmentService } from '../environment/environment';
@@ -73,7 +74,7 @@ export class AuthSummaryService
       throw new AuthModelNotResolvedError(modelId);
     }
 
-    const providerName = alias.provider ?? config.defaultProvider;
+    const providerName = primaryProviderName(alias) ?? config.defaultProvider;
     if (providerName === undefined || providerName === '') {
       throw new AuthModelNotResolvedError(modelId);
     }

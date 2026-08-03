@@ -939,6 +939,85 @@ support_efforts = ["low", "high"]
   });
 });
 
+describe('provider pool TOML', () => {
+  it('parses an ordered provider pool and the [pool] section', () => {
+    const config = parseConfigString(`
+[providers.a]
+type = "openai"
+api_key = "sk-a"
+
+[providers.b]
+type = "openai"
+api_key = "sk-b"
+
+[models."k2"]
+provider = ["a", "b"]
+model = "k2"
+max_context_size = 262144
+
+[pool]
+strategy = "round_robin"
+cooldown_base_ms = 30000
+cooldown_max_ms = 900000
+probe_interval_ms = 5000
+probe_enabled = false
+`);
+
+    expect(config.models?.['k2']?.provider).toEqual(['a', 'b']);
+    expect(config.pool).toEqual({
+      strategy: 'round_robin',
+      cooldownBaseMs: 30000,
+      cooldownMaxMs: 900000,
+      probeIntervalMs: 5000,
+      probeEnabled: false,
+    });
+  });
+
+  it('writes pool provider list and [pool] section back as TOML data', () => {
+    const config = parseConfigString(`
+[providers.a]
+type = "openai"
+api_key = "sk-a"
+
+[providers.b]
+type = "openai"
+api_key = "sk-b"
+
+[models."k2"]
+provider = ["a", "b"]
+model = "k2"
+max_context_size = 262144
+
+[pool]
+strategy = "priority"
+probe_interval_ms = 3600000
+`);
+
+    const data = configToTomlData(config);
+    const models = data['models'] as Record<string, Record<string, unknown>>;
+    expect(models['k2']?.['provider']).toEqual(['a', 'b']);
+    const pool = data['pool'] as Record<string, unknown>;
+    expect(pool['strategy']).toBe('priority');
+    expect(pool['probe_interval_ms']).toBe(3600000);
+  });
+
+  it('keeps a single-string provider untouched', () => {
+    const config = parseConfigString(`
+[providers.a]
+type = "openai"
+api_key = "sk-a"
+
+[models."k2"]
+provider = "a"
+model = "k2"
+max_context_size = 262144
+`);
+
+    expect(config.models?.['k2']?.provider).toBe('a');
+    expect(config.pool).toBeUndefined();
+  });
+});
+
 describe('applyPrintModeConfigDefaults', () => {
   it('fills unbounded print defaults when nothing is configured', () => {
     const config = applyPrintModeConfigDefaults({ providers: {} });

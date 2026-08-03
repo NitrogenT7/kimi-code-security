@@ -152,6 +152,27 @@ kimi
 
 如需让 Vertex 请求走自定义（如代理）端点，可设置 `base_url`（或 `GOOGLE_VERTEX_BASE_URL` 环境变量）；不填时使用 SDK 默认的区域化 `*-aiplatform.googleapis.com` 地址。与 `google-genai` 一样，只填主机根地址——SDK 会自行追加 `/v1beta1/publishers/google/models/…`。
 
+## 供应商池（限流故障转移）
+
+单个 API key 或供应商经常被频率限制（429）时，可以把模型别名的 `provider` 写成**数组**声明一个供应商池。按声明顺序确定优先级，当前供应商被限流时自动故障转移到下一个，被限流的供应商进入冷却（服务端 `Retry-After` 优先），恢复后自动回到最高优先级。每小时还会对被限流的供应商做一次 1 token 的主动探测，提前发现限流解除：
+
+```toml
+[providers.kimi-a]
+type = "kimi"
+api_key = "sk-aaa"
+
+[providers.kimi-b]
+type = "kimi"
+api_key = "sk-bbb"
+
+[models.k2]
+provider = ["kimi-a", "kimi-b"]
+model = "kimi-k2"
+max_context_size = 262144
+```
+
+池内可以是同一供应商的多把 key、多个 base_url，也可以是不同供应商。冷却、探测间隔与关闭探测等参数见[配置文件：`pool`](./config-files.md#pool)。
+
 ## OAuth 与凭证注入
 
 Kimi Code 托管服务使用 OAuth 而非静态 API 密钥。运行 `/login` 后，内置的认证工具链会自动写入并刷新凭证，`config.toml` 里无需手动配置这部分内容。

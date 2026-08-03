@@ -12,6 +12,7 @@ import {
   DEFAULT_CATALOG_URL,
   fetchCatalog,
   inferWireType,
+  primaryProviderName,
   type Catalog,
   type ThinkingEffort,
 } from '@moonshot-ai/kimi-code-sdk';
@@ -47,8 +48,9 @@ export async function handleProviderCommand(host: SlashCommandHost): Promise<voi
 }
 
 function buildProviderManagerOptions(host: SlashCommandHost): ProviderManagerOptions {
+  const currentAlias = host.state.appState.availableModels[host.state.appState.model];
   const activeProviderId =
-    host.state.appState.availableModels[host.state.appState.model]?.provider;
+    currentAlias === undefined ? undefined : primaryProviderName(currentAlias);
   return {
     providers: host.state.appState.availableProviders,
     activeProviderId,
@@ -322,9 +324,9 @@ async function handleCustomRegistryAddViaDialog(host: SlashCommandHost): Promise
   const firstNewAlias = Object.keys(stateModels).find((a) =>
     addedProviderIds.some((pid) => a.startsWith(`${pid}/`)),
   );
-  const firstNewProvider = firstNewAlias
-    ? stateModels[firstNewAlias]?.provider
-    : addedProviderIds[0];
+  const firstNewModel = firstNewAlias === undefined ? undefined : stateModels[firstNewAlias];
+  const firstNewProvider =
+    firstNewModel === undefined ? addedProviderIds[0] : primaryProviderName(firstNewModel);
   const selector = new TabbedModelSelectorComponent({
     models: stateModels,
     currentValue: host.state.appState.model,

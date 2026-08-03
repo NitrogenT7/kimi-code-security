@@ -142,7 +142,7 @@ export class MCPManagerTool implements BuiltinTool<MCPManagerInput> {
           if (group !== undefined) {
             this.agent.mcpGroupMode = groupName;
             this.agent.allowedSkillPrefixes =
-              group.skillPrefixes.length > 0 ? [...group.skillPrefixes] : null;
+              (group.skillPrefixes ?? []).length > 0 ? [...group.skillPrefixes] : null;
           }
           return { output: `MCP group "${groupName}" loaded successfully.` };
         } catch (error: unknown) {

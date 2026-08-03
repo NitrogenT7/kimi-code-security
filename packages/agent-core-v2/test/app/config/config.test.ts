@@ -49,6 +49,8 @@ import {
   resolveSubagentTimeoutMs,
   SUBAGENT_TIMEOUT_ENV,
 } from '#/session/subagent/configSection';
+import '#/session/providerPool/configSection';
+import { POOL_SECTION, type PoolConfig } from '#/session/providerPool/configSection';
 import { ILogService } from '#/_base/log/log';
 import { InMemoryStorageService } from '#/persistence/backends/memory/inMemoryStorageService';
 import { IFileSystemStorageService } from '#/persistence/interface/storage';
@@ -693,6 +695,65 @@ describe('subagent config section', () => {
 
     env[SUBAGENT_TIMEOUT_ENV] = '7000';
     expect(resolveSubagentTimeoutMs(config)).toBe(7000);
+
+    disposables.dispose();
+  });
+});
+
+describe('pool config section', () => {
+  async function createConfigWithToml(toml?: string) {
+    const disposables = new DisposableStore();
+    const ix = disposables.add(new TestInstantiationService());
+    const storage = new InMemoryStorageService();
+    if (toml !== undefined) {
+      await storage.write('', 'config.toml', new TextEncoder().encode(toml));
+    }
+    ix.stub(ILogService, stubLog());
+    ix.stub(IBootstrapService, stubBootstrap('/tmp/kimi-cfg-pool', {}));
+    ix.stub(IFileSystemStorageService, storage);
+    ix.set(IAtomicTomlDocumentStore, new SyncDescriptor(TomlAtomicDocumentStore));
+    ix.set(IConfigRegistry, new SyncDescriptor(ConfigRegistry));
+    ix.set(IConfigService, new SyncDescriptor(ConfigService));
+    const config = ix.get(IConfigService);
+    await config.ready;
+    return { config, storage, disposables };
+  }
+
+  it('reads [pool] snake_case keys from config.toml as camelCase', async () => {
+    const { config, disposables } = await createConfigWithToml(
+      '[pool]\nstrategy = "round_robin"\ncooldown_base_ms = 5000\ncooldown_max_ms = 60000\nprobe_interval_ms = 120000\nprobe_enabled = false\n',
+    );
+
+    expect(config.get<PoolConfig>(POOL_SECTION)).toEqual({
+      strategy: 'round_robin',
+      cooldownBaseMs: 5000,
+      cooldownMaxMs: 60000,
+      probeIntervalMs: 120_000,
+      probeEnabled: false,
+    });
+
+    disposables.dispose();
+  });
+
+  it('writes camelCase pool config back to config.toml as snake_case', async () => {
+    const { config, storage, disposables } = await createConfigWithToml();
+
+    await config.set(POOL_SECTION, { strategy: 'round_robin', cooldownBaseMs: 5000 });
+
+    const raw = await storage.read('', 'config.toml');
+    const text = new TextDecoder().decode(raw);
+    expect(text).toContain('[pool]');
+    expect(text).toContain('strategy = "round_robin"');
+    expect(text).toContain('cooldown_base_ms = 5000');
+    expect(text).not.toContain('cooldownBaseMs');
+
+    disposables.dispose();
+  });
+
+  it('is undefined when config.toml declares no [pool] section', async () => {
+    const { config, disposables } = await createConfigWithToml();
+
+    expect(config.get<PoolConfig>(POOL_SECTION)).toBeUndefined();
 
     disposables.dispose();
   });

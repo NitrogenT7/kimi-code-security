@@ -680,6 +680,10 @@ export class OpenAILegacyChatProvider implements ChatProvider {
     const clientOpts: Record<string, unknown> = {
       apiKey,
       baseURL: this._baseUrl,
+      // Retry policy is owned above kosong (chatWithRetry / pool failover).
+      // SDK-level retries would sleep silently on Retry-After and hide 429s
+      // from the pool's failover.
+      maxRetries: 0,
     };
     const defaultHeaders = mergeRequestHeaders(this._defaultHeaders, auth?.headers);
     if (defaultHeaders !== undefined) {

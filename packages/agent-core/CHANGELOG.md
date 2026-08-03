@@ -1,5 +1,16 @@
 # @moonshot-ai/agent-core
 
+## 0.16.0
+
+### Minor Changes
+
+- 3efb987: Add security-research capabilities to the v1 engine: MCP groups with lazy loading and the MCPManager tool, four-element commander-intent goals with templates, a question-driven TodoList with a findings archive, image payload validation, and retention-plan compaction behind a flag.
+
+### Patch Changes
+
+- c2d19de: Fix sessions failing with repeated provider 400 errors after a tool returns image content whose payload is not valid image data.
+- 7d0143f: Fix the TodoList tool advertising an item-less parameter schema, which let providers misguide the model into submitting plain strings that were then rejected.
+
 ## 0.15.5
 
 ### Patch Changes

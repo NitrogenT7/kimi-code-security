@@ -163,16 +163,25 @@ export class ConfigState {
   }
 
   get provider(): ChatProvider {
-    // All provider-level request config is applied here so every request built
-    // from config.provider — the main loop AND full-history compaction — carries it:
-    //   - withThinking: preserve thinking during compaction (#464)
-    //   - sampling params: KIMI_MODEL_TEMPERATURE / KIMI_MODEL_TOP_P
-    //   - thinking.effort: the resolved ConfigState value, including the
-    //     KIMI_MODEL_THINKING_EFFORT override while thinking is on
-    //   - thinking.keep: env KIMI_MODEL_THINKING_KEEP > config thinking.keep > default "all"
-    //     (only while thinking is on). Drives Kimi's `thinking.keep` and, on the
-    //     Anthropic path, a `context_management` `clear_thinking_20251015` edit.
-    const provider = createProvider(this.providerConfig).withThinking(this.thinkingEffort);
+    return this.buildChatProvider(this.providerConfig);
+  }
+
+  /**
+   * All provider-level request config is applied here so every request built
+   * from config.provider — the main loop AND full-history compaction — carries it:
+   *   - withThinking: preserve thinking during compaction (#464)
+   *   - sampling params: KIMI_MODEL_TEMPERATURE / KIMI_MODEL_TOP_P
+   *   - thinking.effort: the resolved ConfigState value, including the
+   *     KIMI_MODEL_THINKING_EFFORT override while thinking is on
+   *   - thinking.keep: env KIMI_MODEL_THINKING_KEEP > config thinking.keep > default "all"
+   *     (only while thinking is on). Drives Kimi's `thinking.keep` and, on the
+   *     Anthropic path, a `context_management` `clear_thinking_20251015` edit.
+   *
+   * Pool failover reuses this per endpoint so every pool provider gets the
+   * exact same thinking/sampling treatment as the primary.
+   */
+  buildChatProvider(providerConfig: ProviderConfig): ChatProvider {
+    const provider = createProvider(providerConfig).withThinking(this.thinkingEffort);
     const withSampling = applyKimiEnvSamplingParams(provider);
     const configKeep = this.agent.kimiConfig?.thinking?.keep;
     const withKimiKeep = applyKimiEnvThinkingKeep(

@@ -222,6 +222,18 @@ export interface ModelSwitchEvent {
   model: string;
 }
 
+export interface ProviderFailoverEvent {
+  from: string;
+  to: string;
+  reason: string;
+  model: string;
+}
+
+export interface ProviderRecoveredEvent {
+  endpoint: string;
+  model: string;
+}
+
 export interface ThinkingToggleEvent {
   enabled: boolean;
   effort: string;
@@ -634,6 +646,24 @@ export const telemetryEventDefinitions = {
     owner: 'kimi-code',
     comment: 'The active model is bound or switched.',
     properties: { model: 'Model alias' },
+  }),
+  provider_failover: defineTelemetryEvent<ProviderFailoverEvent>({
+    owner: 'kimi-code',
+    comment: 'A pooled model alias fails over to another provider endpoint.',
+    properties: {
+      from: 'Provider endpoint that failed',
+      to: 'Provider endpoint tried next ("none" when the pool is exhausted)',
+      reason: 'Failover trigger (rate_limit / auth / transient)',
+      model: 'Model alias',
+    },
+  }),
+  provider_recovered: defineTelemetryEvent<ProviderRecoveredEvent>({
+    owner: 'kimi-code',
+    comment: 'A rate-limited pool provider endpoint is healthy again.',
+    properties: {
+      endpoint: 'Provider endpoint that recovered',
+      model: 'Model alias',
+    },
   }),
   thinking_toggle: defineTelemetryEvent<ThinkingToggleEvent>({
     owner: 'kimi-code',

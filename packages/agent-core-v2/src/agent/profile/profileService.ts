@@ -46,12 +46,17 @@ import type { LoopControl } from '#/agent/loop/configSection';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
 import { IHostFileSystem } from '#/os/interface/hostFileSystem';
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
+import {
+  ISessionProviderPoolService,
+  type ProviderFailoverInfo,
+} from '#/session/providerPool/providerPool';
 import { isMcpToolName, type ToolSource } from '#/tool/toolContract';
 import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
 import { ISessionSkillCatalog } from '#/session/sessionSkillCatalog/skillCatalog';
 import type { ResolvedAgentProfile, SystemPromptContext } from '#/agent/profile/profile';
 
 import { ITelemetryService } from '#/app/telemetry/telemetry';
+import type { ProviderFailoverEvent } from '#/app/telemetry/events';
 import { IAgentTelemetryContextService } from '#/app/telemetry/agentTelemetryContext';
 import { IWireService } from '#/wire/wire';
 import type { PayloadOf } from '#/wire/types';
@@ -119,6 +124,7 @@ export class AgentProfileService implements IAgentProfileService {
     @IHostEnvironment private readonly env: IHostEnvironment,
     @IHostFileSystem private readonly fs: IHostFileSystem,
     @ISessionContext private readonly sessionContext: ISessionContext,
+    @ISessionProviderPoolService private readonly providerPool: ISessionProviderPoolService,
     @IBootstrapService private readonly bootstrap: IBootstrapService,
     @ISessionWorkspaceContext private readonly workspace: ISessionWorkspaceContext,
     @IAgentProfileCatalogService private readonly catalog: IAgentProfileCatalogService,
@@ -304,7 +310,14 @@ export class AgentProfileService implements IAgentProfileService {
 
   resolveModel(): Model | undefined {
     if (this.modelAlias === undefined) return undefined;
-    let model: Model = this.modelFactory.resolve(this.modelAlias);
+    // Pool path: the alias declares `provider = [...]` — a failover Model over
+    // every endpoint, sharing the session-wide health registry. The `with*`
+    // forks below propagate to whichever endpoint serves the request.
+    let model: Model =
+      this.providerPool.resolvePooledModel(this.modelAlias, {
+        onFailover: (info) => this.notifyProviderFailover(info),
+        onRecovered: (name) => this.notifyProviderRecovered(name),
+      }) ?? this.modelFactory.resolve(this.modelAlias);
     const thinking = this.resolveThinkingState(model);
     const thinkingConfig = this.config.get<ThinkingConfig>(THINKING_SECTION);
     const kwargs: GenerationKwargs = {};
@@ -347,6 +360,33 @@ export class AgentProfileService implements IAgentProfileService {
 
   getModelCapabilities(): ModelCapability {
     return this.tryResolveRawModel()?.capabilities ?? UNKNOWN_CAPABILITY;
+  }
+
+  private notifyProviderFailover(info: ProviderFailoverInfo): void {
+    const properties: ProviderFailoverEvent = {
+      from: info.from,
+      to: info.to ?? 'none',
+      reason: info.reason,
+      model: this.modelAlias ?? '',
+    };
+    this.telemetry.track2('provider_failover', properties);
+    const message =
+      info.to !== undefined
+        ? `Provider "${info.from}" ${info.reason === 'rate_limit' ? 'hit a rate limit' : info.reason === 'auth' ? 'was rejected' : 'failed'}; failing over to "${info.to}".`
+        : 'All pool providers are unavailable; waiting for the earliest rate-limit window to reopen.';
+    this.eventBus.publish({ type: 'warning', code: 'provider-failover', message });
+  }
+
+  private notifyProviderRecovered(endpointName: string): void {
+    this.telemetry.track2('provider_recovered', {
+      endpoint: endpointName,
+      model: this.modelAlias ?? '',
+    });
+    this.eventBus.publish({
+      type: 'warning',
+      code: 'provider-recovered',
+      message: `Provider "${endpointName}" recovered from rate limiting; it is back in rotation.`,
+    });
   }
 
   getMaxOutputSize(): number | undefined {

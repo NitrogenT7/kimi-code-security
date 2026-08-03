@@ -54,7 +54,7 @@ import {
   nonEmpty,
   resolveModelAuthMaterial,
 } from '#/app/model/modelAuth';
-import { type ModelAlias, MODELS_SECTION } from '#/app/model/model';
+import { type ModelAlias, MODELS_SECTION, primaryProviderName } from '#/app/model/model';
 import { IPlatformService } from '#/app/platform/platform';
 import {
   IProviderService,
@@ -609,7 +609,7 @@ export class AuthSummaryService implements IAuthSummaryService {
     }
 
     const model = effectiveModelConfig(configured);
-    const providerId = model.providerId ?? model.provider;
+    const providerId = model.providerId ?? primaryProviderName(model);
     const provider = providerId === undefined ? undefined : this.providerService.get(providerId);
     if (providerId !== undefined && provider === undefined) {
       throw new AuthModelNotResolvedError(modelId, providerId);

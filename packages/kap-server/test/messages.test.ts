@@ -56,6 +56,9 @@ describe('server-v2 /api/v1/sessions/{sid}/messages', () => {
         throw new Error('modelResolver.resolve not exercised in this test');
       },
       findByName: () => [],
+      resolveWithProvider: () => {
+        throw new Error('modelResolver.resolveWithProvider not exercised in this test');
+      },
     };
     seeds = [[IModelResolver, modelResolver]];
     await boot();

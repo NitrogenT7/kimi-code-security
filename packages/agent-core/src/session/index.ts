@@ -259,6 +259,29 @@ export class Session {
     void this.loadMcpServers().catch((error: unknown) => {
       this.emitInitialMcpLoadError(error);
     });
+    // Pool recovery prober: hourly 1-token checks on rate-limited endpoints.
+    // No-op when no model alias declares a provider pool.
+    this.options.providerManager?.startRecoveryProbing({
+      onRecovered: (name) => {
+        this.emitPoolHealthNotice(`Provider "${name}" recovered from rate limiting; it is back in rotation.`);
+      },
+      onDown: (name) => {
+        this.emitPoolHealthNotice(`Provider "${name}" was removed from the pool rotation after repeated auth failures.`);
+      },
+    });
+  }
+
+  private emitPoolHealthNotice(message: string): void {
+    try {
+      void this.rpc.emitEvent({
+        type: 'warning',
+        agentId: 'main',
+        code: 'provider-pool-health',
+        message,
+      })?.catch(() => {});
+    } catch {
+      // Pool health notices must never block session startup or shutdown.
+    }
   }
 
   setToolKaos(kaos: Kaos) {
@@ -393,6 +416,7 @@ export class Session {
   }
 
   async close(): Promise<void> {
+    this.options.providerManager?.stopRecoveryProbing();
     try {
       await Promise.allSettled(Array.from(this.readyAgents(), async (agent) => agent.cron?.stop()));
       await this.cancelActiveTurnsOnClose();
@@ -409,6 +433,7 @@ export class Session {
   }
 
   async closeForReload(): Promise<void> {
+    this.options.providerManager?.stopRecoveryProbing();
     try {
       await Promise.allSettled(Array.from(this.readyAgents(), async (agent) => agent.cron?.stop()));
       await this.flushMetadata();

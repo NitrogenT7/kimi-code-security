@@ -1,5 +1,24 @@
 # @moonshot-ai/kimi-code
 
+## 0.28.0
+
+### Minor Changes
+
+- Add provider failover pools with automatic rate-limit recovery: set `provider = ["a", "b"]` on a model alias to fail over to backup providers on 429s, and tune cooldowns or the hourly 1-token recovery probe in the `[pool]` section (`probe_enabled = false` disables probing).
+- 3efb987: Add security-research capabilities to the v1 engine: MCP groups with lazy loading and the MCPManager tool, four-element commander-intent goals with templates, a question-driven TodoList with a findings archive, image payload validation, and retention-plan compaction behind a flag.
+- 3efb987: Add security-research capabilities to the v2 engine: MCP groups with lazy loading, the MCPManager tool, and group-bound security subagent roles; four-element goals with templates; a question-driven TodoList with an InvestigationBoard; impostor image payload downgrading; and retention-plan compaction behind a flag.
+
+### Patch Changes
+
+- 3086e47: Rename the stale "afk" reference to "auto" in the built-in MCP config skill guidance.
+- c2d19de: Fix sessions failing with repeated provider 400 errors after a tool returns image content whose payload is not valid image data.
+- Fix intermittent MCP group load failures caused by an unsafe optional-chain access when the skill registry is unavailable.
+- 3086e47: Correct the YOLO and Auto permission mode descriptions in CLI --help output and in the ACP session mode selector shown by IDE clients.
+- 3086e47: web: Correct the YOLO and Auto permission mode descriptions in the slash command list and the mobile permission sheet.
+- 3086e47: Fix the YOLO and Auto permission mode descriptions to match their actual behavior: YOLO auto-approves tool actions but the agent may still ask questions, while Auto is fully autonomous and never asks.
+- 7d0143f: Fix the TodoList tool advertising an item-less parameter schema, which let providers misguide the model into submitting plain strings that were then rejected.
+- 3086e47: Correct the YOLO mode notice shown when replaying a session: tool actions are auto-approved, but the agent may still ask questions.
+
 ## 0.27.0
 
 ### Minor Changes

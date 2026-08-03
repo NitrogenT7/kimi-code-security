@@ -1,5 +1,6 @@
 import { Disposable, InstantiationType, registerSingleton } from '../../di';
 import type { KimiConfig, ModelAlias, ProviderConfig, ProviderType } from '../../config';
+import { primaryProviderName } from '../../config';
 import type {
   ModelCatalogItem,
   ProviderCatalogItem,
@@ -103,7 +104,7 @@ export class ModelCatalogService
   }
 
   private _providerTypeOf(config: KimiConfig, alias: ModelAlias): ProviderType | undefined {
-    const providerId = alias.provider ?? config.defaultProvider;
+    const providerId = primaryProviderName(alias) ?? config.defaultProvider;
     return config.providers[providerId ?? '']?.type;
   }
 

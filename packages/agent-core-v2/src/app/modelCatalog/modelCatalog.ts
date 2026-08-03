@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { createDecorator, type ServiceIdentifier } from '#/_base/di/instantiation';
 
 import type { ModelAlias } from '#/app/model/model';
+import { primaryProviderName } from '#/app/model/model';
 import { effectiveModelConfig } from '#/app/model/modelAuth';
 import type { ProviderConfig, ProviderType } from '#/app/provider/provider';
 
@@ -111,7 +112,7 @@ export function toProtocolModel(
 ): ModelCatalogItem {
   const effective = effectiveModelConfig(alias, providerType);
   return {
-    provider: effective.provider ?? '',
+    provider: primaryProviderName(effective) ?? '',
     model: modelId,
     display_name: effective.displayName ?? effective.model ?? modelId,
     max_context_size: effective.maxContextSize ?? 0,
@@ -147,7 +148,7 @@ export function modelIdsForProvider(
   providerId: string,
 ): string[] {
   return Object.entries(models)
-    .filter(([, alias]) => alias.provider === providerId)
+    .filter(([, alias]) => primaryProviderName(alias) === providerId)
     .map(([modelId]) => modelId);
 }
 
@@ -158,5 +159,5 @@ function globalDefaultForProvider(
 ): string | undefined {
   if (globalDefaultModel === undefined) return undefined;
   const alias = models[globalDefaultModel];
-  return alias?.provider === providerId ? globalDefaultModel : undefined;
+  return alias !== undefined && primaryProviderName(alias) === providerId ? globalDefaultModel : undefined;
 }

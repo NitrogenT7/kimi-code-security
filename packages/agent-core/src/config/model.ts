@@ -6,6 +6,26 @@ import {
 
 import type { ModelAlias, ProviderType } from './schema';
 
+/**
+ * The alias's provider reference as an ordered list. `provider` may be a
+ * single name or a failover pool (array, first = highest priority); returns
+ * `undefined` when the alias relies on the top-level default provider.
+ */
+export function providerNamesOf(alias: ModelAlias): readonly string[] | undefined {
+  const value = alias.provider;
+  if (value === undefined) return undefined;
+  return typeof value === 'string' ? [value] : value;
+}
+
+/**
+ * The first (highest-priority) provider name of the alias, or `undefined`
+ * when the alias relies on the top-level default provider. Consumers that
+ * only understand a single provider (auth summary, model catalog) use this.
+ */
+export function primaryProviderName(alias: ModelAlias): string | undefined {
+  return providerNamesOf(alias)?.[0];
+}
+
 export function effectiveModelAlias(
   alias: ModelAlias,
   providerType?: ProviderType,

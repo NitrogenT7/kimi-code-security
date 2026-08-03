@@ -1179,6 +1179,8 @@ export class AnthropicChatProvider implements ChatProvider {
       authToken: null,
       baseURL: this._baseUrl ?? null,
       defaultHeaders: this._buildDefaultHeaders(apiKey),
+      // Retry policy is owned above kosong (chatWithRetry / pool failover).
+      maxRetries: 0,
     });
   }
 

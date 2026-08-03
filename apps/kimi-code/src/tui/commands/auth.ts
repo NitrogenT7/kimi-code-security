@@ -8,7 +8,7 @@ import {
   type ManagedKimiConfigShape,
   type OpenPlatformDefinition,
 } from '@moonshot-ai/kimi-code-oauth';
-import { log } from '@moonshot-ai/kimi-code-sdk';
+import { log, primaryProviderName } from '@moonshot-ai/kimi-code-sdk';
 
 import type { ChoiceOption } from '../components/dialogs/choice-picker';
 import { DEFAULT_OAUTH_PROVIDER_NAME, PRODUCT_NAME } from '../constant/kimi-tui';
@@ -214,7 +214,9 @@ export async function handleLogoutCommand(host: SlashCommandHost): Promise<void>
   }
 
   const currentModel = host.state.appState.model.trim();
-  const currentProvider = host.state.appState.availableModels[currentModel]?.provider;
+  const currentAlias = host.state.appState.availableModels[currentModel];
+  const currentProvider =
+    currentAlias === undefined ? undefined : primaryProviderName(currentAlias);
 
   const target = await promptLogoutProviderSelection(host, options, currentProvider);
   if (target === undefined) return;

@@ -1,5 +1,5 @@
 import { createDecorator } from '../../di';
-import { effectiveModelAlias, type KimiConfig, type ModelAlias, type ProviderConfig, type ProviderType } from '../../config';
+import { effectiveModelAlias, primaryProviderName, providerNamesOf, type KimiConfig, type ModelAlias, type ProviderConfig, type ProviderType } from '../../config';
 import type {
   ModelCatalogItem,
   ProviderCatalogItem,
@@ -61,7 +61,7 @@ export function toProtocolModel(
 ): ModelCatalogItem {
   const effective = effectiveModelAlias(alias, providerType);
   return {
-    provider: effective.provider,
+    provider: primaryProviderName(effective) ?? '',
     model: modelId,
     display_name: effective.displayName ?? effective.model,
     max_context_size: effective.maxContextSize,
@@ -101,7 +101,7 @@ export function modelIdsForProvider(
 ): string[] {
   const models = config.models ?? {};
   return Object.entries(models)
-    .filter(([, alias]) => alias.provider === providerId)
+    .filter(([, alias]) => providerNamesOf(alias)?.includes(providerId) ?? false)
     .map(([modelId]) => modelId);
 }
 
@@ -112,7 +112,9 @@ function globalDefaultForProvider(
   const defaultModel = config.defaultModel;
   if (defaultModel === undefined) return undefined;
   const alias = config.models?.[defaultModel];
-  return alias?.provider === providerId ? defaultModel : undefined;
+  return alias !== undefined && (providerNamesOf(alias)?.includes(providerId) ?? false)
+    ? defaultModel
+    : undefined;
 }
 
 void IModelCatalogService;

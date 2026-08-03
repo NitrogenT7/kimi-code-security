@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.4
+
+### Patch Changes
+
+- Updated dependencies [3efb987]
+- Updated dependencies [3efb987]
+  - @moonshot-ai/kimi-code-sdk@0.14.0
+  - @moonshot-ai/migration-legacy@0.1.17
+
 ## 0.6.3
 
 ### Fixed

@@ -210,6 +210,11 @@ const DOMAIN_LAYER = new Map([
   // through `profile` (L4). Its highest real dependency is `agentLifecycle`,
   // so it sits in L6 beside `workspaceCommand`.
   ['sessionInit', 6],
+  // `providerPool` owns the session-shared pool endpoint health registry and
+  // the recovery prober: it reaches through `agentLifecycle` (L6) to publish
+  // prober health notices on the main agent's event bus. Its highest real
+  // dependency is `agentLifecycle`, so it sits in L6 beside `sessionInit`.
+  ['providerPool', 6],
   // L7 — boundary
   ['approval', 7],
   ['question', 7],
@@ -346,6 +351,12 @@ const ALLOWED_EXCEPTIONS = new Set([
   'plugin>externalHooks',
   'plugin>mcp',
   'profile>session',
+  // `profile` (L4) resolves the agent's request-path Model through the
+  // session-shared `providerPool` (L6) so every agent fails over against the
+  // same endpoint health — same shape as the `swarm>agentLifecycle` spawn
+  // exception (an Agent-scope consumer of a Session-scope coordination
+  // service).
+  'profile>providerPool',
   'replayBuilder>agentTask',
   'replayBuilder>rpc',
   'replayBuilder>sessionMetadata',

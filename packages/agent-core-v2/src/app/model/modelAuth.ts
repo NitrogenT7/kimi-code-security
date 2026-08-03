@@ -21,6 +21,7 @@ import type { OAuthRef, ProviderConfig, ProviderType } from '#/app/provider/prov
 import type { Protocol } from '#/app/protocol/protocol';
 
 import type { ModelConfig } from './model';
+import { primaryProviderName } from './model';
 
 export interface ResolvedModelAuthMaterial {
   readonly apiKey?: string;
@@ -43,7 +44,7 @@ export function resolveModelAuthMaterial(args: {
   if (args.model.oauth !== undefined) {
     return {
       oauth: args.model.oauth,
-      oauthProviderKey: args.model.providerId ?? args.model.provider,
+      oauthProviderKey: args.model.providerId ?? primaryProviderName(args.model),
     };
   }
 
@@ -73,7 +74,7 @@ export function resolveModelAuthMaterial(args: {
   if (args.provider?.oauth !== undefined) {
     return {
       oauth: args.provider.oauth,
-      oauthProviderKey: args.model.providerId ?? args.model.provider,
+      oauthProviderKey: args.model.providerId ?? primaryProviderName(args.model),
     };
   }
   return {};

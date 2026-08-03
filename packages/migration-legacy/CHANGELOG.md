@@ -1,5 +1,14 @@
 # @moonshot-ai/migration-legacy
 
+## 0.1.17
+
+### Patch Changes
+
+- Updated dependencies [c2d19de]
+- Updated dependencies [7d0143f]
+- Updated dependencies [3efb987]
+  - @moonshot-ai/agent-core@0.16.0
+
 ## 0.1.16
 
 ### Patch Changes

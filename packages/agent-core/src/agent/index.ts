@@ -21,7 +21,9 @@ import {
   type ResolvedAgentProfile,
 } from '../profile';
 import { HookEngine } from '../session/hooks';
+import type { LLM } from '../loop';
 import type { ModelProvider } from '../session/provider-manager';
+import { resolvePoolOptions } from '../session/provider-pool';
 import type { SessionSubagentHost } from '../session/subagent-host';
 import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
 import { ImageLimits } from '../tools/support/image-limits';
@@ -60,6 +62,7 @@ import { SwarmMode } from './swarm';
 import { ToolManager } from './tool/index';
 import { TurnFlow } from './turn';
 import { KosongLLM } from './turn/kosong-llm';
+import { PoolingLLM, type ProviderFailoverInfo } from './turn/pooling-llm';
 import { UsageRecorder } from './usage';
 
 export type { AgentRecord, AgentRecordPersistence } from './records';
@@ -425,7 +428,44 @@ export class Agent {
     }
   }
 
-  get llm(): KosongLLM {
+  get llm(): LLM {
+    // Pool path: the alias declares `provider = [...]` — build a failover LLM
+    // over every endpoint. Each endpoint gets its own KosongLLM (per-endpoint
+    // capabilities and completion budget); request-time health comes from the
+    // session-shared registry on the model provider.
+    const modelAlias = this.config.modelAlias;
+    const modelProvider = this.modelProvider;
+    if (modelAlias !== undefined && modelProvider?.poolHealth !== undefined) {
+      const pool = modelProvider.resolveProviderPool?.(modelAlias);
+      if (pool !== undefined) {
+        const loopControl = this.kimiConfig?.loopControl;
+        return new PoolingLLM({
+          pool,
+          registry: modelProvider.poolHealth,
+          options: () => resolvePoolOptions(this.kimiConfig?.pool),
+          systemPrompt: this.config.systemPrompt,
+          buildEndpointLLM: (endpoint) =>
+            new KosongLLM({
+              provider: this.config.buildChatProvider(endpoint.provider),
+              systemPrompt: this.config.systemPrompt,
+              capability: endpoint.modelCapabilities,
+              generate: this.generate,
+              completionBudgetConfig: resolveCompletionBudget({
+                maxOutputSize: endpoint.maxOutputSize,
+                reservedContextSize: loopControl?.reservedContextSize,
+              }),
+              usedContextTokens: () => this.context.tokenCount,
+            }),
+          onFailover: (info) => {
+            this.notifyProviderFailover(info);
+          },
+          onRecovered: (name) => {
+            this.notifyProviderRecovered(name);
+          },
+        });
+      }
+    }
+
     // All provider-level request config (thinking, sampling params, thinking.keep)
     // is applied in ConfigState.provider so compaction shares it. See get provider().
     const provider = this.config.provider;
@@ -441,6 +481,32 @@ export class Agent {
       generate: this.generate,
       completionBudgetConfig,
       usedContextTokens: () => this.context.tokenCount,
+    });
+  }
+
+  private notifyProviderFailover(info: ProviderFailoverInfo): void {
+    this.telemetry.track('provider_failover', {
+      from: info.from,
+      to: info.to ?? 'none',
+      reason: info.reason,
+      model: this.config.modelAlias ?? '',
+    });
+    const message =
+      info.to !== undefined
+        ? `Provider "${info.from}" ${info.reason === 'rate_limit' ? 'hit a rate limit' : info.reason === 'auth' ? 'was rejected' : 'failed'}; failing over to "${info.to}".`
+        : `All pool providers are unavailable; waiting for the earliest rate-limit window to reopen.`;
+    this.emitEvent({ type: 'warning', code: 'provider-failover', message });
+  }
+
+  private notifyProviderRecovered(endpointName: string): void {
+    this.telemetry.track('provider_recovered', {
+      endpoint: endpointName,
+      model: this.config.modelAlias ?? '',
+    });
+    this.emitEvent({
+      type: 'warning',
+      code: 'provider-recovered',
+      message: `Provider "${endpointName}" recovered from rate limiting; it is back in rotation.`,
     });
   }
 

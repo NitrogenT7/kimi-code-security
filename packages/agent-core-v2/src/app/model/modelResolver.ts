@@ -22,6 +22,12 @@ export interface IModelResolver {
   readonly _serviceBrand: undefined;
 
   resolve(id: string): Model;
+  /**
+   * Resolve the Model as if its provider were `providerName` — one endpoint
+   * of a pooled alias (`provider = ["a", "b", ...]`). Single-provider aliases
+   * behave exactly like `resolve(id)` when the name matches.
+   */
+  resolveWithProvider(id: string, providerName: string): Model;
   findByName(name: string): readonly string[];
 }
 

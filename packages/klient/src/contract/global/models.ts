@@ -37,7 +37,7 @@ const modelBaseSchema = z.object({
   name: z.string().optional(),
   aliases: z.array(z.string()).optional(),
 
-  provider: z.string().optional(),
+  provider: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
   model: z.string().optional(),
   maxContextSize: z.number().int().min(1).optional(),
   maxOutputSize: z.number().int().min(1).optional(),

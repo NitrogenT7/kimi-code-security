@@ -429,6 +429,8 @@ export class KimiChatProvider implements ChatProvider {
             apiKey: this._apiKey,
             baseURL: this._baseUrl,
             defaultHeaders: this._defaultHeaders,
+            // Retry policy is owned above kosong (chatWithRetry / pool failover).
+            maxRetries: 0,
           });
   }
 
@@ -626,6 +628,8 @@ export class KimiChatProvider implements ChatProvider {
           apiKey: requireProviderApiKey('KimiChatProvider', a, this._apiKey),
           baseURL: this._baseUrl,
           defaultHeaders,
+          // Retry policy is owned above kosong (chatWithRetry / pool failover).
+          maxRetries: 0,
         });
       },
     );

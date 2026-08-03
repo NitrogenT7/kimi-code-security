@@ -120,7 +120,7 @@ export class MCPManagerTool implements BuiltinTool<MCPManagerInput> {
     const active = this.sessionMcp.activeGroup();
     const lines = groups.map((group) => {
       const serverNames = group.servers.join(', ');
-      const prefixes = group.skillPrefixes.length > 0 ? ` [${group.skillPrefixes.join(', ')}]` : '';
+      const prefixes = (group.skillPrefixes ?? []).length > 0 ? ` [${group.skillPrefixes.join(', ')}]` : '';
       const state = group.name === active ? 'active' : group.loaded ? 'loaded' : 'not loaded';
       return `- ${group.name} (${state}): ${group.description ?? 'no description'}\n  servers: ${serverNames}${prefixes}`;
     });

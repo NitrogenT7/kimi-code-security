@@ -22,9 +22,9 @@ import {
 } from 'openai';
 import { describe, it, expect } from 'vitest';
 describe('OpenAI client creation', () => {
-  it('does not inject max_retries into OpenAI client', () => {
-    // The OpenAI constructor is called with apiKey and baseURL only —
-    // we verify that the provider does not set max_retries.
+  it('disables SDK-level retries so chatWithRetry / pool failover own the policy', () => {
+    // SDK retries would sleep silently on Retry-After and hide 429s from the
+    // pool's failover, so the client is built with maxRetries: 0.
     const provider = new OpenAILegacyChatProvider({
       model: 'gpt-4.1',
       apiKey: 'test-key',
@@ -32,7 +32,7 @@ describe('OpenAI client creation', () => {
     });
 
     const client = (provider as any)._client as Record<string, unknown>;
-    expect((client as unknown as Record<string, unknown>)['maxRetries']).not.toBe(0);
+    expect((client as unknown as Record<string, unknown>)['maxRetries']).toBe(0);
   });
 });
 describe('convertOpenAIError: base APIError mapping', () => {

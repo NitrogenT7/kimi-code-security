@@ -1,6 +1,6 @@
 import { release as osRelease, type as osType } from 'node:os';
 
-import type { McpGroupInfo, McpServerInfo, SessionStatus, SessionUsage } from '@moonshot-ai/kimi-code-sdk';
+import { primaryProviderName, type McpGroupInfo, type McpServerInfo, type SessionStatus, type SessionUsage } from '@moonshot-ai/kimi-code-sdk';
 
 import { buildMcpStatusReportLines } from '../components/messages/mcp-status-panel';
 import { buildStatusReportLines } from '../components/messages/status-panel';
@@ -37,7 +37,8 @@ export async function handleFeedbackCommand(host: SlashCommandHost): Promise<voi
     openUrl(FEEDBACK_ISSUE_URL);
   };
 
-  const providerKey = host.state.appState.availableModels[host.state.appState.model]?.provider;
+  const currentAlias = host.state.appState.availableModels[host.state.appState.model];
+  const providerKey = currentAlias === undefined ? undefined : primaryProviderName(currentAlias);
   if (!isManagedUsageProvider(providerKey)) {
     fallback(FEEDBACK_STATUS_NOT_SIGNED_IN);
     return;
@@ -250,7 +251,8 @@ async function loadRuntimeStatusReport(host: SlashCommandHost): Promise<RuntimeS
 
 async function loadManagedUsageReport(host: SlashCommandHost): Promise<ManagedUsageResult | undefined> {
   const alias = host.state.appState.model;
-  const providerKey = host.state.appState.availableModels[alias]?.provider;
+  const modelAlias = host.state.appState.availableModels[alias];
+  const providerKey = modelAlias === undefined ? undefined : primaryProviderName(modelAlias);
   if (!isManagedUsageProvider(providerKey)) return undefined;
 
   let res;

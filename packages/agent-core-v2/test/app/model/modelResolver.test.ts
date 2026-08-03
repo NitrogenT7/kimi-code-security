@@ -134,6 +134,38 @@ describe('ModelResolverService', () => {
     expect(ix.get(IModelResolver).resolve('m').providerName).toBe('explicit');
   });
 
+  it('resolves a pooled alias against its primary provider by default', () => {
+    providers['a'] = { type: 'kimi', baseUrl: 'https://a.example.test/v1', apiKey: 'sk-a' };
+    providers['b'] = { type: 'openai', baseUrl: 'https://b.example.test/v1', apiKey: 'sk-b' };
+    models['m'] = { provider: ['a', 'b'], model: 'wire-name', maxContextSize: 1000 };
+
+    const model = ix.get(IModelResolver).resolve('m');
+
+    expect(model.providerName).toBe('a');
+    expect(model.baseUrl).toBe('https://a.example.test/v1');
+  });
+
+  it('resolveWithProvider resolves one endpoint of a pooled alias', async () => {
+    providers['a'] = { type: 'kimi', baseUrl: 'https://a.example.test/v1', apiKey: 'sk-a' };
+    providers['b'] = { type: 'openai', baseUrl: 'https://b.example.test/v1', apiKey: 'sk-b' };
+    models['m'] = { provider: ['a', 'b'], model: 'wire-name', maxContextSize: 1000 };
+
+    const endpoint = ix.get(IModelResolver).resolveWithProvider('m', 'b');
+
+    expect(endpoint.providerName).toBe('b');
+    expect(endpoint.baseUrl).toBe('https://b.example.test/v1');
+    await expect(endpoint.authProvider.getAuth()).resolves.toEqual({ apiKey: 'sk-b' });
+  });
+
+  it('resolveWithProvider throws for an unconfigured pool endpoint', () => {
+    providers['a'] = { type: 'kimi', baseUrl: 'https://a.example.test/v1', apiKey: 'sk-a' };
+    models['m'] = { provider: ['a', 'b'], model: 'wire-name', maxContextSize: 1000 };
+
+    expect(() => ix.get(IModelResolver).resolveWithProvider('m', 'b')).toThrow(
+      'Provider "b" referenced by model "m" is not configured.',
+    );
+  });
+
   it('prefers a model-inline apiKey override as ProviderRequestAuth.apiKey', async () => {
     providers['p'] = { type: 'kimi', baseUrl: 'https://example.test/v1', apiKey: 'sk-provider' };
     models['m'] = {

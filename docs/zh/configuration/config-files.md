@@ -111,9 +111,10 @@ timeout = 5
 | `image` | `table` | — | 图片压缩参数 → [`image`](#image) |
 | `services` | `table` | — | 内置外部服务配置 → [`services`](#services) |
 | `permission` | `table` | — | 初始权限规则 → [`permission`](#permission) |
+| `pool` | `table` | — | 供应商池故障转移与限流恢复参数 → [`pool`](#pool) |
 | `hooks` | `array<table>` | — | 生命周期 hook，详见 [Hooks](../customization/hooks.md) |
 
-以下各节对 `providers`、`models`、`thinking`、`loop_control`、`background`、`image`、`services`、`permission` 等嵌套表逐一展开。
+以下各节对 `providers`、`models`、`thinking`、`loop_control`、`background`、`image`、`services`、`permission`、`pool` 等嵌套表逐一展开。
 
 ## `providers`
 
@@ -144,7 +145,7 @@ KIMI_BASE_URL = "https://api.moonshot.ai/v1"
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `provider` | `string` | 是 | 使用的供应商名称，必须在 `providers` 中定义 |
+| `provider` | `string` 或 `array<string>` | 是 | 使用的供应商名称，必须在 `providers` 中定义。写成数组（如 `["a", "b"]`）时声明一个**供应商池**：按声明顺序优先级排列，首个供应商被限流（429）时自动故障转移到下一个，详见 [`pool`](#pool) |
 | `model` | `string` | 是 | 调用 API 时实际传给服务端的模型 ID |
 | `max_context_size` | `integer` | 是 | 最大上下文长度（token 数），必须 ≥ 1 |
 | `max_output_size` | `integer` | 否 | 单次请求的输出 token 上限（对应 `max_tokens`）。目前仅 `anthropic` 供应商读取。为 Claude 模型设置后，这个显式值会覆盖内置的服务端最大值 |
@@ -182,6 +183,41 @@ display_name = "Kimi for Coding (custom)"
 `[models."<alias>".overrides]` 接受普通模型字段，例如 `max_context_size`、`max_output_size`、`capabilities`、`display_name`、`reasoning_key`、`adaptive_thinking`、`support_efforts` 和 `default_effort`。不接受身份 / 路由字段：`provider`、`model`、`protocol` 和 `beta_api`。
 
 无需修改配置文件也可以临时切换模型——通过 `KIMI_MODEL_*` 环境变量在内存里合成一个临时供应商，详见[用环境变量定义模型](./env-vars.md#用环境变量定义模型-kimi-model)。
+
+## `pool`
+
+`pool` 表调优供应商池（模型的 `provider` 写成数组时生效）的故障转移与限流恢复行为。所有字段均可选：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `strategy` | `string` | `"priority"` | 端点选择策略：`"priority"` 总是优先列表里第一个健康供应商，被打挂才下移，恢复后回到最高优先级；`"round_robin"` 在健康供应商之间轮转以分摊限流 |
+| `cooldown_base_ms` | `integer` | `60000` | 供应商被限流（429）后的基础冷却毫秒数，连续失败按 2 倍递增，封顶 `cooldown_max_ms`。服务端返回 `Retry-After` 时取两者较大值 |
+| `cooldown_max_ms` | `integer` | `1800000` | 冷却时长上限（默认 30 分钟） |
+| `probe_interval_ms` | `integer` | `3600000` | 主动恢复探测间隔（默认 1 小时，最小 1000）。每个间隔对被限流的供应商发一次 1 token 的最小请求，成功即恢复轮替 |
+| `probe_enabled` | `boolean` | `true` | 是否启用主动恢复探测。设为 `false` 后只靠被动恢复（冷却到期后的第一个真实请求触发） |
+
+示例：
+
+```toml
+[providers.kimi-a]
+type = "kimi"
+api_key = "sk-aaa"
+
+[providers.kimi-b]
+type = "kimi"
+api_key = "sk-bbb"
+
+[models.k2]
+provider = ["kimi-a", "kimi-b"]
+model = "kimi-k2"
+max_context_size = 262144
+
+[pool]
+strategy = "priority"
+probe_interval_ms = 3600000
+```
+
+注意：探测请求每小时每个被限流的供应商消耗约 1 个 token；凭证失效（401/403）的供应商会在会话内直接移出轮替；上下文超长等确定性错误不会触发故障转移。
 
 ## `thinking`
 

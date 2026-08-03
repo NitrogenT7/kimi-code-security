@@ -111,7 +111,7 @@ export function buildMcpStatusReportLines(options: McpStatusReportOptions): stri
       const description = group.description ?? '';
       if (description.length > 0) lines.push(`    ${muted(description)}`);
       lines.push(`    ${muted('servers:')} ${value(group.servers.join(', '))}`);
-      if (group.skillPrefixes.length > 0) {
+      if ((group.skillPrefixes ?? []).length > 0) {
         lines.push(`    ${muted('skills:')} ${value(group.skillPrefixes.join(', '))}`);
       }
     }

@@ -153,7 +153,7 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
         `Unknown MCP group: ${payload.groupName}`,
       );
     }
-    const prefixes = group.skillPrefixes;
+    const prefixes = group.skillPrefixes ?? [];
     agent.allowedSkillPrefixes = prefixes.length > 0 ? [...prefixes] : null;
     agent.mcpGroupMode = payload.groupName;
   }

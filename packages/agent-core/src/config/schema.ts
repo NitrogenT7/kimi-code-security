@@ -40,7 +40,9 @@ export const ProviderConfigSchema = z.object({
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
 const ModelAliasBaseSchema = z.object({
-  provider: z.string(),
+  // Single provider name, or an ordered pool of provider names (first =
+  // highest priority). A pool fails over to the next provider on rate limits.
+  provider: z.union([z.string(), z.array(z.string()).min(1)]),
   model: z.string(),
   maxContextSize: z.number().int().min(1),
   maxOutputSize: z.number().int().min(1).optional(),
@@ -296,6 +298,23 @@ export const McpServerConfigSchema = z.preprocess((raw) => {
 
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 
+export const PoolConfigSchema = z.object({
+  // Endpoint selection: 'priority' always prefers the first healthy provider;
+  // 'round_robin' spreads requests across healthy providers.
+  strategy: z.enum(['priority', 'round_robin']).optional(),
+  // Base cooldown after a rate-limit rejection; doubles per consecutive
+  // failure (server Retry-After wins when longer) up to cooldownMaxMs.
+  cooldownBaseMs: z.number().int().min(1).optional(),
+  cooldownMaxMs: z.number().int().min(1).optional(),
+  // Active recovery probe interval for rate-limited endpoints (default 1h).
+  // Each probe is a single 1-token request. Set probeEnabled = false to only
+  // recover passively (on the next request after cooldown expiry).
+  probeIntervalMs: z.number().int().min(1000).optional(),
+  probeEnabled: z.boolean().optional(),
+});
+
+export type PoolConfig = z.infer<typeof PoolConfigSchema>;
+
 export const KimiConfigSchema = z.object({
   providers: z.record(z.string(), ProviderConfigSchema).default({}),
   defaultProvider: z.string().optional(),
@@ -317,6 +336,7 @@ export const KimiConfigSchema = z.object({
   image: ImageConfigSchema.optional(),
   modelCatalog: ModelCatalogConfigSchema.optional(),
   experimental: ExperimentalConfigSchema.optional(),
+  pool: PoolConfigSchema.optional(),
   telemetry: z.boolean().optional(),
   raw: z.record(z.string(), z.unknown()).optional(),
 });
@@ -333,6 +353,7 @@ const SubagentConfigPatchSchema = SubagentConfigSchema.partial();
 const ImageConfigPatchSchema = ImageConfigSchema.partial();
 const ModelCatalogConfigPatchSchema = ModelCatalogConfigSchema.partial();
 const ExperimentalConfigPatchSchema = ExperimentalConfigSchema;
+const PoolConfigPatchSchema = PoolConfigSchema.partial();
 const MoonshotServiceConfigPatchSchema = MoonshotServiceConfigSchema.partial();
 const ServicesConfigPatchSchema = z.object({
   moonshotSearch: MoonshotServiceConfigPatchSchema.optional(),
@@ -361,6 +382,7 @@ export const KimiConfigPatchSchema = z
     image: ImageConfigPatchSchema.optional(),
     modelCatalog: ModelCatalogConfigPatchSchema.optional(),
     experimental: ExperimentalConfigPatchSchema.optional(),
+    pool: PoolConfigPatchSchema.optional(),
     telemetry: z.boolean().optional(),
   })
   .strict();

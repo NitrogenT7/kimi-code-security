@@ -264,6 +264,12 @@ export * from '#/session/interaction/interaction';
 export * from '#/session/interaction/interactionService';
 export * from '#/session/sessionContext/sessionContext';
 
+export * from '#/session/providerPool/configSection';
+export * from '#/session/providerPool/providerPool';
+export * from '#/session/providerPool/poolHealth';
+export * from '#/session/providerPool/poolingModel';
+export * from '#/session/providerPool/providerPoolService';
+
 import '#/session/approval/approval';
 import '#/session/approval/approvalService';
 export { ISessionApprovalService } from '#/session/approval/approval';

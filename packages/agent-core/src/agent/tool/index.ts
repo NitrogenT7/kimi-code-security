@@ -745,7 +745,8 @@ export class ToolManager {
         this.agent.cron && new b.CronCreateTool(this.agent.cron),
         this.agent.cron && new b.CronListTool(this.agent.cron),
         this.agent.cron && new b.CronDeleteTool(this.agent.cron),
-        this.agent.skills?.registry.listInvocableSkills().length && new b.SkillTool(this.agent),
+        (this.agent.skills?.registry.listInvocableSkills().length ?? 0) > 0 &&
+          new b.SkillTool(this.agent),
         this.agent.subagentHost &&
           new b.AgentTool(
             this.agent.subagentHost,

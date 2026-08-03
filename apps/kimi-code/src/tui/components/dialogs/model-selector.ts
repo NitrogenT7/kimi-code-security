@@ -1,4 +1,4 @@
-import { effectiveModelAlias, type ModelAlias, type ThinkingEffort } from '@moonshot-ai/kimi-code-sdk';
+import { effectiveModelAlias, primaryProviderName, type ModelAlias, type ThinkingEffort } from '@moonshot-ai/kimi-code-sdk';
 import {
   Container,
   Key,
@@ -55,7 +55,7 @@ export function createModelChoiceOptions(
     const effective = effectiveModelAlias(cfg);
     return {
       value: alias,
-      label: `${modelDisplayName(alias, effective)} (${providerDisplayName(effective.provider)})`,
+      label: `${modelDisplayName(alias, effective)} (${providerDisplayName(primaryProviderName(effective) ?? '')})`,
     };
   });
 }
@@ -89,7 +89,7 @@ function createModelChoices(models: Record<string, ModelAlias>): readonly ModelC
   return Object.entries(models).map(([alias, cfg]) => {
     const effective = effectiveModelAlias(cfg);
     const name = modelDisplayName(alias, effective);
-    const provider = providerDisplayName(effective.provider);
+    const provider = providerDisplayName(primaryProviderName(effective) ?? '');
     return { alias, model: effective, name, provider, label: `${name} (${provider})` };
   });
 }

@@ -1,9 +1,19 @@
 import type { Logger } from '#/logging/types';
 import type { ProviderConfig as KosongProviderConfig, ModelCapability, ProviderRequestAuth } from '@moonshot-ai/kosong';
-import { APIStatusError, getModelCapability, UNKNOWN_CAPABILITY } from '@moonshot-ai/kosong';
+import {
+  APIEmptyResponseError,
+  APIStatusError,
+  createProvider,
+  generate,
+  getModelCapability,
+  UNKNOWN_CAPABILITY,
+  type Message,
+} from '@moonshot-ai/kosong';
 import { parseKimiCodeCustomHeaders } from '@moonshot-ai/kimi-code-oauth';
 import {
   effectiveModelAlias,
+  primaryProviderName,
+  providerNamesOf,
   type KimiConfig,
   type ModelAlias,
   type OAuthRef,
@@ -11,6 +21,13 @@ import {
   type ProviderType,
 } from '../config';
 import { ErrorCodes, isKimiError, KimiError } from '../errors';
+
+import {
+  PoolHealthRegistry,
+  PoolRecoveryProber,
+  resolvePoolOptions,
+  type PoolRecoveryProberHooks,
+} from './provider-pool';
 
 export interface BearerTokenProvider {
   getAccessToken(options?: { readonly force?: boolean }): Promise<string>;
@@ -51,6 +68,19 @@ export interface ModelProvider {
   readonly defaultModel?: string;
   resolveProviderConfig(model: string): ResolvedRuntimeProvider;
   resolveAuth?(model: string, options?: { readonly log?: Logger }): AuthorizedRequest | undefined;
+  /**
+   * When the model alias declares an ordered provider pool
+   * (`provider = ["a", "b", ...]`), returns every endpoint in priority order.
+   * `undefined` for single-provider aliases — callers keep the classic path.
+   */
+  resolveProviderPool?(model: string): ResolvedProviderPool | undefined;
+  /** Session-shared endpoint health view, present when pooling is supported. */
+  readonly poolHealth?: PoolHealthRegistry;
+}
+
+export interface ResolvedProviderPool {
+  readonly alias: string;
+  readonly endpoints: readonly ResolvedRuntimeProvider[];
 }
 
 export class SingleModelProvider implements ModelProvider {
@@ -81,7 +111,18 @@ export class SingleModelProvider implements ModelProvider {
 }
 
 export class ProviderManager implements ModelProvider {
-  constructor(private readonly options: ProviderManagerOptions) {}
+  /**
+   * Session-shared pool endpoint health. Always present (cheap when no pool
+   * is configured) so agents can read it without a capability probe.
+   */
+  readonly poolHealth: PoolHealthRegistry;
+  private prober: PoolRecoveryProber | undefined;
+  /** Latest resolved endpoint configs by provider name, for recovery probes. */
+  private readonly poolEndpoints = new Map<string, ResolvedRuntimeProvider>();
+
+  constructor(private readonly options: ProviderManagerOptions) {
+    this.poolHealth = new PoolHealthRegistry(() => resolvePoolOptions(this.config.pool));
+  }
 
   private get config(): KimiConfig {
     const { config } = this.options;
@@ -89,6 +130,31 @@ export class ProviderManager implements ModelProvider {
   }
 
   resolveProviderConfig(model: string): ResolvedRuntimeProvider {
+    const alias = this.modelAlias(model);
+    const providerName = primaryProviderName(alias) ?? this.config.defaultProvider;
+    if (providerName === undefined) {
+      throw new KimiError(
+        ErrorCodes.CONFIG_INVALID,
+        `Model "${model}" must define a provider in config.toml.`,
+      );
+    }
+    return this.resolveOne(model, alias, providerName);
+  }
+
+  resolveProviderPool(model: string): ResolvedProviderPool | undefined {
+    const alias = this.modelAlias(model);
+    const names =
+      providerNamesOf(alias) ??
+      (this.config.defaultProvider !== undefined ? [this.config.defaultProvider] : undefined);
+    if (names === undefined || names.length <= 1) return undefined;
+    const endpoints = names.map((name) => this.resolveOne(model, alias, name));
+    for (const endpoint of endpoints) {
+      this.poolEndpoints.set(endpoint.providerName, endpoint);
+    }
+    return { alias: model, endpoints };
+  }
+
+  private modelAlias(model: string): ModelAlias {
     const alias = this.config.models?.[model];
     if (alias === undefined) {
       throw new KimiError(
@@ -96,15 +162,10 @@ export class ProviderManager implements ModelProvider {
         `Model "${model}" is not configured in config.toml. Add a [models."${model}"] entry with max_context_size.`,
       );
     }
+    return alias;
+  }
 
-    const providerName = alias.provider ?? this.config.defaultProvider;
-    if (providerName === undefined) {
-      throw new KimiError(
-        ErrorCodes.CONFIG_INVALID,
-        `Model "${model}" must define a provider in config.toml.`,
-      );
-    }
-
+  private resolveOne(model: string, alias: ModelAlias, providerName: string): ResolvedRuntimeProvider {
     const providerConfig = this.config.providers[providerName];
     if (providerConfig === undefined) {
       throw new KimiError(
@@ -223,7 +284,62 @@ export class ProviderManager implements ModelProvider {
       }
     };
   }
+
+  /**
+   * Start the hourly recovery prober for pool endpoints. Idempotent; the tick
+   * reads `pool.probeEnabled` / `pool.probeIntervalMs` live so config reloads
+   * apply without a restart. The Session owns start/stop (see `Session.close`).
+   */
+  startRecoveryProbing(hooks: PoolRecoveryProberHooks = {}): void {
+    if (this.prober !== undefined) return;
+    this.prober = new PoolRecoveryProber({
+      registry: this.poolHealth,
+      options: () => resolvePoolOptions(this.config.pool),
+      probe: (name) => this.probeEndpoint(name),
+      ...hooks,
+    });
+    this.prober.start();
+  }
+
+  stopRecoveryProbing(): void {
+    this.prober?.stop();
+    this.prober = undefined;
+  }
+
+  /**
+   * One minimal request against a pool endpoint to test whether its rate
+   * limit has lifted. A 200 with an empty/one-token body still proves quota,
+   * so `APIEmptyResponseError` counts as recovered. Endpoints whose config
+   * disappeared since resolution are treated as healthy (no longer probed).
+   */
+  private async probeEndpoint(name: string): Promise<void> {
+    const endpoint = this.poolEndpoints.get(name);
+    if (endpoint === undefined) return;
+    const provider = createProvider(endpoint.provider);
+    const capped = provider.withMaxCompletionTokens?.(1) ?? provider;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, 30_000);
+    try {
+      await generate(capped, PROBE_SYSTEM_PROMPT, [], [PROBE_USER_MESSAGE], undefined, {
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof APIEmptyResponseError) return;
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
 }
+
+const PROBE_SYSTEM_PROMPT = 'You are a connectivity check. Reply with a single word: ok.';
+const PROBE_USER_MESSAGE: Message = {
+  role: 'user',
+  content: [{ type: 'text', text: 'ping' }],
+  toolCalls: [],
+};
 
 function resolveModelCapabilities(
   alias: ModelAlias,

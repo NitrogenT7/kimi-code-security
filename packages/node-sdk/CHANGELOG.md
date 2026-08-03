@@ -1,5 +1,12 @@
 # @moonshot-ai/kimi-code-sdk
 
+## 0.14.0
+
+### Minor Changes
+
+- 3efb987: Add security-research capabilities to the v1 engine: MCP groups with lazy loading and the MCPManager tool, four-element commander-intent goals with templates, a question-driven TodoList with a findings archive, image payload validation, and retention-plan compaction behind a flag.
+- 3efb987: Add security-research capabilities to the v2 engine: MCP groups with lazy loading, the MCPManager tool, and group-bound security subagent roles; four-element goals with templates; a question-driven TodoList with an InvestigationBoard; impostor image payload downgrading; and retention-plan compaction behind a flag.
+
 ## 0.13.4
 
 ### Patch Changes

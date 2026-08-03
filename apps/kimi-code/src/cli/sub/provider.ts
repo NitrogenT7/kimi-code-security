@@ -28,6 +28,7 @@ import {
   DEFAULT_CATALOG_URL,
   fetchCatalog,
   inferWireType,
+  primaryProviderName,
   type Catalog,
   type CatalogProviderEntry,
   type KimiConfig,
@@ -179,9 +180,10 @@ export async function handleProviderList(
 
   const modelsByProvider = new Map<string, string[]>();
   for (const [alias, model] of Object.entries(config.models ?? {})) {
-    const list = modelsByProvider.get(model.provider) ?? [];
+    const providerName = primaryProviderName(model) ?? '';
+    const list = modelsByProvider.get(providerName) ?? [];
     list.push(alias);
-    modelsByProvider.set(model.provider, list);
+    modelsByProvider.set(providerName, list);
   }
 
   const providerIds = Object.keys(config.providers).toSorted();

@@ -31,7 +31,7 @@
  * declare `protocol`.
  */
 
-import { effectiveModelAlias, type ProviderType } from '@moonshot-ai/agent-core';
+import { effectiveModelAlias, primaryProviderName, type ProviderType } from '@moonshot-ai/agent-core';
 import type { KimiHarness, ModelAlias } from '@moonshot-ai/kimi-code-sdk';
 
 /**
@@ -154,7 +154,7 @@ function providerTypeOf(
     defaultProvider?: string | undefined;
   },
 ): ProviderType | undefined {
-  const providerName = alias.provider ?? config.defaultProvider;
+  const providerName = primaryProviderName(alias) ?? config.defaultProvider;
   const providerType =
     providerName === undefined ? undefined : config.providers?.[providerName]?.type;
   // Flat models (inline base_url, no named provider) have no provider entry to

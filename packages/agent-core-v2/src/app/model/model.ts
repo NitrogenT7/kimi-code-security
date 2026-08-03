@@ -45,7 +45,9 @@ const ModelBaseSchema = z.object({
   name: z.string().optional(),
   aliases: z.array(z.string()).optional(),
 
-  provider: z.string().optional(),
+  // Single provider name, or an ordered pool of provider names (first =
+  // highest priority). A pool fails over to the next provider on rate limits.
+  provider: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
   model: z.string().optional(),
   maxContextSize: z.number().int().min(1).optional(),
   maxOutputSize: z.number().int().min(1).optional(),
@@ -83,6 +85,25 @@ export type ModelAlias = ModelConfig;
 export const ModelsSectionSchema = z.record(z.string(), ModelSchema);
 
 export type ModelsSection = z.infer<typeof ModelsSectionSchema>;
+
+/**
+ * Every provider name declared on the alias, in declaration order. `undefined`
+ * when the alias names no provider (the caller's default-provider fallback
+ * applies). A single string normalizes to a one-element list.
+ */
+export function providerNamesOf(model: ModelConfig): readonly string[] | undefined {
+  const provider = model.provider;
+  if (provider === undefined) return undefined;
+  return typeof provider === 'string' ? [provider] : provider;
+}
+
+/**
+ * The first declared provider name — what consumers that only understand one
+ * provider (auth summary, model catalog, single-provider resolution) use.
+ */
+export function primaryProviderName(model: ModelConfig): string | undefined {
+  return providerNamesOf(model)?.[0];
+}
 
 export interface ModelsChangedEvent {
   readonly added: readonly string[];

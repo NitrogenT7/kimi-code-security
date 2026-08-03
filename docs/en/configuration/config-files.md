@@ -111,9 +111,10 @@ Fields in the config file fall into two categories: **top-level scalars** that d
 | `image` | `table` | — | Image compression parameters → [`image`](#image) |
 | `services` | `table` | — | Built-in external service configuration → [`services`](#services) |
 | `permission` | `table` | — | Initial permission rules → [`permission`](#permission) |
+| `pool` | `table` | — | Provider pool failover and rate-limit recovery parameters → [`pool`](#pool) |
 | `hooks` | `array<table>` | — | Lifecycle hooks; see [Hooks](../customization/hooks.md) |
 
-The following sections cover each of the nested tables in turn: `providers`, `models`, `thinking`, `loop_control`, `background`, `image`, `services`, and `permission`.
+The following sections cover each of the nested tables in turn: `providers`, `models`, `thinking`, `loop_control`, `background`, `image`, `services`, `permission`, and `pool`.
 
 ## `providers`
 
@@ -144,7 +145,7 @@ Each entry in the `models` table defines a model alias (the name used in `defaul
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `provider` | `string` | Yes | Name of the provider to use; must be defined in `providers` |
+| `provider` | `string` or `array<string>` | Yes | Name of the provider to use; must be defined in `providers`. As an array (e.g. `["a", "b"]`) it declares a **provider pool** in priority order: when the first provider is rate limited (429), requests fail over to the next one — see [`pool`](#pool) |
 | `model` | `string` | Yes | Model identifier sent to the server when calling the API |
 | `max_context_size` | `integer` | Yes | Maximum context length in tokens; must be at least 1 |
 | `max_output_size` | `integer` | No | Per-request output token cap (maps to `max_tokens`). Currently only the `anthropic` provider honors it. When set for a Claude model, this explicit value overrides the built-in server-side maximum |
@@ -182,6 +183,41 @@ display_name = "Kimi for Coding (custom)"
 `[models."<alias>".overrides]` accepts ordinary model fields such as `max_context_size`, `max_output_size`, `capabilities`, `display_name`, `reasoning_key`, `adaptive_thinking`, `support_efforts`, and `default_effort`. It does not accept identity / routing fields: `provider`, `model`, `protocol`, and `beta_api`.
 
 You can also switch models temporarily without touching the config file — by setting `KIMI_MODEL_*` environment variables, the CLI synthesizes a temporary provider in memory that does not persist after restart. See [Define a model from environment variables](./env-vars.md#define-a-model-from-environment-variables-kimi_model).
+
+## `pool`
+
+The `pool` table tunes failover and rate-limit recovery for provider pools (when a model's `provider` is an array). All fields are optional:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `strategy` | `string` | `"priority"` | Endpoint selection: `"priority"` always prefers the first healthy provider in the list, falls down only while it is unavailable, and returns to it after recovery; `"round_robin"` rotates across healthy providers to spread rate limits |
+| `cooldown_base_ms` | `integer` | `60000` | Base cooldown in milliseconds after a provider is rate limited (429); doubles per consecutive failure up to `cooldown_max_ms`. A server `Retry-After` wins when longer |
+| `cooldown_max_ms` | `integer` | `1800000` | Cooldown ceiling (default 30 minutes) |
+| `probe_interval_ms` | `integer` | `3600000` | Active recovery probe interval (default 1 hour, minimum 1000). Each interval sends a 1-token minimal request to every rate-limited provider; a success puts it back in rotation |
+| `probe_enabled` | `boolean` | `true` | Whether active recovery probing is enabled. Set to `false` to recover only passively (the first real request after cooldown expiry) |
+
+Example:
+
+```toml
+[providers.kimi-a]
+type = "kimi"
+api_key = "sk-aaa"
+
+[providers.kimi-b]
+type = "kimi"
+api_key = "sk-bbb"
+
+[models.k2]
+provider = ["kimi-a", "kimi-b"]
+model = "kimi-k2"
+max_context_size = 262144
+
+[pool]
+strategy = "priority"
+probe_interval_ms = 3600000
+```
+
+Notes: each probe costs about 1 token per limited provider per interval; a provider whose credentials are rejected (401/403) is removed from rotation for the rest of the session; deterministic errors such as context overflow never trigger failover.
 
 ## `thinking`
 

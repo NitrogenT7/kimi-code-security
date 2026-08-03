@@ -152,6 +152,27 @@ kimi
 
 To route Vertex requests through a custom (e.g. proxied) endpoint, set `base_url` (or the `GOOGLE_VERTEX_BASE_URL` env var); when omitted, the SDK default regional `*-aiplatform.googleapis.com` host is used. As with `google-genai`, give the host root only — the SDK appends `/v1beta1/publishers/google/models/…` itself.
 
+## Provider pools (rate-limit failover)
+
+When a single API key or provider keeps hitting rate limits (429), declare a provider pool by writing the model alias's `provider` as an **array**. Declaration order sets priority: when the current provider is rate limited, requests fail over to the next one, the limited provider cools down (a server `Retry-After` wins), and traffic returns to the highest priority once it recovers. Every hour a 1-token active probe also checks each limited provider so recovery is noticed early:
+
+```toml
+[providers.kimi-a]
+type = "kimi"
+api_key = "sk-aaa"
+
+[providers.kimi-b]
+type = "kimi"
+api_key = "sk-bbb"
+
+[models.k2]
+provider = ["kimi-a", "kimi-b"]
+model = "kimi-k2"
+max_context_size = 262144
+```
+
+A pool can mix multiple keys of the same provider, multiple base URLs, or different providers entirely. Cooldowns, probe interval, and disabling probes are covered in [Configuration files: `pool`](./config-files.md#pool).
+
 ## OAuth and credential injection
 
 The Kimi Code managed service uses OAuth rather than static API keys. After running `/login`, the built-in authentication toolchain automatically writes and refreshes credentials — no manual configuration is needed in `config.toml` for this.

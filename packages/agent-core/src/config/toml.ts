@@ -18,6 +18,7 @@ import {
   type MoonshotServiceConfig,
   type OAuthRef,
   type PermissionConfig,
+  type PoolConfig,
   type ProviderConfig,
   type ServicesConfig,
   type SubagentConfig,
@@ -320,6 +321,8 @@ export function transformTomlData(data: Record<string, unknown>): Record<string,
       result[targetKey] = cloneRecord(value);
     } else if (targetKey === 'subagent' && isPlainObject(value)) {
       result[targetKey] = transformPlainObject(value);
+    } else if (targetKey === 'pool' && isPlainObject(value)) {
+      result[targetKey] = transformPlainObject(value);
     } else if (!isPlainObject(value)) {
       result[targetKey] = value;
     }
@@ -499,6 +502,7 @@ export function configToTomlData(config: KimiConfig): Record<string, unknown> {
   setSection(out, 'image', config.image, imageToToml);
   setSection(out, 'experimental', config.experimental, experimentalToToml);
   setSection(out, 'permission', config.permission, permissionToToml);
+  setSection(out, 'pool', config.pool, poolToToml);
   setHooks(out, config.hooks);
 
   return out;
@@ -595,6 +599,14 @@ function thinkingToToml(thinking: ThinkingConfig, rawThinking: unknown): Record<
   const out = cloneRecord(rawThinking);
   delete out['mode'];
   for (const [key, value] of Object.entries(thinking)) {
+    setDefined(out, camelToSnake(key), value);
+  }
+  return out;
+}
+
+function poolToToml(pool: PoolConfig, rawPool: unknown): Record<string, unknown> {
+  const out = cloneRecord(rawPool);
+  for (const [key, value] of Object.entries(pool)) {
     setDefined(out, camelToSnake(key), value);
   }
   return out;
