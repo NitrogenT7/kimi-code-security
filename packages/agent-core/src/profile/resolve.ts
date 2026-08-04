@@ -14,6 +14,7 @@ interface MergedAgentProfile {
   readonly promptVars: Record<string, string>;
   readonly tools: string[];
   readonly whenToUse?: string | undefined;
+  readonly model?: string | undefined;
   readonly subagents?: Record<string, RawSubagentProfile> | undefined;
 }
 
@@ -99,6 +100,7 @@ function resolveMergedProfile(
     },
     tools: profile.tools !== undefined ? [...profile.tools] : [...(parent?.tools ?? [])],
     whenToUse: profile.whenToUse ?? parent?.whenToUse,
+    model: profile.model ?? parent?.model,
     subagents: cloneSubagents(profile.subagents),
   };
 
@@ -113,6 +115,7 @@ function toResolvedProfile(merged: MergedAgentProfile): ResolvedAgentProfile {
     systemPrompt: createSystemPromptRenderer(merged),
     tools: [...merged.tools],
     whenToUse: merged.whenToUse,
+    model: merged.model,
   };
 }
 

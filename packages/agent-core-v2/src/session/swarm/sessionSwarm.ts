@@ -23,6 +23,8 @@ type SessionSwarmTaskBase<T> = {
   readonly runInBackground: boolean;
   readonly timeout?: number;
   readonly signal?: AbortSignal;
+  /** Optional model id for the subagent; resolved against routing / profile / caller model. */
+  readonly modelAlias?: string;
 };
 
 export type SessionSwarmSpawnTask<T = unknown> = SessionSwarmTaskBase<T> & {
@@ -45,6 +47,7 @@ export interface SessionSwarmRunArgs<T = unknown> {
 export interface SessionSwarmRunResult<T = unknown> {
   readonly task: SessionSwarmTask<T>;
   readonly agentId?: string;
+  readonly modelAlias?: string;
   readonly status: 'completed' | 'failed' | 'aborted';
   readonly state?: 'started' | 'not_started';
   readonly result?: string;

@@ -47,7 +47,7 @@ function agentTask(
   description: string,
 ): SubagentTask {
   return new SubagentTask(
-    { agentId: 'agent-child', profileName: 'coder', completion },
+    { agentId: 'agent-child', profileName: 'coder', modelAlias: 'test-model', completion },
     description,
     new AbortController(),
   );
@@ -320,7 +320,7 @@ describe('task notification → main agent (real Agent instance)', () => {
         const background = main.get(IAgentTaskService);
         const taskId = background.registerTask(
           new SubagentTask(
-            { agentId: 'agent-child', profileName: 'coder', completion },
+            { agentId: 'agent-child', profileName: 'coder', modelAlias: 'test-model', completion },
             'kill-order repro',
             controller,
           ),

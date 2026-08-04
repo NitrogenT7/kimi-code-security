@@ -51,6 +51,8 @@ type BaseQueuedSubagentTask<T> = {
   readonly runInBackground: boolean;
   readonly timeout?: number;
   readonly signal?: AbortSignal;
+  /** Optional model alias for the subagent; resolved against routing / profile / caller model. */
+  readonly modelAlias?: string;
 };
 
 export type SpawnQueuedSubagentTask<T = unknown> = BaseQueuedSubagentTask<T> & {
@@ -70,6 +72,7 @@ export type QueuedSubagentTask<T = unknown> =
 export type SubagentResult<T = unknown> = {
   readonly task: QueuedSubagentTask<T>;
   readonly agentId?: string;
+  readonly modelAlias?: string;
   readonly status: 'completed' | 'failed' | 'aborted';
   readonly state?: 'started' | 'not_started';
   readonly result?: string;
@@ -102,6 +105,7 @@ type TaskState<T> = {
   readonly index: number;
   readonly task: QueuedSubagentTask<T>;
   agentId?: string;
+  modelAlias?: string;
   retryAgentId?: string;
   retryCount: number;
   retryReadyAt: number;
@@ -306,6 +310,7 @@ export class SubagentBatch<T> {
       description: task.description,
       swarmIndex: task.swarmIndex,
       runInBackground: task.runInBackground,
+      modelAlias: task.modelAlias,
       signal: attempt.controller.signal,
       onReady: () => {
         this.markAttemptReady(attempt);
@@ -333,11 +338,13 @@ export class SubagentBatch<T> {
     }
 
     attempt.state.agentId = handle.agentId;
+    attempt.state.modelAlias = handle.modelAlias;
     try {
       const completion = await handle.completion;
       return {
         task,
         agentId: handle.agentId,
+        modelAlias: handle.modelAlias,
         status: 'completed',
         result: completion.result,
         usage: completion.usage,
@@ -363,6 +370,7 @@ export class SubagentBatch<T> {
     return {
       task: attempt.state.task,
       agentId: attempt.state.agentId,
+      modelAlias: attempt.state.modelAlias,
       status,
       state: attempt.state.agentId === undefined ? 'not_started' : 'started',
       error: this.attemptErrorMessage(attempt, error, status),

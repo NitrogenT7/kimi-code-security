@@ -24,6 +24,7 @@ import { ToolAccesses, type ExecutableTool } from '#/tool/toolContract';
 import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { IAgentLoopService } from '#/agent/loop/loop';
 import { IAgentUserToolService, type UserToolRegistration } from '#/agent/userTool/userTool';
+import { IModelResolver } from '#/app/model/modelResolver';
 import {
   AgentSwarmToolInputSchema,
   type AgentSwarmToolInput,
@@ -195,7 +196,10 @@ function createAgentLifecycleStub(options: AgentLifecycleStubOptions = {}): Agen
         if (serviceId === IAgentProfileService) {
           return {
             _serviceBrand: undefined,
-            data: () => ({ profileName: profileByAgentId.get(agentId) }),
+            data: () => ({
+              profileName: profileByAgentId.get(agentId),
+              modelAlias: 'mock-model',
+            }),
             update: () => {},
             isToolActive: () => false,
           } as never;
@@ -402,11 +406,17 @@ describe('AgentToolInputSchema', () => {
     expect((properties['resume']?.description ?? '').toLowerCase()).toContain('subagent_type');
   });
 
-  it('does not expose timeout or model parameters in the JSON schema', () => {
+  it('does not expose a timeout parameter in the JSON schema', () => {
     const properties = agentSchemaProperties();
 
     expect(properties).not.toHaveProperty('timeout');
-    expect(properties).not.toHaveProperty('model');
+  });
+
+  it('exposes a model parameter in the JSON schema', () => {
+    const properties = agentSchemaProperties<{ description?: string }>();
+
+    expect(properties).toHaveProperty('model');
+    expect(properties['model']?.description ?? '').toContain('models');
   });
 
   it('normalizes the default subagent type into tool args', () => {
@@ -487,6 +497,21 @@ describe('Agent tool description', () => {
     expect(description).toContain(
       '- coder: General software engineering agent — the only subagent type with file-editing tools',
     );
+  });
+
+  it('lists available models in the description when configured', () => {
+    ctx = createTestAgent({
+      initialConfig: {
+        models: {
+          'ds-flash': { provider: 'test-provider', model: 'ds-flash', maxContextSize: 200_000 },
+        },
+      },
+    });
+
+    const description = agentDescription();
+
+    expect(description).toContain('Available models (pass via model):');
+    expect(description).toContain('- ds-flash');
   });
 });
 
@@ -588,6 +613,102 @@ describe('Agent tool execution contract', () => {
     expect(result.output).toContain('agent_id: agent-child');
     expect(result.output).toContain('actual_subagent_type: explore');
     expect(result.output).toContain('child result');
+  });
+
+  it('binds the model argument on spawn and renders the resolved alias', async () => {
+    const lifecycle = createAgentLifecycleStub({
+      createAgentIds: ['agent-child'],
+      runCompletion: async () => ({ summary: 'child result' }),
+    });
+    const modelResolver = {
+      _serviceBrand: undefined,
+      resolve: vi.fn(() => ({}) as never),
+      resolveWithProvider: vi.fn(),
+      findByName: vi.fn(() => []),
+    } as unknown as IModelResolver;
+    const context = createAgentToolContext(lifecycle, sessionService(IModelResolver, modelResolver));
+
+    const result = await executeAgentTool(context, {
+      prompt: 'Investigate',
+      description: 'Find cause',
+      model: 'ds-flash',
+    });
+
+    expect(lifecycle.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        binding: expect.objectContaining({ profile: 'coder', model: 'ds-flash' }),
+      }),
+    );
+    expect(modelResolver.resolve).toHaveBeenCalledWith('ds-flash');
+    expect(result.output).toContain('model_alias: ds-flash');
+  });
+
+  it('rejects an unknown model alias before creating the child agent', async () => {
+    const lifecycle = createAgentLifecycleStub();
+    const modelResolver = {
+      _serviceBrand: undefined,
+      resolve: vi.fn(() => {
+        throw new Error('Model "nope" is not configured');
+      }),
+      resolveWithProvider: vi.fn(),
+      findByName: vi.fn(() => []),
+    } as unknown as IModelResolver;
+    const context = createAgentToolContext(lifecycle, sessionService(IModelResolver, modelResolver));
+
+    const result = await executeAgentTool(context, {
+      prompt: 'Investigate',
+      description: 'Find cause',
+      model: 'nope',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('Unknown model alias "nope" for subagent');
+    expect(lifecycle.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps the child model on resume unless a model is given', async () => {
+    const lifecycle = createAgentLifecycleStub({
+      runCompletion: async () => ({ summary: 'resumed result' }),
+    });
+    const modelResolver = {
+      _serviceBrand: undefined,
+      resolve: vi.fn(() => ({}) as never),
+      resolveWithProvider: vi.fn(),
+      findByName: vi.fn(() => []),
+    } as unknown as IModelResolver;
+    const childProfile = {
+      _serviceBrand: undefined,
+      data: () => ({ profileName: 'explore', modelAlias: 'child-model' }),
+      update: vi.fn(),
+      isToolActive: () => false,
+    } as unknown as IAgentProfileService;
+    const context = createAgentToolContext(
+      lifecycle,
+      sessionService(IModelResolver, modelResolver),
+      sessionService(
+        ISessionMetadata,
+        sessionMetadataStub({ 'agent-existing': subagentMeta() }),
+      ),
+    );
+    lifecycle.addHandle('agent-existing', 'explore', new Map([[IAgentProfileService, childProfile]]));
+
+    // Resuming without a model keeps the child's current model.
+    await executeAgentTool(context, {
+      prompt: 'Continue',
+      description: 'Continue work',
+      resume: 'agent-existing',
+    });
+    expect(childProfile.update).not.toHaveBeenCalled();
+    expect(lifecycle.create).not.toHaveBeenCalled();
+
+    // Resuming with an explicit model switches the child.
+    await executeAgentTool(context, {
+      prompt: 'Continue',
+      description: 'Continue work',
+      resume: 'agent-existing',
+      model: 'ds-flash',
+    });
+    expect(childProfile.update).toHaveBeenCalledWith({ modelAlias: 'ds-flash' });
   });
 
   it('mirrors v1-compatible subagent lifecycle event fields', async () => {
@@ -829,7 +950,7 @@ describe('Agent tool execution contract', () => {
     expect(lifecycle.run).not.toHaveBeenCalled();
   });
 
-  it('realigns a directly resumed subagent to the caller current model', async () => {
+  it('keeps the directly resumed subagent on its current model', async () => {
     const targetProfile = {
       _serviceBrand: undefined,
       data: () => ({ profileName: 'explore', modelAlias: 'stale-model' }),
@@ -852,18 +973,21 @@ describe('Agent tool execution contract', () => {
       new Map([[IAgentProfileService, targetProfile]]),
     );
 
-    await executeAgentTool(context, {
+    const result = await executeAgentTool(context, {
       prompt: 'Continue',
       description: 'Continue work',
       resume: 'agent-existing',
     });
 
-    expect(targetProfile.update).toHaveBeenCalledWith({ modelAlias: 'mock-model' });
+    // Resume without a model keeps the child's current model instead of
+    // realigning it to the caller model.
+    expect(targetProfile.update).not.toHaveBeenCalled();
     expect(lifecycle.run).toHaveBeenCalledWith(
       'agent-existing',
       { kind: 'prompt', prompt: 'Continue' },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+    expect(result.output).toContain('model_alias: stale-model');
   });
 
   it('registers background subagents with the task manager', async () => {

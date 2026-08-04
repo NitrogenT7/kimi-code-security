@@ -758,6 +758,7 @@ export class ToolManager {
               subagentTimeoutMs: resolveSubagentTimeoutMs(
                 this.agent.kimiConfig?.subagent?.timeoutMs,
               ),
+              models: Object.keys(this.agent.kimiConfig?.models ?? {}),
             },
           ),
         this.agent.subagentHost &&

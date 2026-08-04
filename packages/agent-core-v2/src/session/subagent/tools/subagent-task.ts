@@ -15,6 +15,7 @@ type SubagentCompletion = {
 export type SubagentHandle = {
   readonly agentId: string;
   readonly profileName: string;
+  readonly modelAlias: string;
   readonly completion: Promise<SubagentCompletion>;
 };
 

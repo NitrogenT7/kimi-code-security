@@ -158,6 +158,14 @@ export const SubagentConfigSchema = z.object({
    * in milliseconds. `0` means no timeout. Defaults to 2 hours when unset.
    */
   timeoutMs: z.number().int().min(0).optional(),
+  /**
+   * Static model routing for subagents, keyed by profile name (the value of
+   * `subagent_type`). Each value must be a key of `models` in the config.
+   * Resolution priority: the `model` argument on the Agent / AgentSwarm
+   * call, then this routing entry, then the profile's own default `model`,
+   * then the caller's model.
+   */
+  routing: z.record(z.string(), z.string()).optional(),
 });
 
 export type SubagentConfig = z.infer<typeof SubagentConfigSchema>;

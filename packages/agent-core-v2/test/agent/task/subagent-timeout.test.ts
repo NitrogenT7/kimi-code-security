@@ -20,7 +20,7 @@ function agentTask(
   description: string,
 ): SubagentTask {
   return new SubagentTask(
-    { agentId: 'agent-child', profileName: 'coder', completion },
+    { agentId: 'agent-child', profileName: 'coder', modelAlias: 'test-model', completion },
     description,
     new AbortController(),
   );

@@ -60,6 +60,13 @@ export interface AgentProfile {
   readonly whenToUse?: string;
   readonly tools: readonly string[];
   /**
+   * Optional default model id (a key of the `models` config section) used
+   * when this profile is spawned as a subagent. A profile is model-agnostic
+   * by default: when unset, subagents inherit the caller's model unless the
+   * `model` argument or a `[subagent.routing]` entry assigns one.
+   */
+  readonly model?: string;
+  /**
    * Optional skill-name prefixes that sandbox this profile's skill listing:
    * when set, the profile's system prompt only lists skills whose name starts
    * with one of the prefixes (`'*'` disables filtering). Used by MCP-group-

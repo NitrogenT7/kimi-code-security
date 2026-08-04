@@ -20,6 +20,10 @@ export const RawAgentProfileSchema = z.object({
   // (`mcp__*`, `mcp__github__*`) that gate which MCP tools the profile sees.
   tools: z.array(z.string()).optional(),
   whenToUse: z.string().optional(),
+  // Optional default model alias (a key of `models` in the user config)
+  // used when spawning this profile as a subagent. An explicit `model`
+  // argument on the Agent / AgentSwarm call wins over this default.
+  model: z.string().optional(),
   subagents: z.record(z.string(), RawSubagentProfileSchema).optional(),
 });
 
@@ -52,5 +56,6 @@ export interface ResolvedAgentProfile {
   systemPrompt: SystemPromptRenderer;
   tools: string[];
   whenToUse?: string;
+  model?: string;
   subagents?: Record<string, ResolvedAgentProfile>;
 }

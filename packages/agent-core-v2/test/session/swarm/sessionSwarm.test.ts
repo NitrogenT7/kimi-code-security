@@ -13,6 +13,8 @@ import { IAgentProfileService, type ProfileData } from '#/agent/profile/profile'
 import { IAgentLoopService } from '#/agent/loop/loop';
 import { IAgentUserToolService } from '#/agent/userTool/userTool';
 import { IEventBus, type DomainEvent } from '#/app/event/eventBus';
+import { IConfigService } from '#/app/config/config';
+import { IModelResolver } from '#/app/model/modelResolver';
 import { IAgentProfileCatalogService } from '#/app/agentProfileCatalog/agentProfileCatalog';
 import { APIProviderRateLimitError } from '#/app/llmProtocol/errors';
 import { ITelemetryService, noopTelemetryService } from '#/app/telemetry/telemetry';
@@ -784,6 +786,7 @@ describe('AgentRunBatch swarm item forwarding', () => {
         return {
           agentId: `agent-${String(nextId++)}`,
           profileName: options.profileName,
+          modelAlias: 'test-model',
           completion: Promise.resolve({ result: 'ok' }),
         };
       }),
@@ -902,6 +905,20 @@ describe('SessionSwarmService metadata compatibility', () => {
       },
     });
     ix.stub(ILogService, stubLog());
+    ix.stub(IConfigService, {
+      _serviceBrand: undefined,
+      get: () => undefined,
+    } as unknown as IConfigService);
+    ix.stub(IModelResolver, {
+      _serviceBrand: undefined,
+      resolve: () => {
+        throw new Error('unexpected model resolution');
+      },
+      resolveWithProvider: () => {
+        throw new Error('unexpected model resolution');
+      },
+      findByName: () => [],
+    } as unknown as IModelResolver);
     ix.set(ISessionSwarmService, new SyncDescriptor(SessionSwarmService));
   });
 
@@ -1061,7 +1078,7 @@ describe('SessionSwarmService metadata compatibility', () => {
     expect(runAgent).not.toHaveBeenCalled();
   });
 
-  it('realigns resumed children to the caller current model', async () => {
+  it('keeps the resumed child on its current model unless one is given', async () => {
     agents['agent-existing'] = {
       labels: { parentAgentId: 'main' },
     };
@@ -1079,7 +1096,9 @@ describe('SessionSwarmService metadata compatibility', () => {
       }),
     ).resolves.toMatchObject([{ status: 'completed', agentId: 'agent-existing' }]);
 
-    expect(child.accessor.get(IAgentProfileService).data().modelAlias).toBe('kimi-test');
+    // Resume without a model keeps the child's current model instead of
+    // realigning it to the caller model.
+    expect(child.accessor.get(IAgentProfileService).data().modelAlias).toBe('stale-model');
     expect(runAgent).toHaveBeenCalledWith(
       'agent-existing',
       { kind: 'prompt', prompt: 'Continue' },
@@ -1395,6 +1414,7 @@ function createMockAgentRunBatchRunner(
     return {
       agentId,
       profileName,
+      modelAlias: 'test-model',
       completion: completionFromMockAgentRunOutcome(outcome, runOptions.signal),
     };
   };

@@ -795,6 +795,7 @@ function createMockBatchRunner(
     return {
       agentId,
       profileName,
+      modelAlias: 'test-model',
       resumed,
       completion: completionFromMockOutcome(outcome, runOptions.signal),
     };

@@ -136,12 +136,33 @@ describe('AgentTool', () => {
     expect(tool.description).toContain('Default to a foreground subagent');
   });
 
-  it('does not expose a model parameter in the JSON schema', () => {
+  it('exposes a model parameter in the JSON schema', () => {
     const host = mockSubagentHost({ spawn: vi.fn() });
     const tool = agentTool(host);
-    const properties = (tool.parameters as { properties: Record<string, unknown> }).properties;
+    const properties = (
+      tool.parameters as { properties: Record<string, { description?: string }> }
+    ).properties;
 
-    expect(properties).not.toHaveProperty('model');
+    expect(properties).toHaveProperty('model');
+    expect(properties['model']?.description ?? '').toContain('models');
+  });
+
+  it('lists available models in the description when configured', () => {
+    const host = mockSubagentHost({ spawn: vi.fn() });
+    const tool = agentTool(host, createBackgroundManager().manager, undefined, {
+      models: ['kimi-k3', 'ds-flash'],
+    });
+
+    expect(tool.description).toContain('Available models (pass via model):');
+    expect(tool.description).toContain('- kimi-k3');
+    expect(tool.description).toContain('- ds-flash');
+  });
+
+  it('does not list available models when none are configured', () => {
+    const host = mockSubagentHost({ spawn: vi.fn() });
+    const tool = agentTool(host);
+
+    expect(tool.description).not.toContain('Available models');
   });
 
   it('renders the tool set for each subagent type', () => {
@@ -222,6 +243,7 @@ describe('AgentTool', () => {
       spawn: vi.fn().mockResolvedValue({
         agentId: 'agent-child',
         profileName: 'explore',
+        modelAlias: 'mock-model',
         resumed: false,
         completion: Promise.resolve({ result: 'child result' }),
       }),
@@ -243,12 +265,70 @@ describe('AgentTool', () => {
         prompt: 'Investigate',
         description: 'Find cause',
         runInBackground: false,
+        modelAlias: undefined,
         signal: expect.any(AbortSignal),
       }),
     );
     expect(result.output).toContain('agent_id: agent-child');
     expect(result.output).toContain('actual_subagent_type: explore');
+    expect(result.output).toContain('model_alias: mock-model');
     expect(result.output).toContain('child result');
+  });
+
+  it('passes the model argument to spawn and renders the resolved alias', async () => {
+    const host = mockSubagentHost({
+      spawn: vi.fn().mockResolvedValue({
+        agentId: 'agent-child',
+        profileName: 'coder',
+        modelAlias: 'ds-flash',
+        resumed: false,
+        completion: Promise.resolve({ result: 'child result' }),
+      }),
+    });
+    const tool = agentTool(host);
+
+    const result = await executeTool(tool,
+      context({
+        prompt: 'Investigate',
+        description: 'Find cause',
+        model: 'ds-flash',
+      }),
+    );
+
+    expect(host.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileName: 'coder',
+        modelAlias: 'ds-flash',
+      }),
+    );
+    expect(result.output).toContain('model_alias: ds-flash');
+  });
+
+  it('normalizes an empty model argument to undefined', async () => {
+    const host = mockSubagentHost({
+      spawn: vi.fn().mockResolvedValue({
+        agentId: 'agent-child',
+        profileName: 'coder',
+        modelAlias: 'mock-model',
+        resumed: false,
+        completion: Promise.resolve({ result: 'child result' }),
+      }),
+    });
+    const tool = agentTool(host);
+
+    await executeTool(tool,
+      context({
+        prompt: 'Investigate',
+        description: 'Find cause',
+        model: '   ',
+      }),
+    );
+
+    expect(host.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelAlias: undefined,
+      }),
+    );
   });
 
   it('falls back to coder for an empty subagent type', async () => {
@@ -314,8 +394,38 @@ describe('AgentTool', () => {
     expect(result.output).toContain('resumed result');
   });
 
-  it('returns an error when resuming with a subagent type', async () => {
+  it('passes the model argument to resume when resuming', async () => {
     const host = mockSubagentHost({
+      spawn: vi.fn(),
+      resume: vi.fn().mockResolvedValue({
+        agentId: 'agent-existing',
+        profileName: 'explore',
+        modelAlias: 'ds-flash',
+        resumed: true,
+        completion: Promise.resolve({ result: 'resumed result' }),
+      }),
+    });
+    const tool = agentTool(host);
+
+    const result = await executeTool(tool,
+      context({
+        prompt: 'Continue',
+        description: 'Continue work',
+        resume: 'agent-existing',
+        model: 'ds-flash',
+      }),
+    );
+
+    expect(host.resume).toHaveBeenCalledWith(
+      'agent-existing',
+      expect.objectContaining({
+        modelAlias: 'ds-flash',
+      }),
+    );
+    expect(result.output).toContain('model_alias: ds-flash');
+  });
+
+  it('returns an error when resuming with a subagent type', async () => {    const host = mockSubagentHost({
       spawn: vi.fn(),
       resume: vi.fn(),
     });
@@ -802,6 +912,7 @@ describe('AgentTool', () => {
         Promise.resolve({
           agentId: 'agent-child',
           profileName: 'coder',
+          modelAlias: 'test-model',
           resumed: false,
           completion: new Promise<{ result: string }>((_resolve, reject) => {
             const signal =
@@ -852,6 +963,7 @@ describe('AgentTool', () => {
           Promise.resolve({
             agentId: 'agent-child',
             profileName: 'coder',
+            modelAlias: 'test-model',
             resumed: false,
             completion: new Promise<{ result: string }>((_resolve, reject) => {
               const signal =

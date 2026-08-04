@@ -121,8 +121,32 @@ tools:
     expect(coderPrompt).not.toContain('{{ ROLE_ADDITIONAL }}');
   });
 
-  it('reports invalid profile graphs without relying on loader internals', () => {
-    expect(() =>
+  it('inherits a default model through extends and lets the child override it', () => {
+    const resolved = resolveAgentProfiles([
+      {
+        name: 'base',
+        systemPromptTemplate: 'base prompt',
+      },
+      {
+        name: 'child',
+        extends: 'base',
+        systemPromptTemplate: 'child prompt',
+        model: 'child-model',
+      },
+      {
+        name: 'grandchild',
+        extends: 'child',
+        systemPromptTemplate: 'grandchild prompt',
+      },
+    ]);
+
+    expect(resolved['base']?.model).toBeUndefined();
+    expect(resolved['child']?.model).toBe('child-model');
+    // A profile that does not declare a model inherits the parent's default.
+    expect(resolved['grandchild']?.model).toBe('child-model');
+  });
+
+  it('reports invalid profile graphs without relying on loader internals', () => {    expect(() =>
       resolveAgentProfiles([
         {
           name: 'agent',

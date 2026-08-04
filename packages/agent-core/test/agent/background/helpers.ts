@@ -80,6 +80,7 @@ export function agentTask(
   const handle: SubagentHandle = {
     agentId: options.agentId ?? 'agent-child',
     profileName: options.subagentType ?? 'coder',
+    modelAlias: 'test-model',
     resumed: false,
     completion,
   };

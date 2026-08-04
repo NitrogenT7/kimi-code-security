@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Agent, AgentOptions } from '../../src/agent';
 import { AGENT_WIRE_PROTOCOL_VERSION } from '../../src/agent/records';
+import type { KimiConfig } from '../../src/config';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
@@ -34,6 +35,25 @@ vi.mock('../../src/session/git-context', () => ({
 const signal = new AbortController().signal;
 const tempDirs: string[] = [];
 type GenerateFn = NonNullable<AgentOptions['generate']>;
+
+/**
+ * A minimal config that registers each alias against the `test-provider`
+ * endpoint, so subagent model resolution can be exercised without a real
+ * provider (the harness mocks the LLM through `generate`).
+ */
+function modelAliasConfig(aliases: readonly string[]): KimiConfig {
+  return {
+    providers: {
+      'test-provider': { type: 'kimi', apiKey: 'test-key' },
+    },
+    models: Object.fromEntries(
+      aliases.map((alias) => [
+        alias,
+        { provider: 'test-provider', model: alias, maxContextSize: 1_000_000 },
+      ]),
+    ),
+  };
+}
 
 afterEach(async () => {
   for (const dir of tempDirs.splice(0)) {
@@ -368,6 +388,167 @@ describe('SessionSubagentHost', () => {
         content: [{ type: 'text', text: 'Find the cause' }],
       },
     ]);
+  });
+
+  it('routes a spawned subagent to the configured routing alias', async () => {
+    const parent = testAgent({
+      initialConfig: {
+        ...modelAliasConfig(['mock-model', 'routed-model']),
+        subagent: { routing: { explore: 'routed-model' } },
+      },
+    });
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    const child = testAgent({
+      type: 'sub',
+      permission: { parent: parent.agent.permission },
+      initialConfig: modelAliasConfig(['mock-model', 'routed-model']),
+    });
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Investigated the request and completed the child task end to end. The relevant module was located, its behavior traced through every call site, and the requested change applied and verified against the existing test suite.',
+    });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn({
+      profileName: 'explore',
+      parentToolCallId: 'call_agent',
+      prompt: 'Find the cause',
+      description: 'Find cause',
+      runInBackground: false,
+      signal,
+    });
+
+    expect(handle.modelAlias).toBe('routed-model');
+    await expect(handle.completion).resolves.toMatchObject({ result: expect.any(String) });
+    expect(child.agent.config.modelAlias).toBe('routed-model');
+  });
+
+  it('prefers the explicit model argument over the routing table', async () => {
+    const parent = testAgent({
+      initialConfig: {
+        ...modelAliasConfig(['mock-model', 'routed-model', 'explicit-model']),
+        subagent: { routing: { explore: 'routed-model' } },
+      },
+    });
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    const child = testAgent({
+      type: 'sub',
+      permission: { parent: parent.agent.permission },
+      initialConfig: modelAliasConfig(['mock-model', 'routed-model', 'explicit-model']),
+    });
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Investigated the request and completed the child task end to end. The relevant module was located, its behavior traced through every call site, and the requested change applied and verified against the existing test suite.',
+    });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn({
+      profileName: 'explore',
+      parentToolCallId: 'call_agent',
+      prompt: 'Find the cause',
+      description: 'Find cause',
+      runInBackground: false,
+      modelAlias: 'explicit-model',
+      signal,
+    });
+
+    expect(handle.modelAlias).toBe('explicit-model');
+    await expect(handle.completion).resolves.toMatchObject({ result: expect.any(String) });
+    expect(child.agent.config.modelAlias).toBe('explicit-model');
+  });
+
+  it('rejects an unknown model alias before creating the child agent', async () => {
+    const parent = testAgent();
+    parent.configure();
+    const child = testAgent({ type: 'sub' });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    await expect(
+      host.spawn({
+        profileName: 'explore',
+        parentToolCallId: 'call_agent',
+        prompt: 'Find the cause',
+        description: 'Find cause',
+        runInBackground: false,
+        modelAlias: 'no-such-model',
+        signal,
+      }),
+    ).rejects.toThrow('Unknown model alias "no-such-model" for subagent');
+    expect(session.createAgent).not.toHaveBeenCalled();
+  });
+
+  it('keeps the child model on resume unless a model is given', async () => {
+    const parent = testAgent({
+      initialConfig: modelAliasConfig(['mock-model', 'routed-model', 'switch-model']),
+    });
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    const child = testAgent({
+      type: 'sub',
+      permission: { parent: parent.agent.permission },
+      initialConfig: modelAliasConfig(['mock-model', 'routed-model', 'switch-model']),
+    });
+    const summary =
+      'Investigated the request and completed the child task end to end. The relevant module was located, its behavior traced through every call site, and the requested change applied and verified against the existing test suite.';
+    child.mockNextResponse({ type: 'text', text: summary });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/kimi-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    const host = new SessionSubagentHost(session, 'main');
+
+    const spawned = await host.spawn({
+      profileName: 'explore',
+      parentToolCallId: 'call_agent',
+      prompt: 'First task',
+      description: 'First task',
+      runInBackground: false,
+      modelAlias: 'routed-model',
+      signal,
+    });
+    expect(spawned.modelAlias).toBe('routed-model');
+    await spawned.completion;
+    expect(child.agent.config.modelAlias).toBe('routed-model');
+
+    // Resuming without a model keeps the child's current model (the parent
+    // uses `mock-model`, so the old realign-to-parent behavior is gone).
+    child.mockNextResponse({ type: 'text', text: summary });
+    const resumed = await host.resume('agent-0', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Continue',
+      description: 'Continue',
+      runInBackground: false,
+      signal,
+    });
+    expect(resumed.modelAlias).toBe('routed-model');
+    await resumed.completion;
+    expect(child.agent.config.modelAlias).toBe('routed-model');
+
+    // Resuming with an explicit model switches the child.
+    child.mockNextResponse({ type: 'text', text: summary });
+    const switched = await host.resume('agent-0', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Continue again',
+      description: 'Continue again',
+      runInBackground: false,
+      modelAlias: 'switch-model',
+      signal,
+    });
+    expect(switched.modelAlias).toBe('switch-model');
+    await switched.completion;
+    expect(child.agent.config.modelAlias).toBe('switch-model');
   });
 
   it('inherits active parent user tools when spawning a subagent', async () => {
@@ -1125,14 +1306,16 @@ describe('SessionSubagentHost', () => {
     expect(userTextMessages(histories[1] ?? [])).toEqual(['Implement the retry-safe change']);
   });
 
-  it('realigns a resumed subagent to the parent agent current model', async () => {
+  it('keeps the resumed subagent current model unless a model is given', async () => {
     const parent = testAgent();
     parent.configure();
     parent.agent.permission.setMode('yolo');
 
-    const child = testAgent();
+    const child = testAgent({
+      initialConfig: modelAliasConfig(['mock-model', 'stale-model-from-initial-spawn']),
+    });
     child.configure({ tools: ['Read'] });
-    // The child was originally spawned with a model that no longer matches the
+    // The child was originally spawned with a model that differs from the
     // parent agent's current model (as if the parent ran setModel afterwards).
     child.agent.config.update({ modelAlias: 'stale-model-from-initial-spawn' });
     child.agent.useProfile(
@@ -1162,10 +1345,11 @@ describe('SessionSubagentHost', () => {
     });
 
     await handle.completion;
-    // resume must realign the child to the parent agent's current model rather
-    // than leave it on the stale model from its initial spawn.
-    expect(child.agent.config.modelAlias).toBe(parent.agent.config.modelAlias);
-    expect(child.agent.config.modelAlias).not.toBe('stale-model-from-initial-spawn');
+    // resume without a model keeps the child's current model rather than
+    // realigning it to the parent agent's model.
+    expect(handle.modelAlias).toBe('stale-model-from-initial-spawn');
+    expect(child.agent.config.modelAlias).toBe('stale-model-from-initial-spawn');
+    expect(child.agent.config.modelAlias).not.toBe(parent.agent.config.modelAlias);
   });
 });
 

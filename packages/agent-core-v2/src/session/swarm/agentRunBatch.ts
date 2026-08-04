@@ -26,6 +26,8 @@ export interface AgentRunAttemptOptions {
   readonly signal: AbortSignal;
   readonly onReady?: () => void;
   readonly suppressRateLimitFailureEvent?: boolean;
+  /** Optional model id for the subagent; resolved against routing / profile / caller model. */
+  readonly modelAlias?: string;
 }
 
 export interface AgentSpawnAttemptOptions extends AgentRunAttemptOptions {
@@ -36,6 +38,7 @@ export interface AgentSpawnAttemptOptions extends AgentRunAttemptOptions {
 export type AgentRunAttemptHandle = {
   readonly agentId: string;
   readonly profileName: string;
+  readonly modelAlias: string;
   readonly completion: Promise<{
     readonly result: string;
     readonly usage?: TokenUsage;
@@ -84,6 +87,7 @@ type TaskState<T> = {
   readonly index: number;
   readonly task: QueuedAgentRunTask<T>;
   agentId?: string;
+  modelAlias?: string;
   retryAgentId?: string;
   retryCount: number;
   retryReadyAt: number;
@@ -283,6 +287,7 @@ export class AgentRunBatch<T> {
       description: task.description,
       swarmIndex: task.swarmIndex,
       runInBackground: task.runInBackground,
+      modelAlias: task.modelAlias,
       signal: attempt.controller.signal,
       onReady: () => {
         this.markAttemptReady(attempt);
@@ -310,11 +315,13 @@ export class AgentRunBatch<T> {
     }
 
     attempt.state.agentId = handle.agentId;
+    attempt.state.modelAlias = handle.modelAlias;
     try {
       const completion = await handle.completion;
       return {
         task,
         agentId: handle.agentId,
+        modelAlias: handle.modelAlias,
         status: 'completed',
         result: completion.result,
         usage: completion.usage,
@@ -340,6 +347,7 @@ export class AgentRunBatch<T> {
     return {
       task: attempt.state.task,
       agentId: attempt.state.agentId,
+      modelAlias: attempt.state.modelAlias,
       status,
       state: attempt.state.agentId === undefined ? 'not_started' : 'started',
       error: this.attemptErrorMessage(attempt, error, status),

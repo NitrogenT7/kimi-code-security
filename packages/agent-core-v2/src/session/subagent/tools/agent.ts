@@ -45,6 +45,8 @@ import { IAgentProfileCatalogService, type AgentProfile } from '#/app/agentProfi
 import { applyProfilePromptPrefix } from '#/app/agentProfileCatalog/promptPrefix';
 import { ILogService } from '#/_base/log/log';
 import { IConfigService } from '#/app/config/config';
+import { IModelResolver } from '#/app/model/modelResolver';
+import { MODELS_SECTION } from '#/app/model/model';
 import { IAgentLifecycleService } from '#/session/agentLifecycle/agentLifecycle';
 import { isSubagentMeta, subagentLabels, subagentParentAgentId } from '#/session/agentLifecycle/subagentMetadata';
 import { ISessionProcessRunner } from '#/session/process/processRunner';
@@ -56,6 +58,8 @@ import { ISessionSubagentService } from '../subagent';
 import {
   formatSubagentTimeoutDescription,
   resolveSubagentTimeoutMs,
+  SUBAGENT_SECTION,
+  type SubagentConfig,
 } from '../configSection';
 import { SubagentTask, type SubagentHandle } from './subagent-task';
 
@@ -104,6 +108,12 @@ export const AgentToolInputSchema = z.preprocess(
       .optional()
       .describe(
         'If true, return immediately without waiting for completion. Prefer false unless the task can run independently and there is a clear benefit to not waiting.',
+      ),
+    model: z
+      .string()
+      .optional()
+      .describe(
+        'Optional model id (a key of the `models` section in the user config) for this subagent. When omitted, the subagent uses the caller model unless a routing rule or the profile default assigns one. May be combined with resume to switch the resumed agent model.',
       ),
   }),
 );
@@ -154,6 +164,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     @ILogService private readonly log: ILogService,
     @IAgentPermissionModeService private readonly permissionMode: IAgentPermissionModeService,
     @IConfigService private readonly config: IConfigService,
+    @IModelResolver private readonly modelResolver: IModelResolver,
   ) {
     this.callerAgentId = scopeContext.agentId;
     this.canRunInBackground = () =>
@@ -168,9 +179,10 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       : AGENT_BACKGROUND_DISABLED_DESCRIPTION;
     const baseDescription = `${AGENT_DESCRIPTION_BASE}\n\n${backgroundDescription}`;
     const typeLines = buildProfileDescriptions(this.catalog.list());
+    const modelLines = buildAvailableModelLines(this.config);
     return typeLines
-      ? `${baseDescription}\n\nAvailable agent types (pass via subagent_type):\n${typeLines}`
-      : baseDescription;
+      ? `${baseDescription}\n\nAvailable agent types (pass via subagent_type):\n${typeLines}${modelLines}`
+      : `${baseDescription}${modelLines}`;
   }
 
   async resolveExecution(args: AgentToolInput): Promise<ToolExecution> {
@@ -223,9 +235,11 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
 
     const resumeAgentId = args.resume?.trim();
     const isResume = resumeAgentId !== undefined && resumeAgentId.length > 0;
+    const requestedModel = normalizeOptionalString(args.model);
 
     let agentId: string;
     let profileName: string;
+    let modelAlias: string;
     let promptText = args.prompt;
     if (isResume) {
       const target = this.lifecycle.get(resumeAgentId);
@@ -233,7 +247,11 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         throw new Error(`Agent instance "${resumeAgentId}" does not exist`);
       }
       await this.ensureOwnedIdleSubagent(resumeAgentId, target);
-      this.realignChildModel(target);
+      if (requestedModel !== undefined) {
+        this.switchChildModel(target, requestedModel);
+      }
+      modelAlias =
+        target.accessor.get(IAgentProfileService).data().modelAlias ?? requestedModel ?? '';
       agentId = target.id;
       profileName =
         target.accessor.get(IAgentProfileService).data().profileName ?? RESUMED_LABEL;
@@ -249,10 +267,11 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       if (own.modelAlias === undefined) {
         throw new Error('Caller agent has no model bound');
       }
+      modelAlias = this.resolveSpawnedChildModel(profile, requestedModel, own.modelAlias);
       const created = await this.lifecycle.create({
         binding: {
           profile: profile.name,
-          model: own.modelAlias,
+          model: modelAlias,
           thinking: own.thinkingLevel,
           cwd: own.cwd,
         },
@@ -295,8 +314,46 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     return {
       agentId,
       profileName,
+      modelAlias,
       completion: mirrored.then((r) => ({ result: r.summary, usage: r.usage })),
     };
+  }
+
+  /**
+   * Resolve the model id for a freshly spawned subagent: explicit argument,
+   * `[subagent.routing]` entry keyed by profile name, the profile's default
+   * `model`, then the caller's model.
+   */
+  private resolveSpawnedChildModel(
+    profile: AgentProfile,
+    requested: string | undefined,
+    callerModel: string,
+  ): string {
+    const routing = this.config.get<SubagentConfig | undefined>(SUBAGENT_SECTION)?.routing;
+    const alias = requested ?? routing?.[profile.name] ?? profile.model ?? callerModel;
+    // The caller's own model is already in use; only explicit routing targets
+    // (argument, routing entry, profile default) need existence validation.
+    if (alias === callerModel) return alias;
+    return this.assertKnownModelAlias(alias);
+  }
+
+  private assertKnownModelAlias(alias: string): string {
+    try {
+      this.modelResolver.resolve(alias);
+    } catch (error) {
+      throw new Error(
+        `Unknown model alias "${alias}" for subagent: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
+    }
+    return alias;
+  }
+
+  private switchChildModel(target: IAgentScopeHandle, modelAlias: string): void {
+    this.assertKnownModelAlias(modelAlias);
+    target.accessor.get(IAgentProfileService).update({ modelAlias });
   }
 
   private async ensureOwnedIdleSubagent(
@@ -313,14 +370,6 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     if (target.accessor.get(IAgentLoopService).status().state === 'running') {
       throw new Error(`Agent instance "${agentId}" is already running and cannot run concurrently`);
     }
-  }
-
-  private realignChildModel(target: IAgentScopeHandle): void {
-    const modelAlias = this.profile.data().modelAlias;
-    if (modelAlias === undefined) {
-      throw new Error('Caller agent has no model bound');
-    }
-    target.accessor.get(IAgentProfileService).update({ modelAlias });
   }
 
   private async execution(
@@ -460,6 +509,19 @@ function buildProfileDescriptions(
     .join('\n');
 }
 
+function buildAvailableModelLines(config: IConfigService): string {
+  const models = config.get<Record<string, unknown> | undefined>(MODELS_SECTION);
+  const names = models === undefined ? [] : Object.keys(models);
+  if (names.length === 0) return '';
+  return `\n\nAvailable models (pass via model):\n${names.map((name) => `- ${name}`).join('\n')}`;
+}
+
+function normalizeOptionalString(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function formatBackgroundAgentResult(
   taskId: string,
   handle: SubagentHandle,
@@ -471,6 +533,7 @@ function formatBackgroundAgentResult(
     'status: running',
     `agent_id: ${handle.agentId}`,
     `actual_subagent_type: ${handle.profileName}`,
+    `model_alias: ${handle.modelAlias}`,
     'automatic_notification: true',
     '',
     `description: ${description}`,
@@ -486,6 +549,7 @@ function formatForegroundAgentSuccess(handle: SubagentHandle, result: string): s
   return [
     `agent_id: ${handle.agentId}`,
     `actual_subagent_type: ${handle.profileName}`,
+    `model_alias: ${handle.modelAlias}`,
     'status: completed',
     '',
     '[summary]',
@@ -501,6 +565,7 @@ function formatForegroundAgentFailure(
   const lines = [
     `agent_id: ${handle.agentId}`,
     `actual_subagent_type: ${handle.profileName}`,
+    `model_alias: ${handle.modelAlias}`,
     'status: failed',
     '',
     `subagent error: ${message}`,

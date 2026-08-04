@@ -285,6 +285,109 @@ describe('AgentSwarmTool', () => {
     expect(result.isError).toBeUndefined();
   });
 
+  it('forwards per-item models and renders model/usage attributes', async () => {
+    const host = mockSwarmHost({
+      run: vi.fn().mockResolvedValue([
+        {
+          task: {
+            kind: 'spawn',
+            data: {
+              kind: 'spawn',
+              index: 1,
+              item: 'a',
+              prompt: 'Review a',
+              model: 'ds-flash',
+            },
+            profileName: 'coder',
+            parentToolCallId: 'call_swarm',
+            prompt: 'Review a',
+            description: 'Review files #1 (coder)',
+            runInBackground: false,
+          },
+          agentId: 'agent-1',
+          modelAlias: 'ds-flash',
+          status: 'completed',
+          usage: { inputOther: 10, output: 5, inputCacheRead: 2, inputCacheCreation: 3 },
+          result: 'done a',
+        },
+        {
+          task: {
+            kind: 'spawn',
+            data: {
+              kind: 'spawn',
+              index: 2,
+              item: 'b',
+              prompt: 'Review b',
+            },
+            profileName: 'coder',
+            parentToolCallId: 'call_swarm',
+            prompt: 'Review b',
+            description: 'Review files #2 (coder)',
+            runInBackground: false,
+          },
+          agentId: 'agent-2',
+          // No per-item model: the resolved alias comes from routing/profile defaults.
+          modelAlias: 'kimi-k3',
+          status: 'completed',
+          result: 'done b',
+        },
+      ]),
+    });
+    const tool = new AgentSwarmTool(
+      host.swarmService,
+      makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }),
+      mockSwarmMode(),
+      stubConfig(),
+    );
+    const input = {
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: [{ item: 'a', model: 'ds-flash' }, 'b'],
+    };
+
+    expect(AgentSwarmToolInputSchema.safeParse(input).success).toBe(true);
+    expect(
+      AgentSwarmToolInputSchema.safeParse({ ...input, items: [{ item: '' }] }).success,
+    ).toBe(false);
+
+    const result = await executeTool(tool, context(input));
+
+    expect(host.swarmService.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tasks: [
+          expect.objectContaining({
+            data: {
+              kind: 'spawn',
+              index: 1,
+              item: 'a',
+              prompt: 'Review a',
+              model: 'ds-flash',
+            },
+            modelAlias: 'ds-flash',
+          }),
+          expect.objectContaining({
+            data: {
+              kind: 'spawn',
+              index: 2,
+              item: 'b',
+              prompt: 'Review b',
+            },
+            modelAlias: undefined,
+          }),
+        ],
+      }),
+    );
+    expect(result.output).toBe(
+      [
+        '<agent_swarm_result>',
+        '<summary>completed: 2</summary>',
+        '<subagent agent_id="agent-1" item="a" model="ds-flash" input_tokens="10" output_tokens="5" cache_read_tokens="2" cache_write_tokens="3" outcome="completed">done a</subagent>',
+        '<subagent agent_id="agent-2" item="b" model="kimi-k3" outcome="completed">done b</subagent>',
+        '</agent_swarm_result>',
+      ].join('\n'),
+    );
+  });
+
   it('does not expose permission rule argument matching', () => {
     const host = mockSwarmHost();
     const tool = new AgentSwarmTool(host.swarmService, makeAgentScopeContext({ agentId: host.callerAgentId, agentScope: '' }), mockSwarmMode(), stubConfig());

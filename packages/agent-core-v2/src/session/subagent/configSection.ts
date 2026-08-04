@@ -22,6 +22,14 @@ export const SUBAGENT_SECTION = 'subagent';
 export const SubagentConfigSchema = z.object({
   /** Per-run subagent timeout in milliseconds; set a large value to effectively disable the cap. */
   timeoutMs: z.number().int().min(1).optional(),
+  /**
+   * Static model routing for subagents, keyed by profile name (the value of
+   * `subagent_type`). Each value must be an id from the `models` config
+   * section. Resolution priority: the `model` argument on the Agent /
+   * AgentSwarm call, then this routing entry, then the profile's own default
+   * `model`, then the caller's model.
+   */
+  routing: z.record(z.string(), z.string()).optional(),
 });
 
 export type SubagentConfig = z.infer<typeof SubagentConfigSchema>;

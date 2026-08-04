@@ -94,6 +94,7 @@ function agentTask(
   const handle: SubagentHandle = {
     agentId: options.agentId ?? 'agent-child',
     profileName: options.subagentType ?? 'coder',
+    modelAlias: 'test-model',
     completion,
   };
   const task = new SubagentTask(

@@ -24,8 +24,10 @@ import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMo
 import { IAgentLoopService } from '#/agent/loop/loop';
 import { IAgentUserToolService } from '#/agent/userTool/userTool';
 import { IEventBus } from '#/app/event/eventBus';
-import { IAgentProfileCatalogService } from '#/app/agentProfileCatalog/agentProfileCatalog';
+import { IAgentProfileCatalogService, type AgentProfile } from '#/app/agentProfileCatalog/agentProfileCatalog';
 import { applyProfilePromptPrefix } from '#/app/agentProfileCatalog/promptPrefix';
+import { IConfigService } from '#/app/config/config';
+import { IModelResolver } from '#/app/model/modelResolver';
 import { IAgentLifecycleService } from '#/session/agentLifecycle/agentLifecycle';
 import {
   isSubagentMeta,
@@ -35,6 +37,7 @@ import {
 } from '#/session/agentLifecycle/subagentMetadata';
 import { emitAgentRunSpawned, mirrorAgentRun } from '#/session/subagent/mirrorAgentRun';
 import { ISessionSubagentService } from '#/session/subagent/subagent';
+import { SUBAGENT_SECTION, type SubagentConfig } from '#/session/subagent/configSection';
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
 import { ISessionMetadata, type AgentMeta } from '#/session/sessionMetadata/sessionMetadata';
 import { ISessionProcessRunner } from '#/session/process/processRunner';
@@ -82,6 +85,8 @@ export class SessionSwarmService implements ISessionSwarmService {
     @ISessionMetadata private readonly metadata: ISessionMetadata,
     @ISessionProcessRunner private readonly processRunner: ISessionProcessRunner,
     @ILogService private readonly log: ILogService,
+    @IConfigService private readonly config: IConfigService,
+    @IModelResolver private readonly modelResolver: IModelResolver,
   ) {}
 
   async getSwarmItem(args: {
@@ -143,10 +148,11 @@ export class SessionSwarmService implements ISessionSwarmService {
     if (callerData.modelAlias === undefined) {
       throw new Error('Caller agent has no model bound');
     }
+    const modelAlias = this.resolveSpawnedChildModel(profile, options.modelAlias, callerData.modelAlias);
     const child = await this.lifecycle.create({
       binding: {
         profile: profile.name,
-        model: callerData.modelAlias,
+        model: modelAlias,
         thinking: callerData.thinkingLevel,
         cwd: callerData.cwd,
       },
@@ -171,7 +177,7 @@ export class SessionSwarmService implements ISessionSwarmService {
       runner: this.processRunner,
       log: this.log,
     });
-    return this.observe(caller, child.id, options.profileName, {
+    return this.observe(caller, child.id, options.profileName, modelAlias, {
       kind: 'prompt',
       prompt: promptText,
     }, options);
@@ -188,7 +194,17 @@ export class SessionSwarmService implements ISessionSwarmService {
     const caller = this.requireHandle(callerAgentId, 'Caller agent');
     const child = this.requireHandle(agentId, 'Agent instance');
     this.requireIdleSubagent(agentId, child);
-    this.realignChildModel(caller, child);
+    let modelAlias: string;
+    if (options.modelAlias !== undefined) {
+      modelAlias = this.assertKnownModelAlias(options.modelAlias);
+      child.accessor.get(IAgentProfileService).update({ modelAlias });
+    } else {
+      const current = child.accessor.get(IAgentProfileService).data().modelAlias;
+      if (current === undefined) {
+        throw new Error('The subagent has no model configured');
+      }
+      modelAlias = current;
+    }
     const profileName =
       child.accessor.get(IAgentProfileService).data().profileName ?? RESUMED_PROFILE_FALLBACK;
     if (!retryTurn) {
@@ -204,13 +220,46 @@ export class SessionSwarmService implements ISessionSwarmService {
     const request = retryTurn
       ? ({ kind: 'retry' } as const)
       : ({ kind: 'prompt', prompt: options.prompt } as const);
-    return this.observe(caller, child.id, profileName, request, options);
+    return this.observe(caller, child.id, profileName, modelAlias, request, options);
+  }
+
+  /**
+   * Resolve the model id for a freshly spawned subagent: explicit argument,
+   * `[subagent.routing]` entry keyed by profile name, the profile's default
+   * `model`, then the caller's model.
+   */
+  private resolveSpawnedChildModel(
+    profile: AgentProfile,
+    requested: string | undefined,
+    callerModel: string,
+  ): string {
+    const routing = this.config.get<SubagentConfig | undefined>(SUBAGENT_SECTION)?.routing;
+    const alias = requested ?? routing?.[profile.name] ?? profile.model ?? callerModel;
+    // The caller's own model is already in use; only explicit routing targets
+    // (argument, routing entry, profile default) need existence validation.
+    if (alias === callerModel) return alias;
+    return this.assertKnownModelAlias(alias);
+  }
+
+  private assertKnownModelAlias(alias: string): string {
+    try {
+      this.modelResolver.resolve(alias);
+    } catch (error) {
+      throw new Error(
+        `Unknown model alias "${alias}" for subagent: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
+    }
+    return alias;
   }
 
   private async observe(
     caller: IAgentScopeHandle,
     agentId: string,
     profileName: string,
+    modelAlias: string,
     request: { kind: 'prompt'; prompt: string } | { kind: 'retry' },
     options: AgentRunAttemptOptions,
   ): Promise<AgentRunAttemptHandle> {
@@ -227,6 +276,7 @@ export class SessionSwarmService implements ISessionSwarmService {
     return {
       agentId,
       profileName,
+      modelAlias,
       completion: mirrored.then((r) => ({ result: r.summary, usage: r.usage })),
     };
   }
@@ -235,14 +285,6 @@ export class SessionSwarmService implements ISessionSwarmService {
     const handle = this.lifecycle.get(agentId);
     if (handle === undefined) throw new Error(`${label} "${agentId}" does not exist`);
     return handle;
-  }
-
-  private realignChildModel(caller: IAgentScopeHandle, child: IAgentScopeHandle): void {
-    const modelAlias = caller.accessor.get(IAgentProfileService).data().modelAlias;
-    if (modelAlias === undefined) {
-      throw new Error('Caller agent has no model bound');
-    }
-    child.accessor.get(IAgentProfileService).update({ modelAlias });
   }
 
   private requireIdleSubagent(agentId: string, child: IAgentScopeHandle): void {

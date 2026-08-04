@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import type { TokenUsage } from '@moonshot-ai/kosong';
+
 import type { SwarmMode } from '../../../agent/swarm';
 import type { BuiltinTool } from '../../../agent/tool';
 import {
@@ -15,6 +17,23 @@ import AGENT_SWARM_DESCRIPTION from './agent-swarm.md?raw';
 const DEFAULT_SUBAGENT_TYPE = 'coder';
 const PROMPT_TEMPLATE_PLACEHOLDER = '{{item}}';
 const MAX_AGENT_SWARM_SUBAGENTS = 128;
+
+const SwarmItemSchema = z.union([
+  z.string().trim().min(1),
+  z
+    .object({
+      item: z.string().trim().min(1).describe('The value used to fill the {{item}} placeholder.'),
+      model: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe(
+          'Optional model alias (a key of the `models` section in the user config) for this subagent. Defaults to the routing rule / profile default / caller model.',
+        ),
+    })
+    .strict(),
+]);
 
 export const AgentSwarmToolInputSchema = z
   .object({
@@ -40,11 +59,11 @@ export const AgentSwarmToolInputSchema = z
         `Prompt template for each subagent. The ${PROMPT_TEMPLATE_PLACEHOLDER} placeholder is replaced with each item value.`,
       ),
     items: z
-      .array(z.string().trim().min(1))
+      .array(SwarmItemSchema)
       .max(MAX_AGENT_SWARM_SUBAGENTS)
       .optional()
       .describe(
-        `Values used to fill ${PROMPT_TEMPLATE_PLACEHOLDER}. Each item launches one new subagent.`,
+        `Values used to fill ${PROMPT_TEMPLATE_PLACEHOLDER}. Each string item launches one subagent; an object item may additionally specify a per-subagent model alias.`,
       ),
     resume_agent_ids: z
       .record(z.string().trim().min(1), z.string().trim().min(1))
@@ -62,6 +81,7 @@ interface AgentSwarmSpawnSpec {
   readonly index: number;
   readonly item: string;
   readonly prompt: string;
+  readonly model?: string;
 }
 
 interface AgentSwarmResumeSpec {
@@ -77,9 +97,11 @@ type AgentSwarmSpec = AgentSwarmSpawnSpec | AgentSwarmResumeSpec;
 interface SwarmRunResult {
   readonly spec: AgentSwarmSpec;
   readonly agentId?: string;
+  readonly modelAlias?: string;
   readonly status: 'completed' | 'failed' | 'aborted';
   readonly state?: 'started' | 'not_started';
   readonly result?: string;
+  readonly usage?: TokenUsage;
   readonly error?: string;
 }
 
@@ -147,6 +169,7 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
         swarmIndex: spec.index,
         runInBackground: false,
         swarmItem: spec.item,
+        modelAlias: spec.kind === 'spawn' ? spec.model : undefined,
         signal,
         timeout: this.subagentTimeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS,
       };
@@ -175,7 +198,10 @@ function createAgentSwarmSpecs(
     agentId: agentId.trim(),
     prompt: prompt.trim(),
   }));
-  const items = (args.items ?? []).map((item) => item.trim());
+  const items = (args.items ?? []).map((entry) => {
+    if (typeof entry === 'string') return { item: entry, model: undefined };
+    return { item: entry.item, model: entry.model };
+  });
   const itemCount = items.length;
   const resumeCount = resumeEntries.length;
   const totalCount = resumeCount + itemCount;
@@ -209,7 +235,7 @@ function createAgentSwarmSpecs(
   if (items.length > 0) {
     const itemPromptTemplate = promptTemplate!;
     items.forEach((item, index) => {
-      const prompt = itemPromptTemplate.split(PROMPT_TEMPLATE_PLACEHOLDER).join(item);
+      const prompt = itemPromptTemplate.split(PROMPT_TEMPLATE_PLACEHOLDER).join(item.item);
       const previousIndex = seenPrompts.get(prompt);
       if (previousIndex !== undefined) {
         throw new Error(
@@ -220,8 +246,9 @@ function createAgentSwarmSpecs(
       specs.push({
         kind: 'spawn',
         index: specs.length + 1,
-        item,
+        item: item.item,
         prompt,
+        model: item.model,
       });
     });
   }
@@ -259,9 +286,11 @@ function renderSwarmResults(results: readonly SwarmRunResult[]): string {
     const mode = result.spec.kind === 'resume' ? ' mode="resume"' : '';
     const item = result.spec.item === undefined ? '' : ` item="${escapeXmlAttribute(result.spec.item)}"`;
     const state = result.state === undefined ? '' : ` state="${result.state}"`;
+    const model = result.modelAlias === undefined ? '' : ` model="${escapeXmlAttribute(result.modelAlias)}"`;
+    const usageTokens = usageTokenAttributes(result.usage);
     const body = result.status === 'completed' ? (result.result ?? '') : (result.error ?? 'unknown error');
     lines.push(
-      `<subagent${mode}${agentId}${item}${state} outcome="${result.status}">${body}</subagent>`,
+      `<subagent${mode}${agentId}${item}${state}${model}${usageTokens} outcome="${result.status}">${body}</subagent>`,
     );
   }
 
@@ -273,6 +302,20 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   if (value === undefined) return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function usageTokenAttributes(usage: TokenUsage | undefined): string {
+  if (usage === undefined) return '';
+  const parts: string[] = [];
+  if (usage.inputOther !== undefined) parts.push(`input_tokens="${String(usage.inputOther)}"`);
+  if (usage.output !== undefined) parts.push(`output_tokens="${String(usage.output)}"`);
+  if (usage.inputCacheRead !== undefined) {
+    parts.push(`cache_read_tokens="${String(usage.inputCacheRead)}"`);
+  }
+  if (usage.inputCacheCreation !== undefined) {
+    parts.push(`cache_write_tokens="${String(usage.inputCacheCreation)}"`);
+  }
+  return parts.length === 0 ? '' : ` ${parts.join(' ')}`;
 }
 
 function renderSwarmSummary(completed: number, failed: number, aborted = 0): string {

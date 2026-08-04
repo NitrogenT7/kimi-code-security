@@ -116,6 +116,13 @@ export interface RunSubagentOptions {
   readonly signal: AbortSignal;
   readonly onReady?: () => void;
   readonly suppressRateLimitFailureEvent?: boolean;
+  /**
+   * Optional model alias (a key of `models` in the config) for this run.
+   * On spawn it is resolved against the routing table / profile default /
+   * parent model; on resume or retry it switches the child agent to the
+   * alias when provided, otherwise the child keeps its current model.
+   */
+  readonly modelAlias?: string;
 }
 
 export interface SpawnSubagentOptions extends RunSubagentOptions {
@@ -131,6 +138,7 @@ type SubagentCompletion = {
 export type SubagentHandle = {
   readonly agentId: string;
   readonly profileName: string;
+  readonly modelAlias: string;
   readonly resumed: boolean;
   readonly completion: Promise<SubagentCompletion>;
 };
@@ -154,6 +162,7 @@ export class SessionSubagentHost {
 
     const parent = await this.session.ensureAgentResumed(this.ownerAgentId);
     const profile = this.resolveProfile(parent, options.profileName);
+    const modelAlias = this.resolveChildModelAlias(parent, profile, options.modelAlias);
     const { id, agent } = await this.session.createAgent(
       { type: 'sub', generate: parent.rawGenerate },
       { parentAgentId: this.ownerAgentId, swarmItem: options.swarmItem },
@@ -161,7 +170,7 @@ export class SessionSubagentHost {
     const completion = this.runWithActiveChild(id, options, async (runOptions) => {
       this.emitSubagentSpawned(parent, id, profile.name, runOptions);
       try {
-        await this.configureChild(parent, agent, profile);
+        await this.configureChild(parent, agent, profile, modelAlias);
         return await this.runPromptTurn(parent, id, agent, profile.name, runOptions);
       } catch (error) {
         this.emitSubagentFailed(parent, id, runOptions, error);
@@ -171,6 +180,7 @@ export class SessionSubagentHost {
     return {
       agentId: id,
       profileName: profile.name,
+      modelAlias,
       resumed: false,
       completion,
     };
@@ -179,26 +189,32 @@ export class SessionSubagentHost {
   async resume(agentId: string, options: RunSubagentOptions): Promise<SubagentHandle> {
     options.signal.throwIfAborted();
     const { parent, child, profileName } = await this.ensureIdleSubagent(agentId);
+    const modelAlias = this.resolveResumedChildModelAlias(parent, child, options.modelAlias);
     const completion = this.runWithActiveChild(agentId, options, async (runOptions) => {
       this.emitSubagentSpawned(parent, agentId, profileName, runOptions);
       try {
-        child.config.update({ modelAlias: parent.config.modelAlias });
+        if (options.modelAlias !== undefined) {
+          child.config.update({ modelAlias });
+        }
         return await this.runPromptTurn(parent, agentId, child, profileName, runOptions);
       } catch (error) {
         this.emitSubagentFailed(parent, agentId, runOptions, error);
         throw error;
       }
     });
-    return { agentId, profileName, resumed: true, completion };
+    return { agentId, profileName, modelAlias, resumed: true, completion };
   }
 
   async retry(agentId: string, options: RunSubagentOptions): Promise<SubagentHandle> {
     options.signal.throwIfAborted();
     const { parent, child, profileName } = await this.ensureIdleSubagent(agentId);
+    const modelAlias = this.resolveResumedChildModelAlias(parent, child, options.modelAlias);
     const completion = this.runWithActiveChild(agentId, options, async (runOptions) => {
       try {
         runOptions.signal.throwIfAborted();
-        child.config.update({ modelAlias: parent.config.modelAlias });
+        if (options.modelAlias !== undefined) {
+          child.config.update({ modelAlias });
+        }
         this.emitSubagentStarted(parent, agentId);
         const turnId = child.turn.retry('agent-host');
         if (turnId === null) {
@@ -211,7 +227,7 @@ export class SessionSubagentHost {
         throw error;
       }
     });
-    return { agentId, profileName, resumed: true, completion };
+    return { agentId, profileName, modelAlias, resumed: true, completion };
   }
 
   private async ensureIdleSubagent(
@@ -317,6 +333,60 @@ export class SessionSubagentHost {
     return profile;
   }
 
+  /**
+   * Resolve the model alias for a freshly spawned subagent, following the
+   * priority chain: explicit argument, `[subagent.routing]` entry keyed by
+   * the profile name, the profile's default `model`, then the caller's
+   * model (the historical behavior).
+   */
+  private resolveChildModelAlias(
+    parent: Agent,
+    profile: ResolvedAgentProfile,
+    requested?: string,
+  ): string {
+    const routing = parent.kimiConfig?.subagent?.routing;
+    const alias = requested ?? routing?.[profile.name] ?? profile.model ?? parent.config.modelAlias;
+    if (alias === undefined) {
+      throw new Error(
+        `Cannot resolve a model alias for subagent "${profile.name}": the caller agent has no model configured`,
+      );
+    }
+    // The caller's own model is already in use; only explicit routing targets
+    // (argument, routing entry, profile default) need existence validation.
+    if (alias === parent.config.modelAlias) return alias;
+    return this.assertKnownModelAlias(parent, alias);
+  }
+
+  /**
+   * Resolve the model for a resumed / retried subagent: an explicit
+   * argument switches the child model; otherwise the child keeps whatever
+   * model it currently has.
+   */
+  private resolveResumedChildModelAlias(parent: Agent, child: Agent, requested?: string): string {
+    if (requested !== undefined) return this.assertKnownModelAlias(parent, requested);
+    const current = child.config.modelAlias;
+    if (current === undefined) {
+      throw new Error('The subagent has no model configured');
+    }
+    return current;
+  }
+
+  private assertKnownModelAlias(parent: Agent, alias: string): string {
+    if (parent.modelProvider !== undefined) {
+      try {
+        parent.modelProvider.resolveProviderConfig(alias);
+      } catch (error) {
+        throw new Error(
+          `Unknown model alias "${alias}" for subagent: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          { cause: error },
+        );
+      }
+    }
+    return alias;
+  }
+
   private runWithActiveChild(
     childId: string,
     options: RunSubagentOptions,
@@ -400,11 +470,14 @@ export class SessionSubagentHost {
     parent: Agent,
     child: Agent,
     profile: ResolvedAgentProfile,
+    modelAlias: string,
   ): Promise<void> {
-    // A subagent always inherits the parent agent's model.
+    // A subagent inherits the parent agent's model unless a different model
+    // alias was resolved for it (explicit argument, `[subagent.routing]`
+    // entry, or the profile's default `model`).
     child.config.update({
       cwd: parent.config.cwd,
-      modelAlias: parent.config.modelAlias,
+      modelAlias,
       thinkingEffort: parent.config.thinkingEffort,
     });
 

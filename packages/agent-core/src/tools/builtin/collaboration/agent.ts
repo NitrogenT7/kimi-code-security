@@ -78,6 +78,12 @@ export const AgentToolInputSchema = z.preprocess(
       .describe(
         'If true, return immediately without waiting for completion. Prefer false unless the task can run independently and there is a clear benefit to not waiting.',
       ),
+    model: z
+      .string()
+      .optional()
+      .describe(
+        'Optional model alias (a key of the `models` section in the user config) for this subagent. When omitted, the subagent uses the caller model unless a routing rule or the profile default assigns one. May be combined with resume to switch the resumed agent model.',
+      ),
   }),
 );
 
@@ -116,6 +122,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       log?: Logger;
       allowBackground?: boolean | undefined;
       subagentTimeoutMs?: number | undefined;
+      models?: readonly string[] | undefined;
     },
   ) {
     const log = options?.log;
@@ -124,12 +131,14 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     // stays `0`, and the BackgroundManager arms no timer for it.
     this.subagentTimeoutMs = options?.subagentTimeoutMs;
     const typeLines = buildSubagentDescriptions(subagents);
+    const modelLines = buildAvailableModelLines(options?.models);
     const baseDescription = `${AGENT_DESCRIPTION_BASE}\n\n${
       this.allowBackground ? AGENT_BACKGROUND_DESCRIPTION : AGENT_BACKGROUND_DISABLED_DESCRIPTION
     }`;
-    this.description = typeLines
-      ? `${baseDescription}\n\nAvailable agent types (pass via subagent_type):\n${typeLines}`
-      : baseDescription;
+    const typeSection = typeLines
+      ? `\n\nAvailable agent types (pass via subagent_type):\n${typeLines}`
+      : '';
+    this.description = `${baseDescription}${typeSection}${modelLines}`;
     this.log = log;
   }
 
@@ -198,11 +207,13 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       }
 
       const operation = resumeAgentId !== undefined && resumeAgentId.length > 0 ? 'resume' : 'spawn';
+      const modelAlias = args.model?.trim();
       const runOptions = {
         parentToolCallId: toolCallId,
         prompt: args.prompt,
         description: args.description,
         runInBackground,
+        modelAlias: modelAlias !== undefined && modelAlias.length > 0 ? modelAlias : undefined,
         signal: controller.signal,
       };
       let handle: SubagentHandle;
@@ -325,6 +336,7 @@ function formatBackgroundAgentResult(
     'status: running',
     `agent_id: ${handle.agentId}`,
     `actual_subagent_type: ${handle.profileName}`,
+    `model_alias: ${handle.modelAlias}`,
     'automatic_notification: true',
     '',
     `description: ${description}`,
@@ -340,6 +352,7 @@ function formatForegroundAgentSuccess(handle: SubagentHandle, result: string): s
   return [
     `agent_id: ${handle.agentId}`,
     `actual_subagent_type: ${handle.profileName}`,
+    `model_alias: ${handle.modelAlias}`,
     'status: completed',
     '',
     '[summary]',
@@ -355,6 +368,7 @@ function formatForegroundAgentFailure(
   const lines = [
     `agent_id: ${handle.agentId}`,
     `actual_subagent_type: ${handle.profileName}`,
+    `model_alias: ${handle.modelAlias}`,
     'status: failed',
     '',
     `subagent error: ${message}`,
@@ -385,4 +399,11 @@ function buildSubagentDescriptions(subagents: ResolvedAgentProfile['subagents'])
       return `${header}\n  Tools: ${subagent.tools.join(', ')}`;
     })
     .join('\n');
+}
+
+function buildAvailableModelLines(models: readonly string[] | undefined): string {
+  if (models === undefined || models.length === 0) return '';
+  return `\n\nAvailable models (pass via model):\n${models
+    .map((name) => `- ${name}`)
+    .join('\n')}`;
 }
