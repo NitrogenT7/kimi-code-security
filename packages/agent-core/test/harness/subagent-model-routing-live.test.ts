@@ -144,13 +144,18 @@ const liveConfig: KimiConfig = {
 };
 
 function config(): KimiConfig {
+  const provider = (apiKey: string): KimiConfig['providers'][string] => ({
+    type: 'openai',
+    apiKey,
+    baseUrl,
+  });
   return {
     ...liveConfig,
     providers: {
-      main: { ...liveConfig.providers['main'], baseUrl },
-      routed: { ...liveConfig.providers['routed'], baseUrl },
-      limited: { ...liveConfig.providers['limited'], baseUrl },
-      ok: { ...liveConfig.providers['ok'], baseUrl },
+      main: provider('key-main'),
+      routed: provider('key-routed'),
+      limited: provider('key-limited'),
+      ok: provider('key-ok'),
     },
   };
 }
