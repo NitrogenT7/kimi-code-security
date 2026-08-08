@@ -24,6 +24,14 @@ import {
   type TranscriptEntry,
   type TUIStartupState,
 } from './types';
+import type { ThinkingEffort } from '@moonshot-ai/kimi-code-sdk';
+
+/** A `/model` (model + thinking effort) selection deferred to the next turn boundary. */
+export interface PendingModelSwitch {
+  readonly alias: string;
+  readonly effort: ThinkingEffort;
+  readonly persist: boolean;
+}
 
 export interface TUIState {
   ui: TUI;
@@ -59,6 +67,12 @@ export interface TUIState {
    * this flag to avoid starting a goal ahead of the user's earlier message.
    */
   queuedMessageDispatchPending: boolean;
+  /**
+   * A model switch the user confirmed while a turn was streaming. Applied at
+   * the next turn boundary — before any queued message is dispatched — by
+   * `drainPendingModelSwitch`; the latest selection wins.
+   */
+  pendingModelSwitch: PendingModelSwitch | undefined;
   swarmModeEntry: 'manual' | 'task' | undefined;
 }
 
@@ -111,6 +125,7 @@ export function createTUIState(options: KimiTUIOptions): TUIState {
     externalEditorRunning: false,
     queuedMessages: [],
     queuedMessageDispatchPending: false,
+    pendingModelSwitch: undefined,
     swarmModeEntry: undefined,
   };
 }

@@ -43,6 +43,8 @@ import {
   OAUTH_LOGIN_REQUIRED_CODE,
   OAUTH_LOGIN_REQUIRED_STARTUP_NOTICE,
 } from '../constant/kimi-tui';
+import { drainPendingModelSwitch } from '../commands/config';
+import type { SlashCommandHost } from '../commands/dispatch';
 import { buildGoalCompletionMessage } from '../utils/goal-completion';
 import type {
   UiFindingItem,
@@ -359,11 +361,32 @@ export class SessionEventHandler {
       this.host.showStatus('Turn stopped: prompt hook blocked the request.', 'error');
     }
     this.host.streamingUI.resetToolUi();
-    this.host.streamingUI.finalizeTurn(sendQueued);
+    // Wrap the queued-message dispatch so a `/model` selection confirmed
+    // mid-stream is applied first — the next message starts on the new model.
+    this.host.streamingUI.finalizeTurn((item) => {
+      this.drainModelSwitchThen(() => {
+        sendQueued(item);
+      });
+    });
+    if (!this.host.state.queuedMessageDispatchPending) {
+      // No queued message was shifted inside finalizeTurn: the turn boundary
+      // is now, so drain a pending model switch immediately.
+      this.drainModelSwitchThen();
+    }
     this.renderPendingModelBlockedFallback();
     this.currentTurnHasAssistantText = false;
     this.goalCompletionTurnEnded = true;
     this.scheduleQueuedGoalPromotion();
+  }
+
+  /**
+   * Apply a mid-stream `/model` selection (if any), then run `proceed`.
+   * SessionEventHost is structurally narrower than SlashCommandHost; the
+   * concrete TUI object implements both (same cast pattern as
+   * commands/config.ts).
+   */
+  private drainModelSwitchThen(proceed?: () => void): void {
+    drainPendingModelSwitch(this.host as unknown as SlashCommandHost, proceed);
   }
 
   private handleStepBegin(event: TurnStepStartedEvent): void {
@@ -1050,8 +1073,15 @@ export class SessionEventHandler {
       if (next !== undefined) {
         setTimeout(() => {
           this.host.state.queuedMessageDispatchPending = false;
-          sendQueued(next);
+          // A `/model` selection confirmed mid-stream is applied before the
+          // queued message starts, so it runs on the new model.
+          this.drainModelSwitchThen(() => {
+            sendQueued(next);
+          });
         }, 0);
+      } else {
+        // Turn boundary with nothing queued: drain a pending model switch now.
+        this.drainModelSwitchThen();
       }
     } else {
       this.host.setAppState({ isCompacting: false });

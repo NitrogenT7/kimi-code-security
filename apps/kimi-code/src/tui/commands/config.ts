@@ -428,14 +428,25 @@ export function showModelPicker(host: SlashCommandHost, selectedValue: string = 
   );
 }
 
-async function performModelSwitch(
+export async function performModelSwitch(
   host: SlashCommandHost,
   alias: string,
   effort: ThinkingEffort,
   persist: boolean,
 ): Promise<void> {
   if (host.state.appState.streamingPhase !== 'idle') {
-    host.showError('Cannot switch models while streaming — press Esc or Ctrl-C first.');
+    // Defer to the next turn boundary: the switch is applied when the current
+    // stream finishes, before any queued message is dispatched, so the next
+    // message starts on the new model (see drainPendingModelSwitch). The
+    // latest selection wins.
+    host.state.pendingModelSwitch = { alias, effort, persist };
+    const queuedDisplayName = modelDisplayName(
+      alias,
+      host.state.appState.availableModels[alias],
+    );
+    host.showStatus(
+      `Streaming in progress — will switch to ${queuedDisplayName} with thinking ${effort} when the turn finishes.`,
+    );
     return;
   }
 
@@ -518,6 +529,25 @@ async function performModelSwitch(
     status = `Already using ${displayName} with thinking ${effectiveEffort}.`;
   }
   host.showStatus(status, 'success');
+}
+
+/**
+ * Apply a `/model` selection the user confirmed mid-stream (queued by
+ * `performModelSwitch` while `streamingPhase !== 'idle'`), then run
+ * `proceed`. Callers invoke this at turn boundaries — the queued message
+ * dispatch is passed as `proceed` so the next message starts on the new
+ * model. A no-op (aside from `proceed`) when nothing is queued.
+ */
+export function drainPendingModelSwitch(host: SlashCommandHost, proceed?: () => void): void {
+  const pending = host.state.pendingModelSwitch;
+  if (pending === undefined) {
+    proceed?.();
+    return;
+  }
+  host.state.pendingModelSwitch = undefined;
+  void performModelSwitch(host, pending.alias, pending.effort, pending.persist).finally(() => {
+    proceed?.();
+  });
 }
 
 async function persistModelSelection(
