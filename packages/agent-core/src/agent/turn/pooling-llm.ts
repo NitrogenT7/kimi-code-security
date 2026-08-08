@@ -29,6 +29,7 @@ import {
   type ModelCapability,
 } from '@moonshot-ai/kosong';
 
+import { ErrorCodes, isKimiError } from '../../errors';
 import type { LLM, LLMChatParams, LLMChatResponse } from '../../loop';
 import { isAbortError } from '../../loop/errors';
 import type {
@@ -114,7 +115,7 @@ export class PoolingLLM implements LLM {
           this.onFailover?.({ from: name, to: next, reason: 'rate_limit', error });
           continue;
         }
-        if (error instanceof APIStatusError && (error.statusCode === 401 || error.statusCode === 403)) {
+        if (isAuthRejection(error)) {
           this.registry.markDown(name);
           this.onFailover?.({ from: name, to: next, reason: 'auth', error });
           continue;
@@ -157,6 +158,24 @@ function isTransientProviderError(error: unknown): boolean {
   if (error instanceof APIConnectionError || error instanceof APITimeoutError) return true;
   if (error instanceof APIEmptyResponseError) return true;
   return error instanceof APIStatusError && TRANSIENT_STATUS_CODES.includes(error.statusCode);
+}
+
+/**
+ * Auth rejections that justify failing over to the next pool endpoint:
+ * raw 401/403 status errors, plus the coded errors produced by the OAuth
+ * request-auth wrapper once its internal refresh-and-retry is exhausted
+ * (`provider.auth_error`) or when the provider was never logged in
+ * (`auth.login_required`).
+ */
+function isAuthRejection(error: unknown): boolean {
+  if (error instanceof APIStatusError && (error.statusCode === 401 || error.statusCode === 403)) {
+    return true;
+  }
+  return (
+    isKimiError(error) &&
+    (error.code === ErrorCodes.PROVIDER_AUTH_ERROR ||
+      error.code === ErrorCodes.AUTH_LOGIN_REQUIRED)
+  );
 }
 
 function readRetryAfterMs(error: unknown): number | undefined {

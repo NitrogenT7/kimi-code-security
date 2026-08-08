@@ -283,6 +283,19 @@ export class Agent {
   }
 
   get generate(): typeof generate {
+    return this.createGenerate(undefined);
+  }
+
+  /**
+   * Build the generate function for LLM calls. When `authProviderName` is
+   * given (one endpoint of a pooled alias), request auth is resolved for that
+   * specific provider; otherwise auth is resolved at the alias level (the
+   * primary provider). Pool endpoints must never share the primary's OAuth
+   * credentials — a static-key fallback endpoint would receive a token it
+   * cannot use, or die with the primary's OAuth failure before reaching the
+   * wire.
+   */
+  private createGenerate(authProviderName: string | undefined): typeof generate {
     return async (provider, systemPrompt, tools, history, callbacks, options) => {
       const { requestLogFields, generateOptions } = splitGenerateOptions(options);
       const modelAlias = this.config.modelAlias;
@@ -315,9 +328,11 @@ export class Agent {
         return run(generateOptions);
       }
       const withAuth =
-        modelAlias === undefined
-          ? undefined
-          : this.modelProvider?.resolveAuth?.(modelAlias, { log: this.log });
+        authProviderName !== undefined
+          ? this.modelProvider?.resolveAuthForProvider?.(authProviderName, { log: this.log })
+          : modelAlias === undefined
+            ? undefined
+            : this.modelProvider?.resolveAuth?.(modelAlias, { log: this.log });
       if (withAuth === undefined) {
         return run(generateOptions);
       }
@@ -449,7 +464,7 @@ export class Agent {
               provider: this.config.buildChatProvider(endpoint.provider),
               systemPrompt: this.config.systemPrompt,
               capability: endpoint.modelCapabilities,
-              generate: this.generate,
+              generate: this.createGenerate(endpoint.providerName),
               completionBudgetConfig: resolveCompletionBudget({
                 maxOutputSize: endpoint.maxOutputSize,
                 reservedContextSize: loopControl?.reservedContextSize,

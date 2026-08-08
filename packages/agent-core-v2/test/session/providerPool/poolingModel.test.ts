@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { Error2 } from '#/_base/errors/errors';
+import { AuthErrors } from '#/app/auth/errors';
 import { UNKNOWN_CAPABILITY } from '#/app/llmProtocol/capability';
 import {
   APIConnectionError,
@@ -167,6 +168,29 @@ describe('PoolingModel', () => {
     expect(await chat(h.model)).toBe('b');
     expect(h.registry.status('a')).toBe('limited');
     expect(h.failovers).toEqual([{ from: 'a', to: 'b', reason: 'rate_limit' }]);
+  });
+
+  it('fails over on coded OAuth auth errors (provider.auth_error)', async () => {
+    const h = harness(['a', 'b']);
+    h.setBehavior('a', async () => {
+      throw new Error2(
+        ProtocolErrors.codes.PROVIDER_AUTH_ERROR,
+        'OAuth provider credentials were rejected.',
+      );
+    });
+    expect(await chat(h.model)).toBe('b');
+    expect(h.registry.status('a')).toBe('down');
+    expect(h.failovers).toEqual([{ from: 'a', to: 'b', reason: 'auth' }]);
+  });
+
+  it('fails over when the OAuth provider requires login', async () => {
+    const h = harness(['a', 'b']);
+    h.setBehavior('a', async () => {
+      throw new Error2(AuthErrors.codes.AUTH_LOGIN_REQUIRED, 'OAuth provider "a" requires login.');
+    });
+    expect(await chat(h.model)).toBe('b');
+    expect(h.registry.status('a')).toBe('down');
+    expect(h.failovers).toEqual([{ from: 'a', to: 'b', reason: 'auth' }]);
   });
 
   it('half-opens the limited endpoint after cooldown and recovers on success', async () => {

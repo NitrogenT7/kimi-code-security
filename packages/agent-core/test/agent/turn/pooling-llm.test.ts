@@ -9,18 +9,23 @@ import {
   UNKNOWN_CAPABILITY,
 } from '@moonshot-ai/kosong';
 
+import type { AgentOptions } from '../../../src/agent';
 import { PoolingLLM } from '../../../src/agent/turn/pooling-llm';
 import type { KosongLLM } from '../../../src/agent/turn/kosong-llm';
+import type { KimiConfig } from '../../../src/config';
+import { ErrorCodes, KimiError } from '../../../src/errors';
 import type { LLMChatParams, LLMChatResponse } from '../../../src/loop';
 import type {
   ResolvedProviderPool,
   ResolvedRuntimeProvider,
 } from '../../../src/session/provider-manager';
+import { ProviderManager } from '../../../src/session/provider-manager';
 import {
   DEFAULT_POOL_OPTIONS,
   PoolHealthRegistry,
   type PoolOptions,
 } from '../../../src/session/provider-pool';
+import { testAgent } from '../harness/agent';
 
 const PARAMS: LLMChatParams = {
   messages: [],
@@ -179,6 +184,34 @@ describe('PoolingLLM', () => {
     expect(h.calls.get('a')).toBe(1);
   });
 
+  it('fails over on OAuth-wrapped auth errors (provider.auth_error)', async () => {
+    const h = harness(['a', 'b']);
+    h.setBehavior('a', async () => {
+      throw new KimiError(
+        ErrorCodes.PROVIDER_AUTH_ERROR,
+        'OAuth provider credentials were rejected.',
+      );
+    });
+    const res = await h.llm.chat(PARAMS);
+    expect(res.messageId).toBe('b');
+    expect(h.registry.status('a')).toBe('down');
+    expect(h.failovers[0]?.reason).toBe('auth');
+  });
+
+  it('fails over when the OAuth provider requires login', async () => {
+    const h = harness(['a', 'b']);
+    h.setBehavior('a', async () => {
+      throw new KimiError(
+        ErrorCodes.AUTH_LOGIN_REQUIRED,
+        'OAuth provider "a" requires login before it can be used.',
+      );
+    });
+    const res = await h.llm.chat(PARAMS);
+    expect(res.messageId).toBe('b');
+    expect(h.registry.status('a')).toBe('down');
+    expect(h.failovers[0]?.reason).toBe('auth');
+  });
+
   it('tries the next endpoint on connection errors without poisoning health', async () => {
     const h = harness(['a', 'b']);
     h.setBehavior('a', async () => {
@@ -240,5 +273,74 @@ describe('PoolingLLM', () => {
     expect(h.llm.modelName).toBe('mock-model');
     expect(h.llm.systemPrompt).toBe('sys');
     expect(h.llm.capability).toBe(UNKNOWN_CAPABILITY);
+  });
+});
+
+describe('Agent pool wiring (per-endpoint auth)', () => {
+  it('does not leak the OAuth primary token into the static-key fallback endpoint', async () => {
+    const cfg: KimiConfig = {
+      providers: {
+        primary: { type: 'kimi', oauth: { storage: 'file', key: 'test-oauth' } },
+        secondary: { type: 'openai', apiKey: 'secondary-key', baseUrl: 'http://127.0.0.1:9/v1' },
+      },
+      models: {
+        pooled: { provider: ['primary', 'secondary'], model: 'm', maxContextSize: 1_000_000 },
+      },
+    };
+    const calls: Array<{ providerName: string; authApiKey?: string }> = [];
+    const customGenerate: NonNullable<AgentOptions['generate']> = async (
+      provider,
+      _systemPrompt,
+      _tools,
+      _history,
+      callbacks,
+      options,
+    ) => {
+      calls.push({ providerName: provider.name, authApiKey: options?.auth?.apiKey });
+      if (provider.name === 'kimi') {
+        throw new APIStatusError(401, 'managed token rejected');
+      }
+      await callbacks?.onMessagePart?.({ type: 'text', text: 'ok from secondary' });
+      return {
+        id: 'mock-secondary',
+        message: {
+          role: 'assistant' as const,
+          content: [{ type: 'text' as const, text: 'ok from secondary' }],
+          toolCalls: [],
+        },
+        usage: { inputOther: 1, output: 1, inputCacheRead: 0, inputCacheCreation: 0 },
+        finishReason: 'completed' as const,
+        rawFinishReason: 'stop',
+        traceId: null,
+      };
+    };
+    const manager = new ProviderManager({
+      config: cfg,
+      resolveOAuthTokenProvider: () =>
+        ({ getAccessToken: async () => 'primary-token' }) as never,
+    });
+    const ctx = testAgent({
+      initialConfig: cfg,
+      providerManager: manager,
+      generate: customGenerate,
+    });
+    ctx.agent.config.update({ modelAlias: 'pooled', thinkingEffort: 'off' });
+
+    await ctx.agent.llm.chat({
+      messages: [],
+      tools: [],
+      signal: new AbortController().signal,
+    });
+
+    // The OAuth endpoint carries its own token (one forced-refresh retry → 2 calls).
+    const primaryCalls = calls.filter((call) => call.providerName === 'kimi');
+    expect(primaryCalls.length).toBeGreaterThan(0);
+    expect(primaryCalls.every((call) => call.authApiKey === 'primary-token')).toBe(true);
+
+    // The static-key fallback must never receive the primary's OAuth token:
+    // no auth override means its own `api_key` from config is used.
+    const secondaryCalls = calls.filter((call) => call.providerName === 'openai');
+    expect(secondaryCalls).toHaveLength(1);
+    expect(secondaryCalls[0]?.authApiKey).toBeUndefined();
   });
 });

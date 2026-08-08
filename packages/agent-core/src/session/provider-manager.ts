@@ -69,6 +69,16 @@ export interface ModelProvider {
   resolveProviderConfig(model: string): ResolvedRuntimeProvider;
   resolveAuth?(model: string, options?: { readonly log?: Logger }): AuthorizedRequest | undefined;
   /**
+   * Resolve request auth for one specific provider — one endpoint of a pooled
+   * alias. Pool endpoints must resolve auth per endpoint so an OAuth-backed
+   * endpoint and a static-key endpoint in the same pool each use their own
+   * credentials instead of the primary endpoint's.
+   */
+  resolveAuthForProvider?(
+    providerName: string,
+    options?: { readonly log?: Logger },
+  ): AuthorizedRequest | undefined;
+  /**
    * When the model alias declares an ordered provider pool
    * (`provider = ["a", "b", ...]`), returns every endpoint in priority order.
    * `undefined` for single-provider aliases — callers keep the classic path.
@@ -216,6 +226,13 @@ export class ProviderManager implements ModelProvider {
     options?: { readonly log?: Logger },
   ): AuthorizedRequest | undefined {
     const { providerName } = this.resolveProviderConfig(model);
+    return this.resolveAuthForProvider(providerName, options);
+  }
+
+  resolveAuthForProvider(
+    providerName: string,
+    options?: { readonly log?: Logger },
+  ): AuthorizedRequest | undefined {
     const providerConfig = this.config.providers[providerName];
     if (providerConfig?.oauth === undefined) return undefined;
 
