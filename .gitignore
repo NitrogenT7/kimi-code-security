@@ -27,6 +27,8 @@ apps/vscode/artifacts/
 Dockerfile
 docker-compose.yml
 .dockerignore
+# Local docker scratch workspace (may contain credentials) - do not commit
+docker/
 
 docs/superpowers/
 reports/
