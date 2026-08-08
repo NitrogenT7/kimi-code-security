@@ -36,6 +36,8 @@ const LONG_REPLY_MAIN =
   'Served by the MAIN endpoint. This subagent completed the delegated investigation end to end: the relevant module was located, its behavior traced through every call site, and the requested work verified against the existing test suite.';
 const LONG_REPLY_ROUTED =
   'Served by the ROUTED endpoint. This subagent completed the delegated investigation end to end: the relevant module was located, its behavior traced through every call site, and the requested work verified against the existing test suite.';
+const LONG_REPLY_POOLED =
+  'Served by the POOLED OK endpoint. This subagent completed the delegated investigation end to end: the relevant module was located, its behavior traced through every call site, and the requested work verified against the existing test suite.';
 
 function sseBody(text: string): string {
   const chunk = (delta: Record<string, unknown>, finishReason: string | null): string =>
@@ -81,6 +83,24 @@ beforeAll(async () => {
         replyWith(res, apiKey, LONG_REPLY_MAIN);
       } else if (apiKey === 'key-routed') {
         replyWith(res, apiKey, LONG_REPLY_ROUTED);
+      } else if (apiKey === 'key-limited') {
+        // The limited endpoint of the pooled alias always rate-limits, so the
+        // subagent's PoolingLLM must fail over to `key-ok`.
+        res.writeHead(429, {
+          'content-type': 'application/json',
+          'retry-after': '1',
+        });
+        res.end(
+          JSON.stringify({
+            error: {
+              message: 'rate limit on key-limited',
+              type: 'rate_limit_error',
+              code: 'rate_limit_exceeded',
+            },
+          }),
+        );
+      } else if (apiKey === 'key-ok') {
+        replyWith(res, apiKey, LONG_REPLY_POOLED);
       } else {
         res.writeHead(401, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: { message: `unexpected key ${apiKey}` } }));
@@ -106,10 +126,17 @@ const liveConfig: KimiConfig = {
   providers: {
     main: { type: 'openai', apiKey: 'key-main', baseUrl: '<set-at-runtime>' },
     routed: { type: 'openai', apiKey: 'key-routed', baseUrl: '<set-at-runtime>' },
+    limited: { type: 'openai', apiKey: 'key-limited', baseUrl: '<set-at-runtime>' },
+    ok: { type: 'openai', apiKey: 'key-ok', baseUrl: '<set-at-runtime>' },
   },
   models: {
     'main-model': { provider: 'main', model: 'model-main', maxContextSize: 128_000 },
     'routed-model': { provider: 'routed', model: 'model-routed', maxContextSize: 128_000 },
+    'pooled-model': {
+      provider: ['limited', 'ok'],
+      model: 'model-pooled',
+      maxContextSize: 128_000,
+    },
   },
   subagent: {
     routing: { coder: 'routed-model' },
@@ -122,6 +149,8 @@ function config(): KimiConfig {
     providers: {
       main: { ...liveConfig.providers['main'], baseUrl },
       routed: { ...liveConfig.providers['routed'], baseUrl },
+      limited: { ...liveConfig.providers['limited'], baseUrl },
+      ok: { ...liveConfig.providers['ok'], baseUrl },
     },
   };
 }
@@ -209,6 +238,35 @@ describe('per-subagent model routing over real HTTP', () => {
         { apiKey: 'key-routed', model: 'model-routed' },
         { apiKey: 'key-main', model: 'model-main' },
         { apiKey: 'key-main', model: 'model-main' },
+      ]);
+    } finally {
+      await session.close?.();
+    }
+  }, 60_000);
+
+  it('fails over inside a pooled alias routed to a subagent', async () => {
+    const session = await createLiveSession();
+    try {
+      const { agent: mainAgent } = await session.createAgent(
+        { type: 'main' },
+        { profile: mainProfile },
+      );
+      mainAgent.config.update({ modelAlias: 'main-model', thinkingEffort: 'off' });
+      mainAgent.permission.setMode('yolo');
+      const host = mainAgent.subagentHost!;
+
+      // The subagent binds the pooled alias; the first endpoint (`key-limited`)
+      // always answers 429, so the subagent's own PoolingLLM must fail over to
+      // `key-ok` within the same run — proving routing and failover compose.
+      const pooled = await host.spawn(spawnArgs('coder', 'pooled-model'));
+      expect(pooled.modelAlias).toBe('pooled-model');
+      await expect(pooled.completion).resolves.toMatchObject({
+        result: LONG_REPLY_POOLED,
+      });
+
+      expect(captured.slice(-2)).toEqual([
+        { apiKey: 'key-limited', model: 'model-pooled' },
+        { apiKey: 'key-ok', model: 'model-pooled' },
       ]);
     } finally {
       await session.close?.();
