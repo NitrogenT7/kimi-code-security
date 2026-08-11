@@ -44,6 +44,7 @@ import {
   IAgentProfileService,
   IAgentToolRegistryService,
   ISessionTodoService,
+  ISessionNotepadService,
   DYNAMIC_TOOL_SCHEMA_VARIANT,
   type ExecutableTool,
   type ResolvedAgentProfile,
@@ -2659,7 +2660,7 @@ describe('FullCompaction', () => {
   });
 
 
-  it('appends the todo list and findings digest to the compaction summary', async () => {
+  it('appends the todo list, findings digest, and notepad to the compaction summary', async () => {
     const todos = [
       {
         type: 'question',
@@ -2702,6 +2703,9 @@ describe('FullCompaction', () => {
         reg.definePartialInstance(ISessionTodoService, {
           getTodos: () => todos,
           getFindings: () => findings,
+        });
+        reg.definePartialInstance(ISessionNotepadService, {
+          getContent: () => 'auth endpoint uses cursor pagination, not offset',
         });
       }),
     );
@@ -2748,6 +2752,12 @@ describe('FullCompaction', () => {
       role: 'user',
       text: expect.stringContaining(
         '## Findings\n1. [resolved] Was the sink reachable? (confidence: high, depth: deep)\n   Conclusion: Yes, through path X',
+      ),
+    });
+    expect(history[2]).toMatchObject({
+      role: 'user',
+      text: expect.stringContaining(
+        '## Notepad\nauth endpoint uses cursor pagination, not offset',
       ),
     });
     expect(ctx.context.get().at(-1)?.content[0]).toMatchObject({

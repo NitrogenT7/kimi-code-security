@@ -173,6 +173,9 @@ const DOMAIN_LAYER = new Map([
   ['shellCommand', 4],
   ['replayBuilder', 4],
   ['todo', 4],
+  // `notepad` is a stateless facade over the main agent's wire, same shape as
+  // `todo`; its highest real dependency is `agentLifecycle` (target lookup).
+  ['notepad', 4],
   ['web', 4],
   // L5 — agent task management
   ['agentTask', 5],
@@ -332,6 +335,9 @@ const ALLOWED_EXCEPTIONS = new Set([
   'cron>agentLifecycle',
   'cron>sessionContext',
   'todo>agentLifecycle',
+  // `notepad` reads/writes the main agent's wire through the lifecycle
+  // handle, mirroring the `todo>agentLifecycle` facade pattern.
+  'notepad>agentLifecycle',
   // L3/L4 type-sharing: tool contract + execution hook contexts now live in
   // `tool`; the remaining upward import is a `loop` error/event helper.
   'contextMemory>agentTask',

@@ -27,6 +27,8 @@ import { IAgentToolSelectService } from '#/agent/toolSelect/toolSelect';
 import { ISessionTodoService } from '#/session/todo/sessionTodo';
 import { renderFindingsDigest } from '#/session/todo/findings';
 import { renderTodoList, type TodoItem } from '#/session/todo/todoItem';
+import { renderNotepad } from '#/session/notepad/notepadContent';
+import { ISessionNotepadService } from '#/session/notepad/sessionNotepad';
 import {
   APIContextOverflowError,
   APIEmptyResponseError,
@@ -127,6 +129,7 @@ export class AgentFullCompactionService extends Disposable implements IAgentFull
     @IAgentToolSelectService private readonly toolSelect: IAgentToolSelectService,
     @IInstantiationService private readonly instantiation: IInstantiationService,
     @ISessionTodoService private readonly todo: ISessionTodoService,
+    @ISessionNotepadService private readonly notepad: ISessionNotepadService,
     @ITelemetryService private readonly telemetry: ITelemetryService,
     @IWireService private readonly wire: IWireService,
     @IEventBus private readonly eventBus: IEventBus,
@@ -723,7 +726,8 @@ export class AgentFullCompactionService extends Disposable implements IAgentFull
   private postProcessSummary(summary: string): string {
     const todos = this.currentTodos();
     const findingsDigest = renderFindingsDigest(this.todo.getFindings());
-    if (todos.length === 0 && findingsDigest === undefined) {
+    const notepadDigest = renderNotepad(this.notepad.getContent());
+    if (todos.length === 0 && findingsDigest === undefined && notepadDigest === undefined) {
       return summary;
     }
     const sections = [summary.trim()];
@@ -732,6 +736,9 @@ export class AgentFullCompactionService extends Disposable implements IAgentFull
     }
     if (findingsDigest !== undefined) {
       sections.push(findingsDigest);
+    }
+    if (notepadDigest !== undefined) {
+      sections.push(notepadDigest);
     }
     return sections.join('\n\n');
   }
