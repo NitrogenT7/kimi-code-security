@@ -24,6 +24,7 @@
  */
 
 import { InstantiationType } from '#/_base/di/extensions';
+import { Disposable } from '#/_base/di/lifecycle';
 import { LifecycleScope, registerScopedService } from '#/_base/di/scope';
 import { UNKNOWN_CAPABILITY, type ModelCapability } from '#/app/llmProtocol/capability';
 import { type GenerationKwargs } from '#/app/llmProtocol/kimiOptions';
@@ -97,7 +98,7 @@ declare module '#/app/event/eventBus' {
   }
 }
 
-export class AgentProfileService implements IAgentProfileService {
+export class AgentProfileService extends Disposable implements IAgentProfileService {
   declare readonly _serviceBrand: undefined;
 
   private optionsValue: ProfileServiceOptions = {};
@@ -130,7 +131,29 @@ export class AgentProfileService implements IAgentProfileService {
     @IAgentProfileCatalogService private readonly catalog: IAgentProfileCatalogService,
     @ISessionSkillCatalog private readonly skillCatalog: ISessionSkillCatalog,
   ) {
+    super();
     this.configure({});
+    // Resumed sessions replay a `tools.set_active_tools` record frozen at
+    // session-creation time; re-apply the freshly resolved profile's list so
+    // tools added after the session was created become available on resume.
+    // Identical lists skip the dispatch to keep replays silent.
+    this._register(
+      this.wire.hooks.onDidRestore.register('profile', async (_ctx, next) => {
+        await next();
+        const profile = this.resolveActiveProfile();
+        if (profile === undefined) return;
+        const current = this.wire.getModel(ActiveToolsModel) as ActiveToolsState;
+        const fresh = [...profile.tools];
+        if (
+          current !== undefined &&
+          current.length === fresh.length &&
+          current.every((name, index) => name === fresh[index])
+        ) {
+          return;
+        }
+        this.setActiveTools(profile.tools);
+      }),
+    );
   }
 
   configure(options: ProfileServiceOptions): void {

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, normalize } from 'pathe';
 
@@ -480,6 +480,51 @@ max_context_size = 100000
     expect(resumed.additionalDirs).toEqual([extraDir]);
     expect(session?.getAdditionalDirs()).toEqual([extraDir]);
     expect(mainAgent?.getAdditionalDirs()).toEqual([extraDir]);
+  });
+
+  it('re-applies the profile tool list when resuming a session with a stale active-tools record', async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'kimi-core-runtime-'));
+    const homeDir = join(tmp, 'home');
+    const workDir = join(tmp, 'work');
+    await mkdir(homeDir, { recursive: true });
+    await mkdir(workDir, { recursive: true });
+    await writeFile(join(homeDir, 'config.toml'), baseModelConfig());
+
+    const [coreRpc, sdkRpc] = createRPC<CoreAPI, SDKAPI>();
+    const core = new KimiCore(coreRpc, { homeDir });
+    const rpc = await sdkRpc({
+      emitEvent: vi.fn(),
+      requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
+      requestQuestion: vi.fn(async () => null),
+      toolCall: vi.fn(async () => ({ output: '' })),
+    });
+
+    const created = await rpc.createSession({
+      id: 'ses_runtime_stale_tools_resume',
+      workDir,
+      model: 'default-mock',
+    });
+    await rpc.closeSession({ sessionId: created.id });
+
+    // Simulate a wire written by an older bundle: the persisted active-tools
+    // record predates the Notepad tool.
+    const wirePath = await findMainAgentWire(homeDir);
+    const lines = (await readFile(wirePath, 'utf-8')).split('\n');
+    let sawActiveTools = false;
+    const stale = lines.map((line) => {
+      if (!line.includes('tools.set_active_tools')) return line;
+      sawActiveTools = true;
+      const record = JSON.parse(line) as { names: string[] };
+      record.names = record.names.filter((name) => name !== 'Notepad');
+      return JSON.stringify(record);
+    });
+    expect(sawActiveTools).toBe(true);
+    await writeFile(wirePath, stale.join('\n'), 'utf-8');
+
+    await rpc.resumeSession({ sessionId: created.id });
+
+    const mainAgent = core.sessions.get(created.id)?.getReadyAgent('main');
+    expect(mainAgent?.tools.loopTools.map((tool) => tool.name)).toContain('Notepad');
   });
 
   it('merges caller additionalDirs when resuming a closed session', async () => {
@@ -1324,4 +1369,21 @@ provider = "test"
 model = "default-mock"
 max_context_size = 100000
 `;
+}
+
+async function findMainAgentWire(homeDir: string): Promise<string> {
+  const sessionsDir = join(homeDir, 'sessions');
+  for (const workspace of await readdir(sessionsDir)) {
+    const workspaceDir = join(sessionsDir, workspace);
+    for (const session of await readdir(workspaceDir)) {
+      const candidate = join(workspaceDir, session, 'agents', 'main', 'wire.jsonl');
+      try {
+        await readFile(candidate, 'utf-8');
+        return candidate;
+      } catch {
+        // not this session — keep scanning
+      }
+    }
+  }
+  throw new Error(`no main agent wire.jsonl found under ${sessionsDir}`);
 }

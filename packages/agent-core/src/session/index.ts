@@ -1119,6 +1119,10 @@ export class Session {
     const profile = this.resolvePersistedProfile(agent, meta, parentAgent);
     if (profile === undefined) return;
     agent.setActiveProfile(profile, this.options.kimiHomeDir);
+    // The replayed `tools.set_active_tools` record froze the tool list from
+    // session-creation time. Re-apply the freshly resolved profile's list so
+    // sessions resumed after a bundle update pick up newly added tools.
+    agent.tools.setActiveTools(profile.tools);
   }
 
   private resolvePersistedProfile(

@@ -5,7 +5,7 @@ import { DisposableStore } from '#/_base/di/lifecycle';
 import { TestInstantiationService } from '#/_base/di/test';
 import { IAgentProfileService } from '#/agent/profile/profile';
 import { AgentProfileService } from '#/agent/profile/profileService';
-import { ProfileModel } from '#/agent/profile/profileOps';
+import { ProfileModel, ActiveToolsModel } from '#/agent/profile/profileOps';
 import { DEFAULT_AGENT_PROFILE_NAME, IAgentProfileCatalogService } from '#/app/agentProfileCatalog/agentProfileCatalog';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { IConfigService } from '#/app/config/config';
@@ -93,7 +93,10 @@ let svc: IAgentProfileService;
 let configValues: Record<string, unknown>;
 let modelResolver: IModelResolver;
 
-function buildHost(key: string): {
+function buildHost(
+  key: string,
+  catalogGet: (name: string) => unknown = () => undefined,
+): {
   ix: TestInstantiationService;
   wire: IWireService;
   svc: IAgentProfileService;
@@ -112,7 +115,12 @@ function buildHost(key: string): {
   host.stub(ISessionContext, createSessionContextStub());
   host.stub(ISessionProviderPoolService, createProviderPoolStub());
   host.stub(ISessionWorkspaceContext, stubUnused());
-  host.stub(IAgentProfileCatalogService, stubUnused());
+  host.stub(IAgentProfileCatalogService, {
+    ...stubUnused<IAgentProfileCatalogService>(),
+    // The service re-applies the profile's tool list after wire restore;
+    // an unknown profile keeps the replayed list untouched.
+    get: catalogGet,
+  } as IAgentProfileCatalogService);
   host.stub(ISessionSkillCatalog, stubUnused());
   host.set(IAgentProfileService, new SyncDescriptor(AgentProfileService));
   const wire = registerTestAgentWire(host, testWireScope(SCOPE, key), {
@@ -290,6 +298,35 @@ describe('AgentProfileService (wire-backed config.update)', () => {
     }
     expect(written[0]).toMatchObject({ type: 'metadata' });
     expect(written.slice(1)).toEqual(records);
+  });
+
+  it('re-applies the profile tool list after restoring a stale active-tools record', async () => {
+    const host = buildHost('profile-tools-refresh', (name: string) =>
+      name === DEFAULT_AGENT_PROFILE_NAME
+        ? {
+            name: DEFAULT_AGENT_PROFILE_NAME,
+            tools: ['Read', 'Notepad'],
+            systemPrompt: () => '',
+          }
+        : undefined,
+    );
+
+    await restoreTestAgentWire(
+      host.wire,
+      host.log,
+      testWireScope(SCOPE, 'profile-tools-refresh'),
+      [
+        {
+          type: 'config.update',
+          profileName: DEFAULT_AGENT_PROFILE_NAME,
+          systemPrompt: 'You are helpful.',
+          time: 1,
+        },
+        { type: 'tools.set_active_tools', names: ['Read'], time: 2 },
+      ] as unknown as WireRecord[],
+    );
+
+    expect(host.wire.getModel(ActiveToolsModel)).toEqual(['Read', 'Notepad']);
   });
 
   it('replay rebuilds the resolved thinkingLevel without re-reading config', async () => {
