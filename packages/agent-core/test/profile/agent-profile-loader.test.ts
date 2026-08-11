@@ -222,6 +222,7 @@ describe('default agent profiles', () => {
       'TaskOutput',
       'TaskStop',
       'TodoList',
+      'Notepad',
       'WebSearch',
       'FetchURL',
       'Write',

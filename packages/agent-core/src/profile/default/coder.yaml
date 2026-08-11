@@ -26,6 +26,7 @@ tools:
   - TaskOutput
   - TaskStop
   - TodoList
+  - Notepad
   - WebSearch
   - FetchURL
   - Write

@@ -29,6 +29,7 @@ tools:
   - CronDelete
   - ReadMediaFile
   - TodoList
+  - Notepad
   - Skill
   - WebSearch
   - Agent

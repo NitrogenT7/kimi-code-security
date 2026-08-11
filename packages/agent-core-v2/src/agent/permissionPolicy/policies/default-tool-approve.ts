@@ -11,6 +11,7 @@ const DEFAULT_APPROVE_TOOLS = new Set([
   'ReadMediaFile',
   'SetTodoList',
   'TodoList',
+  'Notepad',
   'TaskList',
   'TaskOutput',
   'CronList',

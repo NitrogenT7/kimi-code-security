@@ -645,6 +645,7 @@ describe('SessionSubagentHost', () => {
       'ExitPlanMode',
       'Glob',
       'Grep',
+      'Notepad',
       'Read',
       'TaskList',
       'TaskOutput',
