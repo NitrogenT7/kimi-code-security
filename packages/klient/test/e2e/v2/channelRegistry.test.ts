@@ -21,6 +21,7 @@ describe('v2 server channel registry', () => {
     expect(names).toContain('workspaceRegistry');
     // session
     expect(names).toContain('sessionMetadata');
+    expect(names).toContain('sessionNotepadService');
     // agent (facade-backed)
     expect(names).toContain('agentRPCService');
   });
@@ -48,5 +49,15 @@ describe('v2 server channel registry', () => {
     const names = meta?.methods.map((m) => m.name) ?? [];
     expect(names).not.toContain('onDidChangeMetadata');
     expect(names).not.toContain('dispose');
+
+    const notepad = byName.get('sessionNotepadService');
+    expect(notepad?.scope).toBe('session');
+    expect(notepad?.methods.map((m) => m.name)).toEqual(
+      expect.arrayContaining(['getContent', 'setContent', 'append', 'clear']),
+    );
+    expect(notepad?.methods.find((m) => m.name === 'getContent')?.params).toBe('');
+    expect(notepad?.methods.find((m) => m.name === 'setContent')?.params).toBe('content');
+    expect(notepad?.methods.find((m) => m.name === 'append')?.params).toBe('text');
+    expect(notepad?.methods.find((m) => m.name === 'clear')?.params).toBe('');
   });
 });

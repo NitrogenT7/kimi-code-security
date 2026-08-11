@@ -1,10 +1,10 @@
 /**
  * The session facade — one `klient.session(id)` handle aggregating the
  * session-scope services (metadata, activity, approvals, questions,
- * interactions) plus the app-scope lifecycle service for close/archive/
- * restore/fork/createChild. `agents()` reads the metadata registry (agent
- * handles are not serializable, so no agent-lifecycle channel exists on the
- * wire).
+ * interactions, notepad) plus the app-scope lifecycle service for close/
+ * archive/restore/fork/createChild. `agents()` reads the metadata registry
+ * (agent handles are not serializable, so no agent-lifecycle channel exists
+ * on the wire).
  */
 
 import type { AgentActivityState } from '@moonshot-ai/agent-core-v2/agent/activityView/activityView';
@@ -52,6 +52,13 @@ export interface SessionInteractionsFacade {
   respond(id: string, response: unknown): Promise<void>;
 }
 
+export interface SessionNotepadFacade {
+  getContent(): Promise<string>;
+  setContent(content: string): Promise<void>;
+  append(text: string): Promise<void>;
+  clear(): Promise<void>;
+}
+
 /**
  * Derived session lifecycle phase. The engine retired its `sessionActivity`
  * service (#1751) — busy is now derived from agent activity views — so the
@@ -78,6 +85,7 @@ export interface SessionFacade {
   readonly approvals: SessionApprovalsFacade;
   readonly questions: SessionQuestionsFacade;
   readonly interactions: SessionInteractionsFacade;
+  readonly notepad: SessionNotepadFacade;
   /** Agent id → metadata for every agent registered in this session. */
   agents(): Promise<Readonly<Record<string, AgentMeta>>>;
 }
@@ -164,6 +172,16 @@ export function createSessionFacade(call: ScopedCaller, sessionId: string): Sess
         >,
       respond: (id, response) =>
         call(scope, 'sessionInteractionService', 'respond', [id, response]) as Promise<void>,
+    },
+
+    notepad: {
+      getContent: () =>
+        call(scope, 'sessionNotepadService', 'getContent', []) as Promise<string>,
+      setContent: (content) =>
+        call(scope, 'sessionNotepadService', 'setContent', [content]) as Promise<void>,
+      append: (text) =>
+        call(scope, 'sessionNotepadService', 'append', [text]) as Promise<void>,
+      clear: () => call(scope, 'sessionNotepadService', 'clear', []) as Promise<void>,
     },
 
     agents: async () => {

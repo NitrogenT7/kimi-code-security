@@ -27,6 +27,7 @@ import { resolvePoolOptions } from '../session/provider-pool';
 import type { SessionSubagentHost } from '../session/subagent-host';
 import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
 import { ImageLimits } from '../tools/support/image-limits';
+import { NOTEPAD_STORE_KEY, readNotepadContent } from '../tools/builtin/state/notepad';
 import type { ToolServices } from '../tools/support/services';
 import { resolveCompletionBudget } from '../utils/completion-budget';
 import type { PromisableMethods } from '../utils/types';
@@ -747,6 +748,10 @@ export class Agent {
       startBtw: () => this.subagentHost!.startBtw(),
       createGoal: (payload) => this.goal.createGoal(payload),
       getGoal: () => this.goal.getGoal(),
+      getNotepad: () => readNotepadContent(this.tools.storeData()[NOTEPAD_STORE_KEY]),
+      setNotepad: (payload) => {
+        this.tools.updateStore(NOTEPAD_STORE_KEY, payload.content);
+      },
       pauseGoal: () => this.goal.pauseGoal(),
       resumeGoal: () => this.goal.resumeGoal(),
       cancelGoal: () => this.goal.cancelGoal(),

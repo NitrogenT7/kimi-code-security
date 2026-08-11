@@ -28,6 +28,11 @@ const SWARM_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'off', description: 'Turn swarm mode off' },
 ];
 
+const NOTEPAD_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'status', description: 'Show the notepad content' },
+  { value: 'edit', description: 'Edit the notepad in an external editor' },
+];
+
 const ADD_DIR_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'list', description: 'Show configured additional workspace directories' },
 ];
@@ -79,6 +84,11 @@ function completeGoalTemplateArg(argumentPrefix: string): AutocompleteItem[] | n
 /** Argument autocompletion for the `/swarm` command (subcommands). */
 export function swarmArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
   return completeLeadingArg(SWARM_ARG_COMPLETIONS, argumentPrefix);
+}
+
+/** Argument autocompletion for the `/notepad` command (subcommands). */
+export function notepadArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  return completeLeadingArg(NOTEPAD_ARG_COMPLETIONS, argumentPrefix);
 }
 
 /** Argument autocompletion for the `/add-dir` command. */
@@ -331,6 +341,15 @@ export const BUILTIN_SLASH_COMMANDS = [
         ? 'always'
         : 'idle-only';
     },
+  },
+  {
+    name: 'notepad',
+    aliases: [],
+    description: 'View or edit the agent notepad (persists across compaction)',
+    priority: 80,
+    argumentHint: '[status|edit]',
+    completeArgs: notepadArgumentCompletions,
+    availability: 'always',
   },
   {
     name: 'init',

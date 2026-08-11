@@ -229,6 +229,9 @@ export interface SetModelResult {
   readonly model: string;
   readonly providerName?: string | undefined;
 }
+export interface SetNotepadPayload {
+  readonly content: string;
+}
 export interface CancelPlanPayload {
   readonly id?: string;
 }
@@ -487,6 +490,8 @@ export interface AgentAPI {
   startBtw: (payload: EmptyPayload) => string;
   createGoal: (payload: CreateGoalPayload) => GoalSnapshot;
   getGoal: (payload: EmptyPayload) => GoalToolResult;
+  getNotepad: (payload: EmptyPayload) => string;
+  setNotepad: (payload: SetNotepadPayload) => void;
   pauseGoal: (payload: EmptyPayload) => GoalSnapshot;
   resumeGoal: (payload: EmptyPayload) => GoalSnapshot;
   cancelGoal: (payload: EmptyPayload) => GoalSnapshot;

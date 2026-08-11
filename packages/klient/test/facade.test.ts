@@ -98,6 +98,46 @@ describe('facade routing', () => {
     expect(channel.calls.every((call) => call.service === 'bootstrapService')).toBe(true);
   });
 
+  it('routes notepad methods to the sessionNotepadService channel', async () => {
+    const channel = new FakeChannel();
+    const klient = createKlientFromChannel(channel);
+    const notepad = klient.session('s1').notepad;
+
+    channel.result = 'hello';
+    await expect(notepad.getContent()).resolves.toBe('hello');
+    expect(channel.calls[0]).toMatchObject({
+      scope: { sessionId: 's1' },
+      service: 'sessionNotepadService',
+      method: 'getContent',
+      args: [],
+    });
+
+    channel.result = undefined; // void output
+    await notepad.setContent('hello');
+    await notepad.append(' world');
+    await notepad.clear();
+    expect(channel.calls.slice(1)).toMatchObject([
+      {
+        scope: { sessionId: 's1' },
+        service: 'sessionNotepadService',
+        method: 'setContent',
+        args: ['hello'],
+      },
+      {
+        scope: { sessionId: 's1' },
+        service: 'sessionNotepadService',
+        method: 'append',
+        args: [' world'],
+      },
+      {
+        scope: { sessionId: 's1' },
+        service: 'sessionNotepadService',
+        method: 'clear',
+        args: [],
+      },
+    ]);
+  });
+
   it('env() resolves once and serves repeats from the cache', async () => {
     const channel = new FakeChannel();
     const klient = createKlientFromChannel(channel);

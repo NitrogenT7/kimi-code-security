@@ -20,6 +20,7 @@ import { isAbortError } from '../../loop/errors';
 import { LLMRequestTraceState } from '../../loop/llm';
 import { findAPIStatusError, retryBackoffDelays, sleepForRetry } from '../../loop/retry';
 import { renderTodoList, TODO_STORE_KEY, type TodoItem } from '../../tools/builtin/state/todo-list';
+import { NOTEPAD_STORE_KEY, readNotepadContent, renderNotepad } from '../../tools/builtin/state/notepad';
 import { applyCompletionBudget, resolveCompletionBudget } from '../../utils/completion-budget';
 import { renderPrompt } from '../../utils/render-prompt';
 import {
@@ -436,11 +437,18 @@ export class FullCompaction {
   private postProcessSummary(summary: string): string {
     const storeData = this.agent.tools.storeData();
     const todos = (storeData[TODO_STORE_KEY] as readonly TodoItem[] | undefined) ?? [];
-    if (todos.length === 0) {
+    const notepadMarkdown = renderNotepad(readNotepadContent(storeData[NOTEPAD_STORE_KEY]));
+    if (todos.length === 0 && notepadMarkdown === undefined) {
       return summary;
     }
-    const todoMarkdown = renderTodoList(todos, '## TODO List');
-    return `${summary.trim()}\n\n${todoMarkdown}`;
+    const sections = [summary.trim()];
+    if (todos.length > 0) {
+      sections.push(renderTodoList(todos, '## TODO List'));
+    }
+    if (notepadMarkdown !== undefined) {
+      sections.push(notepadMarkdown);
+    }
+    return sections.join('\n\n');
   }
 
   private async compactionRound(

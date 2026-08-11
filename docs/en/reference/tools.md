@@ -75,8 +75,11 @@ Plan mode is a constrained working state: once entered, `Write` and `Edit` are r
 | Tool | Default Approval | Description |
 | --- | --- | --- |
 | `TodoList` | Auto-allow | Manage a question-driven investigation list |
+| `Notepad` | Auto-allow | Read and write a free-form notepad that persists across compaction |
 
 **`TodoList`** maintains a visible question list across multi-step investigations; state is stored within the Agent session. The `todos` parameter accepts an array where each item is a question object with `type` (`"question"`), `id`, `question`, `status` (`pending` / `investigating` / `resolved` / `inconclusive`), `confidence` (`low` / `medium` / `high`), and `depth` (`quick` / `deep`), plus optional `hypothesis`, `conclusion`, `evidence`, `blockers`, `parentId`, and `subQuestions` fields. Omitting `todos` queries the current list; passing an empty array clears it.
+
+**`Notepad`** is a free-form text buffer for working notes that must survive context compaction; the content is stored within the session and is re-attached to the compaction summary. Calling with no parameters reads the current content, `content` replaces the entire buffer (an empty string clears it), and `append` adds text to the end. You can view and edit the same buffer with the [`/notepad`](./slash-commands.md#agent-notepad) slash command.
 
 ## Collaboration Tools
 

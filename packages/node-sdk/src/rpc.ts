@@ -683,6 +683,20 @@ export abstract class SDKRpcClientBase {
     return rpc.getGoal({ sessionId: input.sessionId, agentId: this.interactiveAgentId });
   }
 
+  async getNotepad(input: SessionIdRpcInput): Promise<string> {
+    const rpc = await this.getRpc();
+    return rpc.getNotepad({ sessionId: input.sessionId, agentId: this.interactiveAgentId });
+  }
+
+  async setNotepad(input: SessionIdRpcInput & { content: string }): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.setNotepad({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      content: input.content,
+    });
+  }
+
   async pauseGoal(input: SessionIdRpcInput): Promise<GoalSnapshot> {
     const rpc = await this.getRpc();
     return rpc.pauseGoal({

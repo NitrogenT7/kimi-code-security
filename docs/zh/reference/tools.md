@@ -75,8 +75,11 @@ Plan 模式是一种受约束的工作状态：进入后 `Write` 与 `Edit` 只�
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |
 | `TodoList` | 自动放行 | 管理问题驱动的调查列表 |
+| `Notepad` | 自动放行 | 读写跨上下文压缩持久化的自由文本记事本 |
 
 **`TodoList`** 在多步骤调查中维护一份可见的问题列表，状态存储在 Agent 会话内。`todos` 参数接受一个数组，每项是一个问题对象，包含 `type`（`"question"`）、`id`、`question`、`status`（`pending` / `investigating` / `resolved` / `inconclusive`）、`confidence`（`low` / `medium` / `high`）和 `depth`（`quick` / `deep`），以及可选的 `hypothesis`、`conclusion`、`evidence`、`blockers`、`parentId`、`subQuestions` 字段；省略 `todos` 则仅查询当前列表，传入空数组则清空列表。
+
+**`Notepad`** 是一个自由文本缓冲区，用于保存需要在上下文压缩后保留的工作笔记；内容存储在会话内，并会重新附加到压缩摘要中。不带参数调用时读取当前内容，`content` 整体替换缓冲区（空字符串表示清空），`append` 在末尾追加文本。你也可以通过 [`/notepad`](./slash-commands.md#agent-记事本) 斜杠命令查看和编辑同一个缓冲区。
 
 ## 协作类
 

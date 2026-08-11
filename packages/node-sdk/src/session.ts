@@ -460,6 +460,16 @@ export class Session {
     return this.rpc.getGoal({ sessionId: this.id });
   }
 
+  async getNotepad(): Promise<string> {
+    this.ensureOpen();
+    return this.rpc.getNotepad({ sessionId: this.id });
+  }
+
+  async setNotepad(content: string): Promise<void> {
+    this.ensureOpen();
+    return this.rpc.setNotepad({ sessionId: this.id, content });
+  }
+
   async pauseGoal(): Promise<GoalSnapshot> {
     this.ensureOpen();
     return this.rpc.pauseGoal({ sessionId: this.id });

@@ -32,6 +32,7 @@ import type {
   SetActiveToolsPayload,
   SetMcpGroupModePayload,
   SetModelPayload,
+  SetNotepadPayload,
   SetPermissionPayload,
   SetThinkingPayload,
   SkillSummary,
@@ -308,6 +309,14 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   async getGoal({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
     return (await this.getAgent(agentId)).getGoal(payload);
+  }
+
+  async getNotepad({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
+    return (await this.getAgent(agentId)).getNotepad(payload);
+  }
+
+  async setNotepad({ agentId, ...payload }: AgentScopedPayload<SetNotepadPayload>) {
+    return (await this.getAgent(agentId)).setNotepad(payload);
   }
 
   async pauseGoal({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {

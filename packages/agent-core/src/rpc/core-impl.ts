@@ -135,6 +135,7 @@ import type {
   SetKimiConfigPayload,
   SetMcpGroupModePayload,
   SetModelPayload,
+  SetNotepadPayload,
   SetModelResult,
   SetPermissionPayload,
   SetPluginEnabledPayload,
@@ -1079,6 +1080,14 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
 
   getGoal({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>): Promise<GoalToolResult> {
     return Promise.resolve(this.sessionApi(sessionId).getGoal(payload));
+  }
+
+  getNotepad({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>): Promise<string> {
+    return Promise.resolve(this.sessionApi(sessionId).getNotepad(payload));
+  }
+
+  setNotepad({ sessionId, ...payload }: SessionAgentPayload<SetNotepadPayload>): Promise<void> {
+    return Promise.resolve(this.sessionApi(sessionId).setNotepad(payload));
   }
 
   pauseGoal({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>): Promise<GoalSnapshot> {

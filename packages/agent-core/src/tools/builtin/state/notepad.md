@@ -14,6 +14,4 @@ Use this tool to read and write your notepad — a free-form text buffer that on
 
 **Query mode:** call with no arguments to read the current content. After a context compaction, the notepad content is included in the compaction summary; treat the summary copy as a snapshot and query this tool for the live content when in doubt.
 
-**Sharing:** the notepad is session-shared — every agent in the session (including subagents) reads and writes the same buffer. Write so that others can pick up where you left off, and do not overwrite notes you did not write without folding their still-relevant content into your rewrite.
-
 **The user can see and edit the notepad** via the `/notepad` command — never store secrets or anything the user should not see, and respect user edits as authoritative.

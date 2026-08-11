@@ -95,6 +95,17 @@ kimi -p "/goal Fix the failing checkout test"
 
 Prompt mode exits with code `0` when the goal completes, `3` when it blocks, and `6` when it pauses. Other `/goal` subcommands, including `next`, are TUI controls and are not handled by `kimi -p`.
 
+## Agent Notepad
+
+The notepad is a free-form text buffer shared between you and the agent within a session. The agent keeps working notes in it that must survive context compaction — the content is stored outside the conversation and is re-attached to the compaction summary, so exact details such as paths, commands, and findings are not lost when the context is trimmed.
+
+| Command | Action | Availability |
+| --- | --- | --- |
+| `/notepad` or `/notepad status` | Display the current notepad content | Always available |
+| `/notepad edit` | Open the notepad in an external editor and save your changes back | Always available |
+
+`/notepad edit` resolves the editor the same way as the external-editor keyboard shortcut: the command configured with `/editor`, then `$VISUAL`, then `$EDITOR`. Saving an empty file clears the notepad; closing the editor with a non-zero exit code leaves it unchanged. Your edits are visible to the agent on its next read, so you can use the notepad to leave persistent instructions for the agent.
+
 ## Information & Status
 
 | Command | Alias | Description | Always available |
@@ -102,6 +113,7 @@ Prompt mode exits with code `0` when the goal completes, `3` when it blocks, and
 | `/help` | `/h`, `/?` | Show keyboard shortcuts and all available commands | Yes |
 | `/btw [question]` | — | Open a side conversation in a forked sub-Agent without affecting the current main Agent turn; without a question, opens the panel first to wait for input | Yes |
 | `/usage` | — | Show token usage, context consumption, and quota information | Yes |
+| `/notepad [status\|edit]` | — | View or edit the agent notepad; see [Agent Notepad](#agent-notepad) | Yes |
 | `/status` | — | Show the current session runtime state: version, model, working directory, permission mode, etc. | Yes |
 | `/mcp` | — | List MCP servers and their connection status in the current session | Yes |
 | `/plugins` | — | Open the interactive plugin manager | Yes |

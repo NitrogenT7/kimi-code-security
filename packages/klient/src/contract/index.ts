@@ -24,6 +24,7 @@ import { sessionApprovalContract } from './session/approval.js';
 import { sessionInteractionContract } from './session/interaction.js';
 import { sessionLifecycleContract } from './session/lifecycle.js';
 import { sessionMetadataContract } from './session/metadata.js';
+import { sessionNotepadContract } from './session/notepad.js';
 import { sessionQuestionContract } from './session/question.js';
 
 export const globalContract: KlientContract = {
@@ -43,6 +44,7 @@ export const globalContract: KlientContract = {
   // session scope (+ the app-registered lifecycle service)
   sessionLifecycleService: sessionLifecycleContract,
   sessionMetadata: sessionMetadataContract,
+  sessionNotepadService: sessionNotepadContract,
   sessionInteractionService: sessionInteractionContract,
   sessionApprovalService: sessionApprovalContract,
   sessionQuestionService: sessionQuestionContract,

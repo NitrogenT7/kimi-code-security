@@ -50,6 +50,7 @@ import {
   ISessionLifecycleService,
   ISessionMetadata,
   ISessionMcpService,
+  ISessionNotepadService,
   ISessionQuestionService,
   ISessionWorkspaceCommandService,
   ISessionWorkspaceContext,
@@ -228,6 +229,7 @@ const EXPOSED_SERVICES: readonly ServiceIdentifier<unknown>[] = [
   ISessionFsService,
   ISessionGoalTemplateService,
   ISessionMcpService,
+  ISessionNotepadService,
   // agent
   IAgentGoalService,
   IAgentPlanService,
