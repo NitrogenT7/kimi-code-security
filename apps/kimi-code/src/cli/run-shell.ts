@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import {
   createKimiHarness,
+  createKimiHarnessV2,
   flushDiagnosticLogsSync,
   log,
   type KimiHarness,
@@ -60,7 +61,11 @@ export async function runShell(
     withContext: withTelemetryContext,
     setContext: setTelemetryContext,
   };
-  const harness = createKimiHarness({
+  // Engine selection: `KIMI_CODE_ENGINE=v2` drives the session through the
+  // in-process agent-core-v2 bridge (V2SDKRpcClient); anything else keeps the
+  // v1 engine. The v2 path is experimental while the migration completes.
+  const createHarness = process.env['KIMI_CODE_ENGINE'] === 'v2' ? createKimiHarnessV2 : createKimiHarness;
+  const harness = createHarness({
     homeDir: telemetryBootstrap.homeDir,
     identity: createKimiCodeHostIdentity(version),
     skillDirs: opts.skillsDirs,

@@ -64,6 +64,7 @@
     "@moonshot-ai/kimi-code-oauth": "workspace:^",
     "@moonshot-ai/kosong": "workspace:^",
     "@types/yazl": "^2.4.6",
-    "jimp": "^1.6.1"
+    "jimp": "^1.6.1",
+    "@moonshot-ai/agent-core-v2": "workspace:^"
   }
 }

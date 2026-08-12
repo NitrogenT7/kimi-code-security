@@ -17,6 +17,7 @@ import type { Kaos } from '@moonshot-ai/kaos';
 import { assertKimiHostIdentity, createKimiDefaultHeaders } from '@moonshot-ai/kimi-code-oauth';
 
 import { KimiAuthFacade } from '#/auth';
+import { V2SDKRpcClient } from '#/v2/client';
 import { KimiHarness } from '#/kimi-harness';
 import { ClientAPI, SDKRpcClientBase } from '#/rpc';
 import type {
@@ -147,6 +148,27 @@ export function createKimiHarness(options: KimiHarnessOptions): KimiHarness {
     ensureConfigFile: () => rpc.ensureConfigFile(),
     onClose: () => rpc.close(),
     imageLimits: rpc.core.imageLimits,
+    sessionStartedProperties: options.sessionStartedProperties,
+  });
+}
+
+/**
+ * v2-engine variant of {@link createKimiHarness}: identical `KimiHarness` /
+ * `Session` API, but the RPC contract is served by `V2CoreBridge` over an
+ * in-process agent-core-v2 engine instead of v1's `KimiCore`.
+ */
+export function createKimiHarnessV2(options: KimiHarnessOptions): KimiHarness {
+  const rpc = new V2SDKRpcClient(options);
+  return new KimiHarness(rpc, {
+    identity: rpc.identity,
+    uiMode: options.uiMode,
+    homeDir: rpc.homeDir,
+    configPath: rpc.configPath,
+    auth: rpc.auth,
+    telemetry: rpc.telemetry,
+    ensureConfigFile: () => rpc.ensureConfigFile(),
+    onClose: () => rpc.close(),
+    imageLimits: undefined,
     sessionStartedProperties: options.sessionStartedProperties,
   });
 }
