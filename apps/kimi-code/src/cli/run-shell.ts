@@ -61,10 +61,10 @@ export async function runShell(
     withContext: withTelemetryContext,
     setContext: setTelemetryContext,
   };
-  // Engine selection: `KIMI_CODE_ENGINE=v2` drives the session through the
-  // in-process agent-core-v2 bridge (V2SDKRpcClient); anything else keeps the
-  // v1 engine. The v2 path is experimental while the migration completes.
-  const createHarness = process.env['KIMI_CODE_ENGINE'] === 'v2' ? createKimiHarnessV2 : createKimiHarness;
+  // Engine selection: the v2 engine (in-process agent-core-v2 via
+  // V2SDKRpcClient) is the default; `KIMI_CODE_ENGINE=v1` falls back to the
+  // legacy v1 engine while the migration completes.
+  const createHarness = process.env['KIMI_CODE_ENGINE'] === 'v1' ? createKimiHarness : createKimiHarnessV2;
   const harness = createHarness({
     homeDir: telemetryBootstrap.homeDir,
     identity: createKimiCodeHostIdentity(version),

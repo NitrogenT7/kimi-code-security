@@ -2,4 +2,4 @@
 "@moonshot-ai/kimi-code": minor
 ---
 
-Add an experimental v2 engine path for the interactive CLI: set KIMI_CODE_ENGINE=v2 to run sessions on the in-process agent-core-v2 engine.
+Run interactive CLI sessions on the v2 engine (in-process agent-core-v2) by default; set KIMI_CODE_ENGINE=v1 to fall back to the legacy engine.
