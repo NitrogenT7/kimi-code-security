@@ -29,6 +29,7 @@ import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
 import { ImageLimits } from '../tools/support/image-limits';
 import { NOTEPAD_STORE_KEY, readNotepadContent } from '../tools/builtin/state/notepad';
 import type { ToolServices } from '../tools/support/services';
+import type { ToolStore } from '../tools/store';
 import { resolveCompletionBudget } from '../utils/completion-budget';
 import type { PromisableMethods } from '../utils/types';
 import { BackgroundManager, BackgroundTaskPersistence } from './background';
@@ -106,6 +107,8 @@ export interface AgentOptions {
   readonly experimentalFlags?: ExperimentalFlagResolver;
   /** Owner-scoped [image] limits; a standalone Agent gets env/built-in defaults. */
   readonly imageLimits?: ImageLimits;
+  /** Subagents only: a shared notepad store owned by the main agent. */
+  readonly sharedNotepadStore?: ToolStore;
   readonly replay?: ReplayBuilderOptions;
   readonly additionalDirs?: readonly string[];
   readonly systemPromptContextProvider?: (() => Promise<PreparedSystemPromptContext>) | undefined;
@@ -136,6 +139,12 @@ export class Agent {
   readonly telemetry: TelemetryClient;
   readonly experimentalFlags: ExperimentalFlagResolver;
   readonly imageLimits: ImageLimits;
+  /**
+   * When set (subagents only), the `Notepad` tool reads/writes this store
+   * instead of the agent's own — the session-shared notepad pinned to the
+   * main agent, mirroring the v2 engine's session-scope semantics.
+   */
+  readonly sharedNotepadStore?: ToolStore;
 
   readonly llmRequestLogger: LlmRequestLogger;
   readonly llmRequestRecorder: LlmRequestRecorder;
@@ -206,6 +215,7 @@ export class Agent {
     this.telemetry = options.telemetry ?? noopTelemetryClient;
     this.experimentalFlags = options.experimentalFlags ?? new FlagResolver();
     this.imageLimits = options.imageLimits ?? new ImageLimits();
+    this.sharedNotepadStore = options.sharedNotepadStore;
     this.additionalDirs = normalizeAdditionalDirs(options.additionalDirs ?? []);
     this.systemPromptContextProvider = options.systemPromptContextProvider;
 

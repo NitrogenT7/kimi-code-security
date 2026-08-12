@@ -97,6 +97,11 @@ export class ToolManager {
     };
   }
 
+  /** The Notepad tool's store: the main agent's shared store for subagents. */
+  protected get notepadStore(): ToolStore {
+    return this.agent.sharedNotepadStore ?? this.toolStore;
+  }
+
   attachMcpTools(): void {
     const mcp = this.agent.mcp;
     if (mcp === undefined) return;
@@ -739,7 +744,7 @@ export class ToolManager {
         goalToolsEnabled && new b.UpdateGoalTool(this.agent),
         this.agent.rpc?.requestQuestion && new b.AskUserQuestionTool(this.agent),
         new b.TodoListTool(this.toolStore),
-        new b.NotepadTool(this.toolStore),
+        new b.NotepadTool(this.notepadStore),
         new b.TaskListTool(background),
         new b.TaskOutputTool(background),
         new b.TaskStopTool(background),

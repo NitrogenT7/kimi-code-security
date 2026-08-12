@@ -29,6 +29,7 @@ const SECURITY_BASE_TOOLS = [
   'WebSearch',
   'FetchURL',
   'TodoList',
+  'Notepad',
 ] as const;
 
 const SECURITY_SUMMARY_ROLE =

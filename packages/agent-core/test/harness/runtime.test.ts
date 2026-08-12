@@ -527,6 +527,58 @@ max_context_size = 100000
     expect(mainAgent?.tools.loopTools.map((tool) => tool.name)).toContain('Notepad');
   });
 
+  it('shares the main agent notepad store with subagents', async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'kimi-core-runtime-'));
+    const homeDir = join(tmp, 'home');
+    const workDir = join(tmp, 'work');
+    await mkdir(homeDir, { recursive: true });
+    await mkdir(workDir, { recursive: true });
+    await writeFile(join(homeDir, 'config.toml'), baseModelConfig());
+
+    const [coreRpc, sdkRpc] = createRPC<CoreAPI, SDKAPI>();
+    const core = new KimiCore(coreRpc, { homeDir });
+    const rpc = await sdkRpc({
+      emitEvent: vi.fn(),
+      requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
+      requestQuestion: vi.fn(async () => null),
+      toolCall: vi.fn(async () => ({ output: '' })),
+    });
+
+    const created = await rpc.createSession({
+      id: 'ses_notepad_share',
+      workDir,
+      model: 'default-mock',
+    });
+    const session = core.sessions.get(created.id);
+    const main = session?.getReadyAgent('main');
+    expect(main).toBeDefined();
+
+    const { DEFAULT_AGENT_PROFILES } = await import('../../src/profile/default');
+    const coder = DEFAULT_AGENT_PROFILES['coder'];
+    expect(coder).toBeDefined();
+    const { agent: child } = await session!.createAgent(
+      { type: 'sub' },
+      { profile: coder, persistMetadata: false },
+    );
+
+    // Mirrors subagent-host's configureChild: bind the parent's model so the
+    // child's builtin tools initialize.
+    child.config.update({ modelAlias: 'default-mock' });
+    const notepad = child.tools.loopTools.find((tool) => tool.name === 'Notepad');
+    expect(notepad).toBeDefined();
+    const execution = notepad!.resolveExecution({ append: 'note from child' });
+    if ('execute' in execution) {
+      await execution.execute({
+        turnId: 't1',
+        toolCallId: 'call_1',
+        signal: new AbortController().signal,
+      });
+    }
+
+    // The child's write landed in the main agent's store (and its wire).
+    expect(main!.tools.storeData()['notepad']).toBe('note from child');
+  });
+
   it('merges caller additionalDirs when resuming a closed session', async () => {
     tmp = await mkdtemp(join(tmpdir(), 'kimi-core-runtime-'));
     const homeDir = join(tmp, 'home');

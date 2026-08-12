@@ -11,6 +11,7 @@ import type { KimiConfig, SDKSessionRPC } from '#/rpc';
 import { proxyWithExtraPayload } from '#/rpc/types';
 
 import { Agent, type AgentOptions, type AgentType } from '../agent';
+import type { ToolStore } from '../tools/store';
 import { renderPluginSessionStartReminder } from '../agent/injection/plugin-session-start';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
 import {
@@ -1016,6 +1017,9 @@ export class Session {
       pluginCommands: type === 'main' ? this.options.pluginCommands : undefined,
       experimentalFlags: this.experimentalFlags,
       imageLimits: this.imageLimits,
+      // Subagents share the main agent's notepad (v2 session-scope parity);
+      // writes land in the main agent's wire via its updateStore record path.
+      sharedNotepadStore: type === 'sub' ? this.mainNotepadStore() : undefined,
       additionalDirs: parentAgent?.getAdditionalDirs() ?? this.additionalDirs,
       systemPromptContextProvider: () =>
         prepareSystemPromptContext(
@@ -1025,6 +1029,18 @@ export class Session {
         ),
     });
     return agent;
+  }
+
+  private mainNotepadStore(): ToolStore | undefined {
+    const main = this.getReadyAgent('main');
+    if (main === undefined) return undefined;
+    const tools = main.tools;
+    return {
+      get: (key) => tools.storeData()[key] as never,
+      set: (key, value) => {
+        tools.updateStore(key, value);
+      },
+    };
   }
 
   private permissionOptions(

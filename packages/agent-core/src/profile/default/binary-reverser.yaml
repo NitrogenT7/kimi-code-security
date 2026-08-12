@@ -23,4 +23,5 @@ tools:
   - Edit
   - WebSearch
   - FetchURL
+  - Notepad
   - mcp__*

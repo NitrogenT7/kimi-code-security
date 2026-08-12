@@ -403,4 +403,42 @@ describe('v2 harness bridge', () => {
       await harness.close();
     }
   });
+
+  it('shares the session notepad with subagents end to end', async () => {
+    const childNote = 'subagent found the admin endpoint at /internal/console';
+    scriptQueue = [
+      {
+        toolCall: {
+          name: 'Agent',
+          arguments: JSON.stringify({
+            description: 'audit the admin surface',
+            prompt: 'Audit and record your finding in the notepad.',
+            subagent_type: 'code-auditor',
+          }),
+        },
+      },
+      { toolCall: { name: 'Notepad', arguments: JSON.stringify({ append: childNote }) } },
+      { text: 'audit summary: ' + 'the finding has been recorded in the shared notepad. '.repeat(8) },
+      { text: 'parent done' },
+    ];
+    const { harness, workDir } = await makeHarness();
+    try {
+      const session = await harness.createSession({ id: 'ses_v2_notepad_share', workDir });
+      const turnEnded = waitForEvent(
+        session,
+        (event) => event.type === 'turn.ended' && (event as { agentId?: string }).agentId === 'main',
+        90_000,
+      );
+      await session.prompt('start the audit');
+      await turnEnded;
+
+      // The code-auditor subagent's Notepad write is visible to the main
+      // agent and to the user — one shared session buffer.
+      expect(await session.getNotepad()).toContain(childNote);
+
+      await session.close();
+    } finally {
+      await harness.close();
+    }
+  });
 });
