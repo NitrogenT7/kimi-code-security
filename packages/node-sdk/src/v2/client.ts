@@ -46,8 +46,8 @@ export class V2SDKRpcClient extends SDKRpcClientBase {
   readonly identity: SDKRpcClientOptions['identity'];
   readonly telemetry: TelemetryClient;
   readonly auth: KimiAuthFacade;
-  readonly app: Scope;
-  readonly bridge: V2CoreBridge;
+  private readonly app: Scope;
+  private readonly bridge: V2CoreBridge;
 
   private readonly ready: Promise<RPCMethods<CoreAPI>>;
 
@@ -88,6 +88,7 @@ export class V2SDKRpcClient extends SDKRpcClientBase {
       configPath: this.configPath,
       telemetry: this.telemetry,
       uiMode: options.uiMode,
+      version: this.identity?.version,
     });
     this.ready = sdkRpc(new ClientAPI(this));
   }

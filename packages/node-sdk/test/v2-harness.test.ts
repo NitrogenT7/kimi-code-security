@@ -22,8 +22,16 @@ import { TEST_IDENTITY } from './test-identity';
 // poolingModel.http.test.ts)
 // ---------------------------------------------------------------------------
 
-let scriptedReply: { readonly text?: string; readonly toolCall?: { name: string; arguments: string } } =
-  { text: 'ok' };
+interface ScriptedReply {
+  readonly text?: string;
+  readonly toolCall?: { name: string; arguments: string };
+}
+let scriptedReply: ScriptedReply = { text: 'ok' };
+let scriptQueue: ScriptedReply[] = [];
+
+function nextReply(): ScriptedReply {
+  return scriptQueue.length > 0 ? scriptQueue.shift()! : scriptedReply;
+}
 
 function sseBody(): string {
   const chunk = (delta: Record<string, unknown>, finishReason: string | null): string =>
@@ -43,11 +51,12 @@ function sseBody(): string {
     usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
   })}\n\n`;
 
+  const reply = nextReply();
   let body = '';
-  if (scriptedReply.text !== undefined) {
-    body += chunk({ role: 'assistant', content: scriptedReply.text }, null);
+  if (reply.text !== undefined) {
+    body += chunk({ role: 'assistant', content: reply.text }, null);
   }
-  if (scriptedReply.toolCall !== undefined) {
+  if (reply.toolCall !== undefined) {
     body += chunk(
       {
         role: 'assistant',
@@ -57,8 +66,8 @@ function sseBody(): string {
             id: 'call_mock_1',
             type: 'function',
             function: {
-              name: scriptedReply.toolCall.name,
-              arguments: scriptedReply.toolCall.arguments,
+              name: reply.toolCall.name,
+              arguments: reply.toolCall.arguments,
             },
           },
         ],
@@ -263,6 +272,133 @@ describe('v2 harness bridge', () => {
       expect(replay.length).toBeGreaterThan(0);
 
       await resumed.close();
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('spawns a security-profile subagent through the Agent tool', async () => {
+    scriptQueue = [
+      {
+        toolCall: {
+          name: 'Agent',
+          arguments: JSON.stringify({
+            description: 'recon the codebase',
+            prompt: 'Look around and report back.',
+            subagent_type: 'explore',
+          }),
+        },
+      },
+      { text: 'child summary: ' + 'the recon completed successfully. '.repeat(10) },
+      { text: 'parent-final-answer' },
+    ];
+    const { harness, workDir } = await makeHarness();
+    try {
+      const session = await harness.createSession({ id: 'ses_v2_subagent', workDir });
+
+      const subagentEvents: string[] = [];
+      session.onEvent((event) => {
+        if (event.type.startsWith('subagent.')) {
+          subagentEvents.push(event.type);
+        }
+      });
+      const turnEnded = waitForEvent(
+        session,
+        (event) => event.type === 'turn.ended' && (event as { agentId?: string }).agentId === 'main',
+        90_000,
+      );
+      await session.prompt('delegate the recon');
+      await turnEnded;
+
+      expect(subagentEvents).toContain('subagent.spawned');
+      expect(subagentEvents).toContain('subagent.completed');
+
+      await session.close();
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('lists MCP groups and reaches the group loader', async () => {
+    const { harness, workDir } = await makeHarness();
+    try {
+      const session = await harness.createSession({ id: 'ses_v2_mcp', workDir });
+      const groups = await session.listMcpGroups();
+      expect(Array.isArray(groups)).toBe(true);
+      const servers = await session.listMcpServers();
+      expect(Array.isArray(servers)).toBe(true);
+      // Unknown group must surface a coded error, not a crash.
+      await expect(session.loadMcpGroup('no-such-group')).rejects.toThrow();
+      await session.close();
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('toggles swarm and plan mode through the bridge', async () => {
+    const { harness, workDir } = await makeHarness();
+    try {
+      const session = await harness.createSession({ id: 'ses_v2_modes', workDir });
+
+      await session.setSwarmMode(true, 'task');
+      expect((await session.getStatus()).swarmMode).toBe(true);
+      await session.setSwarmMode(false, 'task');
+      expect((await session.getStatus()).swarmMode).toBe(false);
+
+      await session.setPlanMode(true);
+      expect((await session.getStatus()).planMode).toBe(true);
+      await session.setPlanMode(false);
+      expect((await session.getStatus()).planMode).toBe(false);
+
+      await session.close();
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('bridges AskUserQuestion to the SDK question handler', async () => {
+    scriptQueue = [
+      {
+        toolCall: {
+          name: 'AskUserQuestion',
+          arguments: JSON.stringify({
+            questions: [
+              {
+                question: 'Which option?',
+                header: 'Pick',
+                options: [{ label: 'A' }, { label: 'B' }],
+              },
+            ],
+          }),
+        },
+      },
+      { text: 'answer received' },
+    ];
+    const { harness, workDir } = await makeHarness();
+    try {
+      const session = await harness.createSession({
+        id: 'ses_v2_question',
+        workDir,
+        permission: 'manual',
+      });
+
+      const seen: string[] = [];
+      session.setQuestionHandler(async (request) => {
+        for (const q of request.questions) seen.push(q.question);
+        return { answers: { 'Which option?': 'A' } };
+      });
+
+      const turnEnded = waitForEvent(
+        session,
+        (event) => event.type === 'turn.ended' && (event as { agentId?: string }).agentId === 'main',
+        90_000,
+      );
+      await session.prompt('ask me something');
+      await turnEnded;
+
+      expect(seen).toContain('Which option?');
+
+      await session.close();
     } finally {
       await harness.close();
     }

@@ -36,6 +36,7 @@ import {
   type CancelPayload,
   type CancelPlanPayload,
   type CancelShellCommandPayload,
+  type CoreAPI,
   type CoreRPCClient,
   type CreateGoalPayload,
   type CreateSessionPayload,
@@ -118,7 +119,6 @@ import {
   IAgentPermissionModeService,
   IAgentPermissionRulesService,
   IAgentPlanService,
-  IAgentPluginService,
   IAgentProfileService,
   IAgentPromptService,
   IAgentShellCommandService,
@@ -130,6 +130,11 @@ import {
   IAgentUserToolService,
   IConfigService,
   IEventBus,
+  IEventService,
+  expandCommandArguments,
+  applyPromptMetadataUpdate,
+  promptMetadataTextFromPluginCommand,
+  promptMetadataTextFromSkill,
   IFlagService,
   IPluginService,
   ISessionBtwService,
@@ -153,25 +158,24 @@ import {
   type Scope,
 } from '@moonshot-ai/agent-core-v2';
 
+import { randomUUID } from 'node:crypto';
+
 type SessionScopedPayload<P> = P & { readonly sessionId: string };
 type SessionAgentPayload<P> = SessionScopedPayload<P & { readonly agentId: string }>;
 
-type AgentConfigData = import('@moonshot-ai/agent-core/agent/config/types').AgentConfigData;
-type PermissionData = import('@moonshot-ai/agent-core/agent/permission/types').PermissionData;
-type PlanData = import('@moonshot-ai/agent-core/agent/plan/index').PlanData;
-interface SessionWarning {
-  readonly code: string;
-  readonly message: string;
-  readonly severity: 'info' | 'warning' | 'error';
-}
+type AgentConfigData = ReturnType<CoreAPI['getConfig']>;
+type PermissionData = ReturnType<CoreAPI['getPermission']>;
+type PlanData = Awaited<ReturnType<CoreAPI['getPlan']>>;
+type SessionWarning = Awaited<ReturnType<CoreAPI['getSessionWarnings']>>[number];
 
 
 export interface V2CoreBridgeOptions {
-  readonly app: Scope;
+  readonly app: unknown;
   readonly homeDir: string;
   readonly configPath: string;
   readonly telemetry: TelemetryClient;
   readonly uiMode?: string;
+  readonly version?: string;
 }
 
 function notImplemented(feature: string): never {
@@ -202,7 +206,7 @@ export class V2CoreBridge {
   }
 
   private get app(): Scope['accessor'] {
-    return this.options.app.accessor;
+    return (this.options.app as Scope).accessor;
   }
 
   // -------------------------------------------------------------------------
@@ -579,6 +583,14 @@ export class V2CoreBridge {
     await this.session(payload.sessionId).accessor.get(ISessionMcpService).loadGroup(payload.name);
   }
 
+  // Fork extension surface (`McpGroupRpcSurface` in node-sdk): not part of
+  // upstream v1 CoreAPI, served here for the MCP-group workflow.
+  async listMcpGroups(
+    payload: SessionScopedPayload<EmptyPayload>,
+  ): Promise<readonly import('#/types').McpGroupInfo[]> {
+    return this.session(payload.sessionId).accessor.get(ISessionMcpService).listGroups();
+  }
+
   setMcpGroupMode(payload: SessionScopedPayload<SetMcpGroupModePayload>): void {
     this.session(payload.sessionId).accessor.get(ISessionMcpService).setGroupMode(payload.groupName);
   }
@@ -753,16 +765,68 @@ export class V2CoreBridge {
   }
 
   async activateSkill(payload: SessionAgentPayload<{ name: string; args?: string }>): Promise<void> {
-    await this.agent(payload.sessionId, payload.agentId)
-      .accessor.get(IAgentSkillService)
-      .activate(payload as never);
+    const agent = this.agent(payload.sessionId, payload.agentId);
+    await agent.accessor.get(IAgentSkillService).activate({
+      name: payload.name,
+      args: payload.args,
+    });
+    await this.applyPromptMetadata(payload.sessionId, promptMetadataTextFromSkill(payload));
   }
 
   async activatePluginCommand(
     payload: SessionAgentPayload<{ pluginId: string; commandName: string; args?: string }>,
   ): Promise<void> {
-    void this.agent(payload.sessionId, payload.agentId).accessor.get(IAgentPluginService);
-    notImplemented('activatePluginCommand (v2 plugin command activation wiring)');
+    const agent = this.agent(payload.sessionId, payload.agentId);
+    const commands = await this.app.get(IPluginService).listPluginCommands();
+    const def = commands.find(
+      (command) => command.pluginId === payload.pluginId && command.name === payload.commandName,
+    );
+    if (def === undefined) {
+      throw new KimiError(
+        ErrorCodes.REQUEST_INVALID,
+        `Plugin command "${payload.pluginId}:${payload.commandName}" was not found`,
+      );
+    }
+    const origin = {
+      kind: 'plugin_command' as const,
+      activationId: randomUUID(),
+      pluginId: payload.pluginId,
+      commandName: payload.commandName,
+      commandArgs: payload.args,
+      trigger: 'user-slash' as const,
+    };
+    agent.accessor.get(IEventBus).publish({
+      type: 'plugin_command.activated',
+      activationId: origin.activationId,
+      pluginId: origin.pluginId,
+      commandName: origin.commandName,
+      commandArgs: origin.commandArgs,
+      trigger: origin.trigger,
+    } as never);
+    await agent.accessor.get(IAgentPromptService).enqueue({
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: expandCommandArguments(def.body, payload.args ?? '') }],
+        toolCalls: [],
+        origin,
+      } as never,
+    });
+    await this.applyPromptMetadata(
+      payload.sessionId,
+      promptMetadataTextFromPluginCommand(payload as never),
+    );
+  }
+
+  private async applyPromptMetadata(sessionId: string, text: string | undefined): Promise<void> {
+    if (text === undefined) return;
+    await applyPromptMetadataUpdate(
+      {
+        metadata: this.session(sessionId).accessor.get(ISessionMetadata),
+        eventService: this.app.get(IEventService),
+        sessionId,
+      },
+      text,
+    );
   }
 
   async startBtw(payload: SessionAgentPayload<EmptyPayload>): Promise<string> {
@@ -886,9 +950,7 @@ export class V2CoreBridge {
   // -------------------------------------------------------------------------
 
   getCoreInfo(_payload: EmptyPayload): CoreInfo {
-    return {
-      version: this.options.app.accessor.get(IConfigService).get<string>('version') ?? 'unknown',
-    } as unknown as CoreInfo;
+    return { version: this.options.version ?? 'unknown' };
   }
 
   getExperimentalFeatures(_payload: EmptyPayload): readonly ExperimentalFeatureState[] {
