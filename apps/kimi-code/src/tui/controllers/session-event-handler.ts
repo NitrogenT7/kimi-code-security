@@ -951,6 +951,13 @@ export class SessionEventHandler {
           'textMuted',
         );
         return;
+      case 'registered':
+        this.finalizeMcpServerStatusRow(
+          server.name,
+          `MCP server "${server.name}" registered (not loaded)`,
+          'textMuted',
+        );
+        return;
       case 'pending':
         this.showMcpServerStatusSpinner(server.name);
         return;

@@ -1,12 +1,25 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   mergeCallerMcpServers,
   partitionServersByGroup,
+  resolveSessionMcpConfig,
   type SessionMcpConfig,
 } from '#/agent/mcp/session-config';
 import { McpGroupRegistry } from '#/agent/mcp/group-registry';
 import type { McpServerConfig } from '#/agent/mcp/config-schema';
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  for (const dir of tempDirs.splice(0)) {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 const stdio = (command: string): McpServerConfig => ({
   transport: 'stdio',
@@ -97,5 +110,51 @@ describe('partitionServersByGroup', () => {
       eager: { jadx: servers['jadx'], standalone: servers['standalone'] },
       lazy: { ida: servers['ida'] },
     });
+  });
+});
+
+describe('resolveSessionMcpConfig', () => {
+  it('degrades to no groups when mcpGroups is invalid, keeping servers loadable', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'kimi-mcp-cfg-home-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'kimi-mcp-cfg-work-'));
+    tempDirs.push(homeDir, cwd);
+    await writeFile(
+      join(homeDir, 'mcp.json'),
+      JSON.stringify({
+        mcpServers: { fs: { transport: 'stdio', command: 'fs' } },
+        // Invalid: a group must reference at least one server.
+        mcpGroups: { broken: { servers: [] } },
+      }),
+      'utf-8',
+    );
+
+    const config = await resolveSessionMcpConfig({ cwd, homeDir });
+
+    expect(config?.groupConfigError).toBeDefined();
+    expect(config?.servers['fs']).toBeDefined();
+    expect(config?.groups).toEqual({});
+    // With no groups every server falls back to eager loading.
+    const { eager, lazy } = partitionServersByGroup(config!.servers, config!.groupRegistry);
+    expect(Object.keys(eager)).toEqual(['fs']);
+    expect(lazy).toEqual({});
+  });
+
+  it('loads groups normally when the config is valid', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'kimi-mcp-cfg-home-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'kimi-mcp-cfg-work-'));
+    tempDirs.push(homeDir, cwd);
+    await writeFile(
+      join(homeDir, 'mcp.json'),
+      JSON.stringify({
+        mcpServers: { fs: { transport: 'stdio', command: 'fs' } },
+        mcpGroups: { audit: { servers: ['fs'] } },
+      }),
+      'utf-8',
+    );
+
+    const config = await resolveSessionMcpConfig({ cwd, homeDir });
+
+    expect(config?.groupConfigError).toBeUndefined();
+    expect(Object.keys(config?.groups ?? {})).toEqual(['audit']);
   });
 });

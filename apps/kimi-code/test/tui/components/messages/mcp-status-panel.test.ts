@@ -49,4 +49,21 @@ describe('buildMcpStatusReportLines', () => {
     const errorLine = lines.find((line) => line.includes('error:'));
     expect(errorLine).toContain('error: fetch failed');
   });
+
+  it('renders registered (lazy-loaded) servers without crashing', () => {
+    const lines = buildMcpStatusReportLines({
+      servers: [
+        { name: 'web', transport: 'stdio', status: 'registered', toolCount: 0 },
+        { name: 'ghidra', transport: 'stdio', status: 'connected', toolCount: 3 },
+      ],
+      groups: [{ name: 'web', servers: ['web'], skillPrefixes: [], loaded: false }],
+    }).map(strip);
+
+    const row = lines.find((line) => line.includes('web') && line.includes('stdio'));
+    expect(row).toContain('registered');
+    expect(row).toContain('—');
+    const summary = lines.find((line) => line.includes('available'));
+    expect(summary).toContain('1 registered');
+    expect(summary).toContain('1 connected');
+  });
 });

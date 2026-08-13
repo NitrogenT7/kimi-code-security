@@ -30,7 +30,7 @@ import { ILogService } from '#/_base/log/log';
 import { IAtomicDocumentStore } from '#/persistence/interface/atomicDocumentStore';
 import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
 
-import { ISessionMcpService, type McpGroupInfo } from './sessionMcp';
+import { ISessionMcpService, type McpGroupInfo, type McpGroupLoadResult } from './sessionMcp';
 
 export class SessionMcpService extends Disposable implements ISessionMcpService {
   declare readonly _serviceBrand: undefined;
@@ -89,10 +89,7 @@ export class SessionMcpService extends Disposable implements ISessionMcpService 
       const serverNames = Object.keys(resolved);
       const loaded =
         serverNames.length > 0 &&
-        serverNames.every((name) => {
-          const status = manager.get(name)?.status;
-          return status === 'connected' || status === 'failed' || status === 'needs-auth';
-        });
+        serverNames.every((name) => manager.get(name)?.status === 'connected');
       return {
         name: group.name,
         description: group.description,
@@ -103,14 +100,32 @@ export class SessionMcpService extends Disposable implements ISessionMcpService 
     });
   }
 
-  async loadGroup(name: string): Promise<void> {
+  async loadGroup(name: string): Promise<McpGroupLoadResult> {
     const registry = this.mcpGroupRegistry;
     if (registry === undefined || !registry.has(name)) {
       throw new Error2(ErrorCodes.MCP_SERVER_NOT_FOUND, `Unknown MCP group: ${name}`);
     }
     await this.ensureMcpReady();
-    await this.connectionManager().loadGroup(name, registry);
-    this.activeGroupName = name;
+    const manager = this.connectionManager();
+    const serverNames = Object.keys(registry.resolveServers(name) ?? {});
+    await manager.loadGroup(name, registry);
+    const connected: string[] = [];
+    const needsAuth: string[] = [];
+    const failed: { readonly name: string; readonly error?: string }[] = [];
+    for (const serverName of serverNames) {
+      const entry = manager.get(serverName);
+      if (entry?.status === 'connected') {
+        connected.push(serverName);
+      } else if (entry?.status === 'needs-auth') {
+        needsAuth.push(serverName);
+      } else {
+        failed.push({ name: serverName, error: entry?.error });
+      }
+    }
+    // Mark active only when the group is actually usable — a fully failed
+    // load must not claim success.
+    if (connected.length > 0) this.activeGroupName = name;
+    return { connected, needsAuth, failed };
   }
 
   async loadServer(name: string): Promise<void> {
@@ -155,6 +170,11 @@ export class SessionMcpService extends Disposable implements ISessionMcpService 
       this.plugins.enabledMcpServers(),
     ]);
     const withCaller = mergeCallerMcpServers(base, callerServers);
+    if (withCaller?.groupConfigError !== undefined) {
+      this.log.warn('invalid mcpGroups config; continuing without groups', {
+        error: withCaller.groupConfigError,
+      });
+    }
     const registry = withCaller?.groupRegistry;
     this.mcpGroupRegistry = registry;
     const servers = { ...withCaller?.servers, ...pluginServers };

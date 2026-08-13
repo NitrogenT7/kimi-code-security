@@ -12,7 +12,8 @@ const STATUS_PRIORITY: Record<McpServerInfo['status'], number> = {
   'needs-auth': 1,
   pending: 2,
   connected: 3,
-  disabled: 4,
+  registered: 4,
+  disabled: 5,
 };
 
 const STATUS_LABEL: Record<McpServerInfo['status'], string> = {
@@ -20,6 +21,7 @@ const STATUS_LABEL: Record<McpServerInfo['status'], string> = {
   pending: 'pending',
   'needs-auth': 'needs auth',
   failed: 'failed',
+  registered: 'registered',
   disabled: 'disabled',
 };
 
@@ -28,6 +30,7 @@ const SUMMARY_ORDER: readonly McpServerInfo['status'][] = [
   'pending',
   'needs-auth',
   'failed',
+  'registered',
   'disabled',
 ];
 
@@ -42,13 +45,14 @@ function statusPainter(
     case 'needs-auth':
     case 'pending':
       return (text) => currentTheme.fg('warning', text);
+    case 'registered':
     case 'disabled':
       return (text) => currentTheme.fg('textDim', text);
   }
 }
 
 function formatToolCount(server: McpServerInfo): string {
-  if (server.status === 'disabled') return '—';
+  if (server.status === 'disabled' || server.status === 'registered') return '—';
   return `${server.toolCount} tool${server.toolCount === 1 ? '' : 's'}`;
 }
 

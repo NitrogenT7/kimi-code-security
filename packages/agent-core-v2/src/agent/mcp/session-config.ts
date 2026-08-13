@@ -8,6 +8,13 @@ export interface SessionMcpConfig {
   readonly servers: Record<string, McpServerConfig>;
   readonly groups?: Record<string, McpGroup>;
   readonly groupRegistry?: McpGroupRegistry;
+  /**
+   * Set when the `mcpGroups` section failed to parse. Groups are an add-on
+   * layer over server connections, so a broken group declaration degrades to
+   * "no groups" (every server connects eagerly) instead of taking down the
+   * whole MCP initial load.
+   */
+  readonly groupConfigError?: string;
 }
 
 export interface ResolveSessionMcpConfigInput {
@@ -24,15 +31,22 @@ export async function resolveSessionMcpConfig(
   });
   if (Object.keys(servers).length === 0) return undefined;
 
-  const groups = await loadMcpGroups({
-    cwd: input.cwd,
-    homeDir: input.homeDir,
-  });
+  let groups: Record<string, McpGroup> = {};
+  let groupConfigError: string | undefined;
+  try {
+    groups = await loadMcpGroups({
+      cwd: input.cwd,
+      homeDir: input.homeDir,
+    });
+  } catch (error: unknown) {
+    groupConfigError = error instanceof Error ? error.message : String(error);
+  }
 
   return {
     servers,
     groups,
     groupRegistry: new McpGroupRegistry(groups, servers),
+    groupConfigError,
   };
 }
 
@@ -49,12 +63,13 @@ export function mergeCallerMcpServers(
   };
   const groups = base?.groups;
   if (groups === undefined) {
-    return { servers: mergedServers };
+    return { servers: mergedServers, groupConfigError: base?.groupConfigError };
   }
   return {
     servers: mergedServers,
     groups,
     groupRegistry: new McpGroupRegistry(groups, mergedServers),
+    groupConfigError: base?.groupConfigError,
   };
 }
 

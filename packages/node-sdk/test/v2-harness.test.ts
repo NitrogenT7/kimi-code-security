@@ -195,6 +195,14 @@ describe('v2 harness bridge', () => {
       expect(smokeSummary).toBeDefined();
       expect(smokeSummary?.workDir).toBe(workDir);
 
+      const skills = await session.listSkills();
+      expect(skills.length).toBeGreaterThan(0);
+      for (const skill of skills) {
+        expect(typeof skill.path).toBe('string');
+        expect(skill.path.length).toBeGreaterThan(0);
+        expect(['builtin', 'user', 'extra', 'project']).toContain(skill.source);
+      }
+
       await session.close();
     } finally {
       await harness.close();
@@ -234,6 +242,69 @@ describe('v2 harness bridge', () => {
 
       await first.close();
       await second.close();
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('stops a single background task without stopping the others', async () => {
+    const { harness, workDir } = await makeHarness();
+    try {
+      const session = await harness.createSession({ id: 'ses_v2_stop_bg', workDir });
+      session.setApprovalHandler(async () => ({ decision: 'approved' }));
+
+      for (let i = 0; i < 2; i++) {
+        scriptQueue = [
+          {
+            toolCall: {
+              name: 'Bash',
+              arguments: JSON.stringify({
+                command: 'node -e "setTimeout(() => {}, 30000)"',
+                run_in_background: true,
+                description: `bg-task-${String(i)}`,
+              }),
+            },
+          },
+          { text: 'spawned' },
+        ];
+        const turnEnded = waitForEvent(session, (event) => event.type === 'turn.ended', 90_000);
+        await session.prompt('spawn a background task');
+        await turnEnded;
+      }
+
+      const tasks = await session.listBackgroundTasks();
+      expect(tasks).toHaveLength(2);
+      expect(tasks.every((task) => task.status === 'running')).toBe(true);
+
+      const [victim, survivor] = tasks;
+      await session.stopBackgroundTask(victim!.taskId, { reason: 'test stop' });
+
+      let stopped;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        stopped = (await session.listBackgroundTasks()).find(
+          (task) => task.taskId === victim!.taskId,
+        );
+        if (stopped === undefined || stopped.status !== 'running') break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      expect(stopped === undefined || stopped.status === 'killed').toBe(true);
+
+      const remaining = (await session.listBackgroundTasks()).find(
+        (task) => task.taskId === survivor!.taskId,
+      );
+      expect(remaining?.status).toBe('running');
+
+      await session.stopBackgroundTask(survivor!.taskId, { reason: 'cleanup' });
+      // Wait for the cleanup stop to reach a terminal state — on Windows a
+      // still-running child holds the temp dir and the rm in afterEach fails.
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const survivorNow = (await session.listBackgroundTasks()).find(
+          (task) => task.taskId === survivor!.taskId,
+        );
+        if (survivorNow === undefined || survivorNow.status !== 'running') break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      await session.close();
     } finally {
       await harness.close();
     }

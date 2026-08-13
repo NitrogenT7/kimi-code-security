@@ -24,8 +24,15 @@ export interface McpGroupInfo {
   readonly description?: string;
   readonly servers: readonly string[];
   readonly skillPrefixes: readonly string[];
-  /** True once every server the group resolves to has been loaded. */
+  /** True once every server the group resolves to is connected. */
   readonly loaded: boolean;
+}
+
+/** Per-server outcome of a {@link ISessionMcpService.loadGroup} attempt. */
+export interface McpGroupLoadResult {
+  readonly connected: readonly string[];
+  readonly needsAuth: readonly string[];
+  readonly failed: readonly { readonly name: string; readonly error?: string }[];
 }
 
 export interface ISessionMcpService {
@@ -51,11 +58,13 @@ export interface ISessionMcpService {
   listGroups(): readonly McpGroupInfo[];
 
   /**
-   * Connect every server in the named group and mark it as the active group
-   * (see {@link activeGroup}). Throws `mcp.server_not_found` for unknown
-   * groups.
+   * Connect every server in the named group, returning the per-server outcome.
+   * The group is marked active (see {@link activeGroup}) only when at least
+   * one server actually connected — a fully failed load is reported through
+   * the result instead of pretending success. Throws `mcp.server_not_found`
+   * for unknown groups.
    */
-  loadGroup(name: string): Promise<void>;
+  loadGroup(name: string): Promise<McpGroupLoadResult>;
 
   /** Connect a single known (registered) MCP server on demand. */
   loadServer(name: string): Promise<void>;

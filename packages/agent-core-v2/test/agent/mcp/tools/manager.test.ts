@@ -10,7 +10,7 @@ import type { McpServerConfig } from '#/agent/mcp/config-schema';
 import type { McpServerEntry } from '#/agent/mcp/connection-manager';
 import { MCPManagerTool, type MCPManagerInput } from '#/agent/mcp/tools/manager';
 import { getToolContributions } from '#/agent/toolRegistry/toolContribution';
-import type { ISessionMcpService, McpGroupInfo } from '#/session/mcp/sessionMcp';
+import type { ISessionMcpService, McpGroupInfo, McpGroupLoadResult } from '#/session/mcp/sessionMcp';
 import type { ExecutableToolContext } from '#/tool/toolContract';
 
 const EXEC_CTX = {
@@ -31,6 +31,7 @@ interface FakeSessionMcpOptions {
   readonly groups?: readonly McpGroupInfo[];
   readonly servers?: readonly McpServerEntry[];
   readonly knownGroups?: readonly string[];
+  readonly loadResult?: McpGroupLoadResult;
 }
 
 function fakeSessionMcp(options: FakeSessionMcpOptions = {}) {
@@ -57,7 +58,9 @@ function fakeSessionMcp(options: FakeSessionMcpOptions = {}) {
         return Promise.reject(new Error(`Unknown MCP group: ${name}`));
       }
       calls.loadGroup.push(name);
-      return Promise.resolve();
+      return Promise.resolve(
+        options.loadResult ?? { connected: ['mock-server'], needsAuth: [], failed: [] },
+      );
     },
     loadServer: (name: string) => {
       if (!servers.has(name)) {
@@ -130,7 +133,23 @@ describe('MCPManagerTool', () => {
     const result = await run(tool, { action: 'load_group', group_name: 'web' });
     expect(result.isError).toBeUndefined();
     expect(calls.loadGroup).toEqual(['web']);
-    expect(result.output).toContain('"web" loaded successfully');
+    expect(result.output).toContain('"web" loaded: 1 connected (mock-server)');
+  });
+
+  it('load_group reports an error when no server connects', async () => {
+    const { service } = fakeSessionMcp({
+      knownGroups: ['web'],
+      loadResult: {
+        connected: [],
+        needsAuth: [],
+        failed: [{ name: 'playwright', error: 'spawn npx ENOENT' }],
+      },
+    });
+    const tool = new MCPManagerTool(service);
+    const result = await run(tool, { action: 'load_group', group_name: 'web' });
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('no server connected');
+    expect(result.output).toContain('playwright (spawn npx ENOENT)');
   });
 
   it('load_group surfaces unknown group errors', async () => {

@@ -293,7 +293,7 @@ function sessionMcpServiceStub(
     },
     groupRegistry: () => undefined,
     listGroups: () => [],
-    loadGroup: () => Promise.resolve(),
+    loadGroup: () => Promise.resolve({ connected: [], needsAuth: [], failed: [] }),
     loadServer: () => Promise.resolve(),
     addOrUpdateServer: () => Promise.resolve(),
     removeServer: () => Promise.resolve(false),

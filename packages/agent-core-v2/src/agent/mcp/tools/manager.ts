@@ -23,7 +23,7 @@ import { McpServerConfigSchema } from '#/agent/mcp/config-schema';
 import type { McpServerEntry } from '#/agent/mcp/connection-manager';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { registerTool } from '#/agent/toolRegistry/toolContribution';
-import { ISessionMcpService } from '#/session/mcp/sessionMcp';
+import { ISessionMcpService, type McpGroupLoadResult } from '#/session/mcp/sessionMcp';
 import { toInputJsonSchema } from '#/tool/input-schema';
 import type { BuiltinTool, ToolExecution } from '#/tool/toolContract';
 
@@ -134,8 +134,11 @@ export class MCPManagerTool implements BuiltinTool<MCPManagerInput> {
       return { output: 'group_name is required for load_group.', isError: true };
     }
     try {
-      await this.sessionMcp.loadGroup(groupName);
-      return { output: `MCP group "${groupName}" loaded successfully.` };
+      const result = await this.sessionMcp.loadGroup(groupName);
+      return {
+        output: formatGroupLoadResult(groupName, result),
+        isError: result.connected.length === 0 ? true : undefined,
+      };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       return { output: `Failed to load MCP group "${groupName}": ${message}`, isError: true };
@@ -214,6 +217,29 @@ export class MCPManagerTool implements BuiltinTool<MCPManagerInput> {
     }
     return { output: `MCP server "${serverName}" removed successfully.` };
   }
+}
+
+function formatGroupLoadResult(groupName: string, result: McpGroupLoadResult): string {
+  if (result.connected.length === 0) {
+    const details = result.failed.map(
+      (entry) => `${entry.name}${entry.error !== undefined ? ` (${entry.error})` : ''}`,
+    );
+    const parts: string[] = [];
+    if (details.length > 0) parts.push(`failed: ${details.join(', ')}`);
+    if (result.needsAuth.length > 0) parts.push(`needs auth: ${result.needsAuth.join(', ')}`);
+    const suffix = parts.length > 0 ? ` — ${parts.join('; ')}` : ' (the group resolves to no servers)';
+    return `MCP group "${groupName}" loaded, but no server connected${suffix}.`;
+  }
+  const parts = [`${String(result.connected.length)} connected (${result.connected.join(', ')})`];
+  if (result.needsAuth.length > 0) {
+    parts.push(`${String(result.needsAuth.length)} need auth (${result.needsAuth.join(', ')})`);
+  }
+  if (result.failed.length > 0) {
+    parts.push(
+      `${String(result.failed.length)} failed (${result.failed.map((entry) => entry.name).join(', ')})`,
+    );
+  }
+  return `MCP group "${groupName}" loaded: ${parts.join(', ')}.`;
 }
 
 function formatServerList(servers: readonly McpServerEntry[]): string {

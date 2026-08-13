@@ -88,6 +88,7 @@ import {
   type SetThinkingPayload,
   type SkillSummary,
   type SteerPayload,
+  type StopBackgroundPayload,
   type TelemetryClient,
   type UndoHistoryPayload,
   type UnregisterToolPayload,
@@ -136,6 +137,7 @@ import {
   applyPromptMetadataUpdate,
   promptMetadataTextFromPluginCommand,
   promptMetadataTextFromSkill,
+  summarizeSkill,
   IFlagService,
   IPluginService,
   ISessionBtwService,
@@ -579,13 +581,7 @@ export class V2CoreBridge {
   async listSkills(payload: SessionScopedPayload<EmptyPayload>): Promise<readonly SkillSummary[]> {
     const catalog = this.session(payload.sessionId).accessor.get(ISessionSkillCatalog);
     await catalog.ready;
-    return catalog.catalog.listSkills().map(
-      (skill) =>
-        ({
-          name: skill.name,
-          description: skill.description,
-        }) as unknown as SkillSummary,
-    );
+    return catalog.catalog.listSkills().map((skill) => summarizeSkill(skill));
   }
 
   async listGoalTemplates(
@@ -793,8 +789,10 @@ export class V2CoreBridge {
       .update({ activeToolNames: payload.names });
   }
 
-  async stopBackground(payload: SessionAgentPayload<EmptyPayload>): Promise<void> {
-    await this.agent(payload.sessionId, payload.agentId).accessor.get(IAgentTaskService).stopAll();
+  async stopBackground(payload: SessionAgentPayload<StopBackgroundPayload>): Promise<void> {
+    await this.agent(payload.sessionId, payload.agentId)
+      .accessor.get(IAgentTaskService)
+      .stop(payload.taskId, payload.reason);
   }
 
   detachBackground(payload: SessionAgentPayload<{ taskId: string }>): BackgroundTaskInfo | undefined {
