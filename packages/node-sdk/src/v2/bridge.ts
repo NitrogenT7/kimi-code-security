@@ -128,6 +128,7 @@ import {
   IAgentToolRegistryService,
   IAgentUsageService,
   IAgentUserToolService,
+  IBootstrapService,
   IConfigService,
   IEventBus,
   IEventService,
@@ -152,13 +153,19 @@ import {
   ISessionWorkspaceCommandService,
   ISessionExportService,
   IAgentContextMemoryService,
+  IWorkspaceRegistry,
   type IAgentScopeHandle,
   type ISessionScopeHandle,
   type Interaction,
   type Scope,
 } from '@moonshot-ai/agent-core-v2';
+import {
+  encodeWorkDirKey,
+  workspaceRootKey,
+} from '@moonshot-ai/agent-core-v2/_base/utils/workdir-slug';
 
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 
 type SessionScopedPayload<P> = P & { readonly sessionId: string };
 type SessionAgentPayload<P> = SessionScopedPayload<P & { readonly agentId: string }>;
@@ -498,9 +505,50 @@ export class V2CoreBridge {
     return this.buildResumeResult(session);
   }
 
-  async listSessions(_payload: ListSessionsPayload): Promise<readonly SessionSummary[]> {
-    const page = await this.app.get(ISessionIndex).list({});
-    return page.items.map((item) => item as unknown as SessionSummary);
+  async listSessions(payload: ListSessionsPayload): Promise<readonly SessionSummary[]> {
+    const registry = this.app.get(IWorkspaceRegistry);
+    // v1 semantics: `workDir` scopes the listing to one physical directory.
+    // A registered root expands to every id spelling of that directory (legacy
+    // split buckets); an unregistered one falls back to the minted bucket id.
+    let workspaceIds: readonly string[] | undefined;
+    if (payload.workDir !== undefined) {
+      if (payload.workDir.trim() === '') {
+        throw new KimiError(ErrorCodes.REQUEST_WORK_DIR_REQUIRED, 'listSessions requires workDir');
+      }
+      const workDir = resolve(payload.workDir);
+      const key = workspaceRootKey(workDir);
+      const match = (await registry.list()).find((w) => workspaceRootKey(w.root) === key);
+      workspaceIds =
+        match === undefined ? [encodeWorkDirKey(workDir)] : await registry.resolveAliasIds(match.id);
+    }
+    const page = await this.app.get(ISessionIndex).list({
+      workspaceIds,
+      sessionId: payload.sessionId,
+      includeArchived: payload.includeArchive,
+    });
+    // Map v2 index entries (`cwd`/`custom`) onto the v1 SDK shape
+    // (`workDir`/`metadata`). `cwd` comes from the session's own summary, with
+    // the registry root as back-compat fallback; entries with no recoverable
+    // workDir are skipped, same as the kap-server /sessions route.
+    const roots = new Map((await registry.list()).map((w) => [w.id, w.root] as const));
+    const bootstrap = this.app.get(IBootstrapService);
+    const summaries: SessionSummary[] = [];
+    for (const item of page.items) {
+      const workDir = item.cwd ?? roots.get(item.workspaceId);
+      if (workDir === undefined) continue;
+      summaries.push({
+        id: item.id,
+        title: item.title,
+        lastPrompt: item.lastPrompt,
+        workDir,
+        sessionDir: bootstrap.sessionDir(item.workspaceId, item.id),
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        archived: item.archived,
+        metadata: item.custom as SessionSummary['metadata'],
+      });
+    }
+    return summaries;
   }
 
   async exportSession(payload: ExportSessionPayload): Promise<ExportSessionResult> {

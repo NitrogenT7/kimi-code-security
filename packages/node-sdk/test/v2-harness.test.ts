@@ -190,10 +190,50 @@ describe('v2 harness bridge', () => {
       const context = await session.getContext();
       expect(Array.isArray(context.history)).toBe(true);
 
-      const listed = await harness.listSessions({} as never);
-      expect(listed.some((item) => item.id === 'ses_v2_smoke')).toBe(true);
+      const listed = await harness.listSessions();
+      const smokeSummary = listed.find((item) => item.id === 'ses_v2_smoke');
+      expect(smokeSummary).toBeDefined();
+      expect(smokeSummary?.workDir).toBe(workDir);
 
       await session.close();
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('maps index entries to the SDK summary shape and scopes by workDir', async () => {
+    const { harness, workDir } = await makeHarness();
+    const otherWorkDir = await mkdtemp(join(tmpdir(), 'kimi-v2-bridge-other-'));
+    tempDirs.push(otherWorkDir);
+    try {
+      const first = await harness.createSession({ id: 'ses_v2_list_a', workDir });
+      const second = await harness.createSession({ id: 'ses_v2_list_b', workDir: otherWorkDir });
+
+      const all = await harness.listSessions();
+      const summaryA = all.find((item) => item.id === 'ses_v2_list_a');
+      expect(summaryA).toMatchObject({
+        id: 'ses_v2_list_a',
+        workDir,
+        archived: false,
+      });
+      expect(typeof summaryA?.sessionDir).toBe('string');
+      expect(summaryA?.createdAt).toBeGreaterThan(0);
+
+      const scoped = await harness.listSessions({ workDir });
+      expect(scoped.map((item) => item.id)).toEqual(['ses_v2_list_a']);
+
+      const scopedOther = await harness.listSessions({ workDir: otherWorkDir });
+      expect(scopedOther.map((item) => item.id)).toEqual(['ses_v2_list_b']);
+
+      const byId = await harness.listSessions({ sessionId: 'ses_v2_list_b' });
+      expect(byId.map((item) => item.id)).toEqual(['ses_v2_list_b']);
+
+      await expect(harness.listSessions({ workDir: '   ' })).rejects.toMatchObject({
+        code: 'request.work_dir_required',
+      });
+
+      await first.close();
+      await second.close();
     } finally {
       await harness.close();
     }
