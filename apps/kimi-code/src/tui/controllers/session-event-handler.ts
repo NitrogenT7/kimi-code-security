@@ -668,6 +668,9 @@ export class SessionEventHandler {
     if (Object.keys(patch).length > 0) this.host.setAppState(patch);
     if (event.swarmMode === false) {
       this.host.state.swarmModeEntry = undefined;
+      if (this.host.state.appState.swarmVariant !== undefined) {
+        this.host.setAppState({ swarmVariant: undefined });
+      }
       if (shouldRenderSwarmEnded) {
         this.renderSwarmModeMarker('ended');
       }
@@ -952,11 +955,8 @@ export class SessionEventHandler {
         );
         return;
       case 'registered':
-        this.finalizeMcpServerStatusRow(
-          server.name,
-          `MCP server "${server.name}" registered (not loaded)`,
-          'textMuted',
-        );
+        // Configured but not loaded: keep it in the footer summary (updated
+        // above), but never spend a transcript row on it — nothing happened.
         return;
       case 'pending':
         this.showMcpServerStatusSpinner(server.name);

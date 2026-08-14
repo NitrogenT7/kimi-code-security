@@ -24,8 +24,11 @@ function mcpStartupStatusPriority(status: McpServerStatusSnapshot['status']): nu
 export function selectMcpStartupStatusRows(
   servers: readonly McpServerStatusSnapshot[],
 ): McpServerStatusSnapshot[] {
+  // Only startup-active states earn a transcript row. 'disabled' and
+  // 'registered' (configured but never loaded) servers are footer-summary
+  // material — one row per such server is pure startup noise.
   return [...servers]
-    .filter((server) => server.status !== 'disabled')
+    .filter((server) => server.status !== 'disabled' && server.status !== 'registered')
     .toSorted((a, b) => mcpStartupStatusPriority(a.status) - mcpStartupStatusPriority(b.status))
     .slice(0, MCP_STARTUP_STATUS_ROW_LIMIT);
 }
