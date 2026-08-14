@@ -269,6 +269,21 @@ describe('runUpdatePreflight', () => {
     expect(detectInstallSource).not.toHaveBeenCalled();
   });
 
+  it('skips all update work when the host is a forked package (e.g. ksec)', async () => {
+    mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
+    mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
+    const { options } = captureOutput();
+
+    await expect(
+      runUpdatePreflight('0.4.0', { ...options, hostPackageName: 'kimi-code-security' }),
+    ).resolves.toBe('continue');
+
+    expect(readUpdateCache).not.toHaveBeenCalled();
+    expect(refreshUpdateCache).not.toHaveBeenCalled();
+    expect(detectInstallSource).not.toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
   it('starts an automatic update from the first fresh check when the cache is empty', async () => {
     mocks.readUpdateCache.mockResolvedValue(emptyUpdateCache());
     mocks.readUpdateInstallState.mockResolvedValue(installState());

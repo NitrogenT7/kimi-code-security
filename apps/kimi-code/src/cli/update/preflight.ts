@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 import { log, type Logger } from '@moonshot-ai/kimi-code-sdk';
 import type { TelemetryProperties } from '@moonshot-ai/kimi-telemetry';
@@ -8,6 +9,8 @@ import {
   NATIVE_INSTALL_COMMAND_WIN,
 } from '#/constant/app';
 import { loadTuiConfig } from '#/tui/config';
+
+import { getHostPackageJsonPath } from '../version';
 
 import { readUpdateCache } from './cache';
 import { tryAcquireUpdateInstallLock } from './install-lock';
@@ -47,6 +50,8 @@ export interface RunUpdatePreflightOptions {
   readonly isTTY?: boolean;
   readonly track?: (event: string, properties?: TelemetryProperties) => void;
   readonly logger?: UpdateLogger;
+  /** Test seam: overrides the host package name read from package.json. */
+  readonly hostPackageName?: string;
 }
 
 const AUTO_INSTALL_FAILURE_PROMPT_THRESHOLD = 2;
@@ -412,6 +417,28 @@ function isAutoUpdateDisabledByEnv(env: NodeJS.ProcessEnv = process.env): boolea
   return truthy(env['KIMI_CODE_NO_AUTO_UPDATE']) || truthy(env['KIMI_CLI_NO_AUTO_UPDATE']);
 }
 
+/**
+ * Forked distributions installed under a different package name (for example
+ * the security-research fork's `ksec`) never join the official update
+ * channel: no check, no nag, and no background install of the official
+ * package — a background `npm install -g` would only clobber the official
+ * `kimi` install while never touching the fork itself.
+ */
+function isForkBuild(hostPackageName: string | undefined): boolean {
+  return hostPackageName !== undefined && hostPackageName !== NPM_PACKAGE_NAME;
+}
+
+function resolveHostPackageName(): string | undefined {
+  try {
+    const pkg = JSON.parse(readFileSync(getHostPackageJsonPath(), 'utf-8')) as {
+      name?: string;
+    };
+    return pkg.name;
+  } catch {
+    return undefined;
+  }
+}
+
 async function shouldAutoInstallUpdates(): Promise<boolean> {
   try {
     const config = await loadTuiConfig();
@@ -671,6 +698,9 @@ export async function runUpdatePreflight(
   const platform = process.platform;
 
   if (isAutoUpdateDisabledByEnv()) {
+    return 'continue';
+  }
+  if (isForkBuild(options.hostPackageName ?? resolveHostPackageName())) {
     return 'continue';
   }
 
