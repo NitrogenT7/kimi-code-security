@@ -155,6 +155,7 @@ import {
   ISessionWorkspaceCommandService,
   ISessionExportService,
   IAgentContextMemoryService,
+  IAgentContextSizeService,
   IWorkspaceRegistry,
   type IAgentScopeHandle,
   type ISessionScopeHandle,
@@ -380,6 +381,7 @@ export class V2CoreBridge {
     const permission = agent.accessor.get(IAgentPermissionModeService);
     const rules = agent.accessor.get(IAgentPermissionRulesService);
     const context = agent.accessor.get(IAgentContextMemoryService);
+    const contextSize = agent.accessor.get(IAgentContextSizeService);
 
     const config = profile.data();
     const replay: AgentReplayRecord[] = context.get().map((message) => ({
@@ -409,7 +411,10 @@ export class V2CoreBridge {
       } as AgentConfigData,
       context: {
         history: context.get() as never,
-        tokenCount: 0,
+        // Estimated from the restored history when no measured exchange has
+        // happened since (re)start — never a hardcoded 0, or a resumed session
+        // would show "context: 0%" and read as if the history were lost.
+        tokenCount: contextSize.get().size,
       } as AgentContextData,
       replay,
       permission: {
@@ -935,8 +940,10 @@ export class V2CoreBridge {
   }
 
   getContext(payload: SessionAgentPayload<EmptyPayload>): AgentContextData {
-    const context = this.agent(payload.sessionId, payload.agentId).accessor.get(IAgentContextMemoryService);
-    return { history: context.get() as never, tokenCount: 0 } as AgentContextData;
+    const accessor = this.agent(payload.sessionId, payload.agentId).accessor;
+    const context = accessor.get(IAgentContextMemoryService);
+    const tokenCount = accessor.get(IAgentContextSizeService).get().size;
+    return { history: context.get() as never, tokenCount } as AgentContextData;
   }
 
   getConfig(payload: SessionAgentPayload<EmptyPayload>): AgentConfigData {

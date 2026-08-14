@@ -80,6 +80,7 @@ function sseBody(): string {
 
 let server: Server;
 let baseUrl: string;
+const capturedRequests: { messages?: unknown }[] = [];
 
 beforeAll(async () => {
   server = createServer((req, res: ServerResponse) => {
@@ -88,8 +89,16 @@ beforeAll(async () => {
       res.end();
       return;
     }
-    req.resume();
+    let body = '';
+    req.on('data', (chunk: Buffer) => {
+      body += chunk.toString('utf-8');
+    });
     req.on('end', () => {
+      try {
+        capturedRequests.push(JSON.parse(body) as { messages?: unknown });
+      } catch {
+        // ignore non-JSON bodies
+      }
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.end(sseBody());
     });
@@ -120,12 +129,12 @@ afterEach(async () => {
   }
 });
 
-async function makeHarness() {
-  const homeDir = await mkdtemp(join(tmpdir(), 'kimi-v2-bridge-home-'));
+async function makeHarness(homeDir?: string) {
+  const home = homeDir ?? (await mkdtemp(join(tmpdir(), 'kimi-v2-bridge-home-')));
   const workDir = await mkdtemp(join(tmpdir(), 'kimi-v2-bridge-work-'));
-  tempDirs.push(homeDir, workDir);
+  tempDirs.push(home, workDir);
   await writeFile(
-    join(homeDir, 'config.toml'),
+    join(home, 'config.toml'),
     `default_model = "default-mock"
 
 [providers.test]
@@ -140,8 +149,8 @@ max_context_size = 128000
 `,
     'utf-8',
   );
-  const harness = createKimiHarnessV2({ homeDir, identity: TEST_IDENTITY });
-  return { harness, workDir };
+  const harness = createKimiHarnessV2({ homeDir: home, identity: TEST_IDENTITY });
+  return { harness, workDir, homeDir: home };
 }
 
 function waitForEvent(
@@ -385,6 +394,53 @@ describe('v2 harness bridge', () => {
       await resumed.close();
     } finally {
       await harness.close();
+    }
+  });
+
+  it('keeps conversation context when resuming after a full engine restart', async () => {
+    // Regression guard for `kimi -r` losing prior context: the first harness
+    // is fully closed (engine disposed) before a fresh harness on the same
+    // home resumes the session, and the next turn's LLM request must still
+    // carry the pre-restart history.
+    const marker = 'blue-elephant-42';
+    scriptedReply = { text: 'ok' };
+    const first = await makeHarness();
+    const { workDir, homeDir } = first;
+    try {
+      const session = await first.harness.createSession({ id: 'ses_v2_restart', workDir });
+      const turnEnded = waitForEvent(session, (event) => event.type === 'turn.ended');
+      await session.prompt(`Remember the codeword ${marker}.`);
+      await turnEnded;
+      await session.close();
+    } finally {
+      await first.harness.close();
+    }
+    const requestsBeforeRestart = capturedRequests.length;
+    expect(requestsBeforeRestart).toBeGreaterThan(0);
+
+    const second = await makeHarness(homeDir);
+    try {
+      const resumed = await second.harness.resumeSession({ id: 'ses_v2_restart' });
+      const context = await resumed.getContext();
+      expect(JSON.stringify(context.history)).toContain(marker);
+      // The footer reads this counter after resume; a hardcoded 0 reads as
+      // "context lost" even though the history is intact.
+      expect(context.tokenCount).toBeGreaterThan(0);
+      expect(
+        resumed.getResumeState()?.agents['main']?.context.tokenCount,
+      ).toBeGreaterThan(0);
+
+      const turnEnded = waitForEvent(resumed, (event) => event.type === 'turn.ended');
+      await resumed.prompt('What was the codeword?');
+      await turnEnded;
+
+      const postResumeRequests = capturedRequests.slice(requestsBeforeRestart);
+      expect(postResumeRequests.length).toBeGreaterThan(0);
+      expect(JSON.stringify(postResumeRequests[0]?.messages)).toContain(marker);
+
+      await resumed.close();
+    } finally {
+      await second.harness.close();
     }
   });
 
