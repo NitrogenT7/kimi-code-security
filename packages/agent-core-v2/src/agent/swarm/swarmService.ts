@@ -22,9 +22,10 @@ import { IAgentContextMemoryService } from '#/agent/contextMemory/contextMemory'
 import { IAgentSystemReminderService } from '#/agent/systemReminder/systemReminder';
 import { IEventBus } from '#/app/event/eventBus';
 import { IWireService } from '#/wire/wire';
+import SWARM_AUDIT_MODE_ENTER_REMINDER from './audit-reminder.md?raw';
 import SWARM_MODE_ENTER_REMINDER from './enter-reminder.md?raw';
 import SWARM_MODE_EXIT_REMINDER from './exit-reminder.md?raw';
-import { IAgentSwarmService, type SwarmModeTrigger } from './swarm';
+import { IAgentSwarmService, type SwarmModeTrigger, type SwarmModeVariant } from './swarm';
 import { swarmEnter, swarmExit, SwarmModel } from './swarmOps';
 
 export class AgentSwarmService extends Disposable implements IAgentSwarmService {
@@ -46,26 +47,29 @@ export class AgentSwarmService extends Disposable implements IAgentSwarmService 
     );
   }
 
-  enter(trigger: SwarmModeTrigger): void {
+  enter(trigger: SwarmModeTrigger, variant?: SwarmModeVariant): void {
     if (this.wire.getModel(SwarmModel) !== null) return;
-    this.wire.dispatch(swarmEnter({ trigger }));
+    this.wire.dispatch(swarmEnter({ trigger, variant }));
     if (trigger !== 'tool') {
-      this.reminders.appendSystemReminder(SWARM_MODE_ENTER_REMINDER, {
-        kind: 'injection',
-        variant: 'swarm_mode',
-      });
+      this.reminders.appendSystemReminder(
+        variant === 'audit' ? SWARM_AUDIT_MODE_ENTER_REMINDER : SWARM_MODE_ENTER_REMINDER,
+        {
+          kind: 'injection',
+          variant: 'swarm_mode',
+        },
+      );
     }
   }
 
   exit(): void {
-    const trigger = this.wire.getModel(SwarmModel);
-    if (trigger === null) return;
+    const state = this.wire.getModel(SwarmModel);
+    if (state === null) return;
     const history = this.context.get();
     const last = history[history.length - 1];
     const willPop =
       last?.origin?.kind === 'injection' && last.origin.variant === 'swarm_mode';
     this.wire.dispatch(swarmExit({}));
-    if (trigger === 'tool') return;
+    if (state.trigger === 'tool') return;
     if (willPop) {
       this.eventBus.publish({
         type: 'context.spliced',
@@ -85,8 +89,12 @@ export class AgentSwarmService extends Disposable implements IAgentSwarmService 
     return this.wire.getModel(SwarmModel) !== null;
   }
 
+  get activeVariant(): SwarmModeVariant | undefined {
+    return this.wire.getModel(SwarmModel)?.variant;
+  }
+
   private get shouldAutoExit(): boolean {
-    const trigger = this.wire.getModel(SwarmModel);
+    const trigger = this.wire.getModel(SwarmModel)?.trigger;
     return trigger === 'task' || trigger === 'tool';
   }
 }

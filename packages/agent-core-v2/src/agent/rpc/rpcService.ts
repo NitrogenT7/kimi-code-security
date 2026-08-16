@@ -201,7 +201,7 @@ export class AgentRPCService implements IAgentRPCService {
   }
 
   enterSwarm(payload: EnterSwarmPayload): void {
-    this.swarmMode.enter(payload.trigger);
+    this.swarmMode.enter(payload.trigger, payload.variant);
   }
 
   exitSwarm(_payload: EmptyPayload): void {

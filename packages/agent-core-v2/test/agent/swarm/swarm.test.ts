@@ -57,7 +57,13 @@ function mockSwarmHost({
 }
 
 function mockSwarmMode() {
-  return { _serviceBrand: undefined, isActive: false, enter: vi.fn(), exit: vi.fn() };
+  return {
+    _serviceBrand: undefined,
+    isActive: false,
+    activeVariant: undefined,
+    enter: vi.fn(),
+    exit: vi.fn(),
+  };
 }
 
 function stubConfig(timeoutMs?: number): IConfigService {
@@ -141,7 +147,66 @@ describe('AgentSwarmService', () => {
       testWireScope('wire', 'swarm-replay'),
       records,
     );
-    expect(fresh.getModel(SwarmModel)).toBe('manual');
+    expect(fresh.getModel(SwarmModel)).toEqual({ trigger: 'manual', variant: undefined });
+  });
+
+  it('enters the audit variant with the audit reminder and exposes it via activeVariant', () => {
+    const swarm = ix.get(IAgentSwarmService);
+    expect(swarm.activeVariant).toBeUndefined();
+
+    swarm.enter('manual', 'audit');
+
+    expect(swarm.isActive).toBe(true);
+    expect(swarm.activeVariant).toBe('audit');
+    const context = ix.get(IAgentContextMemoryService);
+    const reminder = context.messages.at(-1);
+    expect(reminder?.origin).toEqual({ kind: 'injection', variant: 'swarm_mode' });
+    expect(JSON.stringify(reminder)).toContain('Swarm Audit Mode');
+    expect(JSON.stringify(reminder)).toContain('Blind spots');
+
+    swarm.exit();
+    expect(swarm.activeVariant).toBeUndefined();
+  });
+
+  it('uses the general reminder when no variant is given', () => {
+    const swarm = ix.get(IAgentSwarmService);
+    swarm.enter('manual');
+
+    const context = ix.get(IAgentContextMemoryService);
+    const reminder = context.messages.at(-1);
+    expect(JSON.stringify(reminder)).toContain('agent swarm');
+    expect(JSON.stringify(reminder)).not.toContain('Swarm Audit Mode');
+  });
+
+  it('persists the variant and rebuilds it on replay', async () => {
+    const swarm = ix.get(IAgentSwarmService);
+    swarm.enter('task', 'audit');
+
+    const log = ix.get(IAppendLogStore);
+    const records: WireRecord[] = [];
+    for await (const record of log.read<WireRecord>(
+      testWireScope('wire', 'swarm-test'),
+      AGENT_WIRE_RECORD_KEY,
+    )) {
+      records.push(record);
+    }
+    expect(records).toEqual([
+      { type: 'swarm_mode.enter', trigger: 'task', variant: 'audit', time: expect.any(Number) },
+    ]);
+
+    const ix2 = disposables.add(new TestInstantiationService());
+    ix2.stub(IFileSystemStorageService, new InMemoryStorageService());
+    ix2.set(IAppendLogStore, new SyncDescriptor(AppendLogStore));
+    const fresh = registerTestAgentWire(ix2, testWireScope('wire', 'swarm-replay'), {
+      log: ix2.get(IAppendLogStore),
+    });
+    await restoreTestAgentWire(
+      fresh,
+      ix2.get(IAppendLogStore),
+      testWireScope('wire', 'swarm-replay'),
+      records,
+    );
+    expect(fresh.getModel(SwarmModel)).toEqual({ trigger: 'task', variant: 'audit' });
   });
 });
 

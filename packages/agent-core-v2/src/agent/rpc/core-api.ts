@@ -12,7 +12,7 @@ import type {
 } from '#/agent/goal/types';
 import type { PermissionData, PermissionMode } from '#/agent/permissionPolicy/types';
 import type { PlanData } from '#/agent/plan/plan';
-import type { SwarmModeTrigger } from '#/agent/swarm/swarm';
+import type { SwarmModeTrigger, SwarmModeVariant } from '#/agent/swarm/swarm';
 import type { ToolInfo } from '#/tool/toolContract';
 import type { ResolvedConfig } from '#/app/config/config';
 import type { McpServerConfig } from '#/agent/mcp/config-schema';
@@ -152,6 +152,7 @@ export interface CancelPlanPayload {
 }
 export interface EnterSwarmPayload {
   readonly trigger: SwarmModeTrigger;
+  readonly variant?: SwarmModeVariant;
 }
 export interface BeginCompactionPayload {
   readonly instruction?: string;

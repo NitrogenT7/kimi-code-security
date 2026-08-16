@@ -926,6 +926,38 @@ describe('Agent turn flow', () => {
     await ctx.expectResumeMatches();
   });
 
+  it('enters audit-variant swarm mode with the audit reminder and restores it on resume', async () => {
+    const ctx = testAgent();
+    ctx.configure();
+    ctx.mockNextResponse({ type: 'text', text: 'audit done' });
+
+    await ctx.rpc.enterSwarm({ trigger: 'manual', variant: 'audit' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Audit this codebase' }] });
+    await ctx.untilTurnEnd();
+
+    expect(ctx.agent.swarmMode.isActive).toBe(true);
+    expect(ctx.agent.swarmMode.activeVariant).toBe('audit');
+    const reminder = ctx.agent.context.history.find(
+      (message) => message.origin?.kind === 'injection' && message.origin.variant === 'swarm_mode',
+    );
+    expect(JSON.stringify(reminder)).toContain('Swarm Audit Mode');
+    await ctx.expectResumeMatches();
+  });
+
+  it('keeps the general swarm reminder when no variant is given', async () => {
+    const ctx = testAgent();
+    ctx.configure();
+
+    await ctx.rpc.enterSwarm({ trigger: 'manual' });
+
+    expect(ctx.agent.swarmMode.activeVariant).toBeUndefined();
+    const reminder = ctx.agent.context.history.find(
+      (message) => message.origin?.kind === 'injection' && message.origin.variant === 'swarm_mode',
+    );
+    expect(JSON.stringify(reminder)).toContain('agent swarm');
+    expect(JSON.stringify(reminder)).not.toContain('Swarm Audit Mode');
+  });
+
   it('exits task swarm mode after a turn completes normally', async () => {
     const ctx = testAgent();
     ctx.configure();

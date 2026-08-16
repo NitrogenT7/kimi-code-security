@@ -956,6 +956,9 @@ importers:
       '@moonshot-ai/agent-core':
         specifier: workspace:^
         version: link:../agent-core
+      '@moonshot-ai/agent-core-v2':
+        specifier: workspace:^
+        version: link:../agent-core-v2
       '@moonshot-ai/kaos':
         specifier: workspace:^
         version: link:../kaos

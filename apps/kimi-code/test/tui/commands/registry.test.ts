@@ -64,13 +64,15 @@ describe('built-in slash command registry', () => {
       return items === null ? null : items.map((item) => item.value);
     };
 
-    expect(values('')).toEqual(['on', 'off']);
+    expect(values('')).toEqual(['on', 'off', 'audit']);
     expect(values('O')).toEqual(['on', 'off']);
+    expect(values('A')).toEqual(['audit']);
     expect(swarmArgumentCompletions('of')).toEqual([
       { value: 'off', label: 'off', description: 'Turn swarm mode off' },
     ]);
     expect(values('on')).toBeNull();
     expect(values('off')).toBeNull();
+    expect(values('audit')).toBeNull();
     expect(values('Ship feature X')).toBeNull();
   });
 

@@ -82,3 +82,20 @@ This is a TypeScript monorepo built for agent-assisted development. Keep the roo
   - Agent working notes or handoff/summary documents (e.g. `HANDOVER-*.md`, `HANDOFF-*.md`, `handoff.md`).
   - Throwaway UI/UX prototypes or design mockups (e.g. `*-designs.html`, `*-mockup.html`, `*-demo(s).html`) at the repo root or under a `design/` folder. The only tracked `.html` files should be Vite `index.html` entrypoints.
   Before committing or opening a PR, run `git status` and `git diff --staged --stat` and remove anything matching these patterns. Put scratch work under `.tmp/` (gitignored) instead of the repo root or the source tree.
+
+## Security Testing Red Lines（安全测试之弦）
+
+进行安全测试、漏洞验证、渗透、逆向利用类任务时，默认姿态只有四个字：**验证，不破坏**。点到为止标准见 `.agents/skills/pentest-safety-guardrails/SKILL.md`。
+
+每发出一个请求、一条命令、一个 payload 之前，先问自己一句：**"这一步会改变对方的东西吗？"**
+
+- 不会（读、看、分析、本地隔离环境内折腾）→ 放手做。
+- 会（写、删、改、发、投、刷），或你说不准 → **停**。这根弦比任何清单都重要：清单没列到的危险操作，照样要停。
+
+停下来不是结束，是流程：
+
+1. 告诉用户要做什么、会改变什么、能否回滚、有没有更轻的证法；
+2. 等明确点头——沉默和"再看看"都是没点头；没点头的记入 `.audit/pending-approval.md`，继续干别的只读活，用户回来主动提；
+3. 批一次只算一次；被拒就到此为止，换工具换路径达到同样效果等同于违规。
+
+点到为止：证明"门没锁"拍张照就够——一条记录、一次回显、一个 canary、一次本地可控崩溃就是实锤，破坏力用文字推演。永远不真用测试中获得的凭证。

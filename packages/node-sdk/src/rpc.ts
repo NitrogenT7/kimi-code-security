@@ -18,6 +18,7 @@ import {
   type ToolCallRequest,
   type ToolCallResponse,
   type SwarmModeTrigger,
+  type SwarmModeVariant,
 } from '@moonshot-ai/agent-core';
 import type { Kaos } from '@moonshot-ai/kaos';
 
@@ -111,7 +112,11 @@ export interface SetSessionPlanModeRpcInput extends SessionIdRpcInput {
 }
 
 export type SetSessionSwarmModeRpcInput =
-  | (SessionIdRpcInput & { readonly enabled: true; readonly trigger: SwarmModeTrigger })
+  | (SessionIdRpcInput & {
+      readonly enabled: true;
+      readonly trigger: SwarmModeTrigger;
+      readonly variant?: SwarmModeVariant;
+    })
   | (SessionIdRpcInput & { readonly enabled: false });
 
 export interface ActivateSkillRpcInput extends SessionIdRpcInput {
@@ -480,13 +485,17 @@ export abstract class SDKRpcClientBase {
   }
 
   private async enterSwarmMode(
-    input: SessionIdRpcInput & { readonly trigger: SwarmModeTrigger },
+    input: SessionIdRpcInput & {
+      readonly trigger: SwarmModeTrigger;
+      readonly variant?: SwarmModeVariant;
+    },
   ): Promise<void> {
     const rpc = await this.getRpc();
     return rpc.enterSwarm({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
       trigger: input.trigger,
+      variant: input.variant,
     });
   }
 

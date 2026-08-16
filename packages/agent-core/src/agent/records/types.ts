@@ -8,7 +8,7 @@ import type { AgentConfigUpdateData } from '../config';
 import type { ContextMessage, PromptOrigin } from '../context';
 import type { GoalActor, GoalBudgetLimits, GoalStatus } from '../goal';
 import type { PermissionApprovalResultRecord, PermissionMode } from '../permission';
-import type { SwarmModeTrigger } from '../swarm';
+import type { SwarmModeTrigger, SwarmModeVariant } from '../swarm';
 import type { McpToolCollision, UserToolRegistration } from '../tool';
 import type { UsageRecordScope } from '../usage';
 
@@ -72,6 +72,7 @@ export interface AgentRecordEvents {
 
   'swarm_mode.enter': {
     trigger: SwarmModeTrigger;
+    variant?: SwarmModeVariant;
   };
   'swarm_mode.exit': {};
 

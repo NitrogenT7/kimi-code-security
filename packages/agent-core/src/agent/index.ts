@@ -68,7 +68,7 @@ import { PoolingLLM, type ProviderFailoverInfo } from './turn/pooling-llm';
 import { UsageRecorder } from './usage';
 
 export type { AgentRecord, AgentRecordPersistence } from './records';
-export type { SwarmModeTrigger } from './swarm';
+export type { SwarmModeTrigger, SwarmModeVariant } from './swarm';
 export type { BuiltinTool, ToolInfo, ToolSource, UserToolRegistration } from './tool';
 export * from './goal';
 
@@ -674,7 +674,7 @@ export class Agent {
       },
       clearPlan: () => this.planMode.clear(),
       enterSwarm: (payload) => {
-        this.swarmMode.enter(payload.trigger);
+        this.swarmMode.enter(payload.trigger, payload.variant);
       },
       exitSwarm: () => {
         this.swarmMode.exit();

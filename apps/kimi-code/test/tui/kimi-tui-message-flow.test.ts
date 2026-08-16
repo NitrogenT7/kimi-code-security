@@ -3059,7 +3059,7 @@ command = "vim"
     driver.handleUserInput('/swarm Ship feature X');
 
     await vi.waitFor(() => {
-      expect(session.setSwarmMode).toHaveBeenCalledWith(true, 'task');
+      expect(session.setSwarmMode).toHaveBeenCalledWith(true, 'task', undefined);
     });
     await vi.waitFor(() => {
       expect(countOccurrences(stripSgr(renderTranscript(driver)), 'Swarm activated')).toBe(1);

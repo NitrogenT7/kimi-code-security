@@ -5,8 +5,14 @@ import { currentTheme } from '#/tui/theme';
 
 export type SwarmModeMarkerState = 'active' | 'inactive' | 'ended';
 
+/** Variant of swarm mode shown in the marker; currently only the security-audit variant. */
+export type SwarmVariant = 'audit';
+
 export class SwarmModeMarkerComponent implements Component {
-  constructor(private readonly state: SwarmModeMarkerState) {}
+  constructor(
+    private readonly state: SwarmModeMarkerState,
+    private readonly variant?: SwarmVariant,
+  ) {}
 
   invalidate(): void {}
 
@@ -16,18 +22,19 @@ export class SwarmModeMarkerComponent implements Component {
 
     const token = this.state === 'inactive' ? 'textDim' : 'success';
     const marker = currentTheme.boldFg(token, STATUS_BULLET);
-    const label = currentTheme.boldFg(token, swarmMarkerLabel(this.state));
+    const label = currentTheme.boldFg(token, swarmMarkerLabel(this.state, this.variant));
     return ['', truncateToWidth(marker + label, safeWidth, '…')];
   }
 }
 
-function swarmMarkerLabel(state: SwarmModeMarkerState): string {
+function swarmMarkerLabel(state: SwarmModeMarkerState, variant: SwarmVariant | undefined): string {
+  const subject = variant === 'audit' ? 'Audit swarm' : 'Swarm';
   switch (state) {
     case 'active':
-      return 'Swarm activated';
+      return `${subject} activated`;
     case 'inactive':
-      return 'Swarm deactivated';
+      return `${subject} deactivated`;
     case 'ended':
-      return 'Swarm ended';
+      return `${subject} ended`;
   }
 }

@@ -16,7 +16,7 @@ import type {
 } from '#/agent/goal';
 import type { PermissionData, PermissionMode } from '#/agent/permission';
 import type { PlanData } from '#/agent/plan';
-import type { SwarmModeTrigger } from '#/agent/swarm';
+import type { SwarmModeTrigger, SwarmModeVariant } from '#/agent/swarm';
 import type { ToolInfo } from '#/agent/tool';
 import type { KimiConfig, KimiConfigPatch, McpServerConfig } from '#/config';
 import type { ExperimentalFeatureState } from '#/flags';
@@ -237,6 +237,7 @@ export interface CancelPlanPayload {
 }
 export interface EnterSwarmPayload {
   readonly trigger: SwarmModeTrigger;
+  readonly variant?: SwarmModeVariant;
 }
 export interface BeginCompactionPayload {
   readonly instruction?: string;
