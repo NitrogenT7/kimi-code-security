@@ -44,6 +44,7 @@ export * from '#/os/backends/node-local/hostFsService';
 export * from '#/os/backends/node-local/hostFsWatchService';
 export * from '#/os/backends/node-local/hostProcessService';
 export * from '#/os/backends/node-local/hostTerminalService';
+export * from '#/os/backends/kaos/hostFsService';
 export * from '#/os/backends/node-local/tools/bash';
 export * from '#/os/backends/node-local/tools/glob';
 export * from '#/os/backends/node-local/tools/grep';

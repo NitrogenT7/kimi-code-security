@@ -36,6 +36,12 @@ export interface SessionMeta {
   readonly archived: boolean;
   readonly cwd?: string;
   readonly forkedFrom?: string;
+  /**
+   * Session-scoped additional workspace dirs (`/add-dir` without persist).
+   * Restored on resume so a closed-and-reopened session keeps its session-only
+   * workspace (v1 parity: v1 stored the same list in `state.json` metadata).
+   */
+  readonly additionalDirs?: readonly string[];
   readonly agents?: Readonly<Record<string, AgentMeta>>;
   readonly custom?: Record<string, unknown>;
 }

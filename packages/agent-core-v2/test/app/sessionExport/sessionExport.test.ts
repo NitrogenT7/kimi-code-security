@@ -871,6 +871,13 @@ function registerSessionExportServices(
     createChild: async () => {
       throw new Error('createChild should not be called by session export');
     },
+    patchSessionMeta: async () => {
+      throw new Error('patchSessionMeta should not be called by session export');
+    },
+    delete: async () => {
+      throw new Error('delete should not be called by session export');
+    },
+    readSessionMeta: async () => undefined,
   });
   reg.defineInstance(IWorkspaceRegistry, {
     _serviceBrand: undefined,

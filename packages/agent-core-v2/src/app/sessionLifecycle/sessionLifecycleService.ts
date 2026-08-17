@@ -22,6 +22,13 @@
  * the session into a bucket v1 readers never look in. Fork flushes
  * live Agent wire journals, normalizes a missing protocol envelope, and
  * appends the fork boundary before restoring the target Agent.
+ * `patchSessionMeta` updates `title` / `custom` on live sessions through
+ * their `sessionMetadata`, and on closed sessions by patching `state.json`
+ * directly through the atomic-document store (v1-parity for renaming
+ * closed sessions from the session picker). `delete` hard-removes a session:
+ * closes the live scope, removes its directory, tombstones the v1-compatible
+ * session index, purges the read-model row, drops its cron tasks, and
+ * broadcasts `event.session.deleted`.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -60,6 +67,9 @@ import { ErrorCodes, Error2, isError2 } from '#/errors';
 import { createHooks } from '#/hooks';
 import { IHostEnvironment } from '#/os/interface/hostEnvironment';
 import { IHostFileSystem, type HostDirEntry } from '#/os/interface/hostFileSystem';
+import { KaosHostFileSystem } from '#/os/backends/kaos/hostFsService';
+import type { ScopeSeed } from '#/_base/di/scope';
+import { IQueryStore } from '#/persistence/interface/queryStore';
 import { IAppendLogStore } from '#/persistence/interface/appendLogStore';
 import { IAtomicDocumentStore } from '#/persistence/interface/atomicDocumentStore';
 import { IAgentLifecycleService, MAIN_AGENT_ID } from '#/session/agentLifecycle/agentLifecycle';
@@ -83,6 +93,7 @@ import {
   type CreateChildSessionOptions,
   type CreateSessionOptions,
   type ForkSessionOptions,
+  type PatchSessionMetaOptions,
   type SessionArchivedEvent,
   type SessionClosedEvent,
   type SessionCreatedEvent,
@@ -129,6 +140,7 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
     private readonly workspaceLocalConfig: IWorkspaceLocalConfigService,
     @IEventService private readonly event: IEventService,
     @ITelemetryService private readonly telemetry: ITelemetryService,
+    @IQueryStore private readonly queryStore: IQueryStore,
   ) {
     super();
   }
@@ -173,14 +185,32 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
       opts.workDir,
       opts.additionalDirs ?? [],
     );
-    const additionalDirs = [...localWorkspaceDirs.additionalDirs, ...callerAdditionalDirs];
+    // v1 parity: session-only dirs (`/add-dir` without persist) live in the
+    // session's persisted metadata; fold them back in on every materialize so
+    // close/resume restores the session's workspace.
+    const persistedSessionDirs =
+      (await this.readMetaFromDisk(workspaceId, opts.sessionId))?.additionalDirs ?? [];
+    const additionalDirs = [
+      ...localWorkspaceDirs.additionalDirs,
+      ...callerAdditionalDirs,
+      ...persistedSessionDirs,
+    ];
     await this.hostEnv.ready;
     const handle = createScopedChildHandle(
       this.instantiation,
       LifecycleScope.Session,
       opts.sessionId,
       {
-        extra: [...sessionContextSeed(ctx)],
+        extra: [
+          ...sessionContextSeed(ctx),
+          // A host-supplied Kaos shadows the App-scoped local filesystem for
+          // this session's file tools only (v1 `toolKaos` channel). The
+          // instance seed wins over the App registration in the child scope,
+          // and Agent scopes inherit it automatically.
+          ...(opts.kaos !== undefined
+            ? ([[IHostFileSystem, new KaosHostFileSystem(opts.kaos)]] as ScopeSeed)
+            : []),
+        ],
       },
     ) as ISessionScopeHandle;
     if (additionalDirs.length > 0) {
@@ -311,6 +341,99 @@ export class SessionLifecycleService extends Disposable implements ISessionLifec
     if (handle === undefined) return undefined;
     await handle.accessor.get(ISessionMetadata).setArchived(false);
     return handle;
+  }
+
+  async delete(sessionId: string): Promise<void> {
+    // v1 parity (core-impl deleteSession → session-store delete): close a live
+    // scope first, then remove the persisted directory. The v1 readers'
+    // `readSessionIndex` folds a `deleted: true` tombstone by sessionId, so the
+    // append-only `session_index.jsonl` cannot resurrect the session on either
+    // engine; the v2 read model (minidb) is purged the same way
+    // `patchSessionMeta` invalidates a stale summary.
+    const summary = await this.index.get(sessionId);
+    const live = this.sessions.get(sessionId);
+    if (live === undefined && summary === undefined) {
+      throw new Error2(ErrorCodes.SESSION_NOT_FOUND, `session ${sessionId} does not exist`);
+    }
+    const workspaceId =
+      live !== undefined
+        ? live.accessor.get(ISessionContext).workspaceId
+        : summary!.workspaceId;
+
+    if (live !== undefined) {
+      await this.close(sessionId);
+    }
+
+    await this.hostFs.remove(this.bootstrap.sessionDir(workspaceId, sessionId)).catch(() => {});
+    this.appendLogStore.append('', 'session_index.jsonl', {
+      sessionId,
+      deleted: true,
+    });
+    await this.appendLogStore.flush();
+    await this.queryStore.delete('session', sessionId).catch(() => {});
+    for (const task of await this.cronStore.list({ workspaceId })) {
+      if (task.tags?.[CRON_SESSION_TAG] !== sessionId) continue;
+      await this.cronStore.delete(workspaceId, task.id);
+    }
+    this.event.publish({ type: 'event.session.deleted', payload: { sessionId } });
+  }
+
+  async patchSessionMeta(opts: PatchSessionMetaOptions): Promise<void> {
+
+    if (opts.title !== undefined && opts.title.trim().length === 0) {
+      throw new Error2(ErrorCodes.SESSION_TITLE_EMPTY, 'Session title cannot be empty');
+    }
+    const live = this.sessions.get(opts.sessionId);
+    if (live !== undefined) {
+      const meta = live.accessor.get(ISessionMetadata);
+      if (opts.title !== undefined) await meta.setTitle(opts.title);
+      if (opts.custom !== undefined) {
+        const current = await meta.read();
+        await meta.update({ custom: { ...current.custom, ...opts.custom } });
+      }
+      return;
+    }
+    const summary = await this.index.get(opts.sessionId);
+    if (summary === undefined) {
+      throw new Error2(
+        ErrorCodes.SESSION_NOT_FOUND,
+        `session ${opts.sessionId} does not exist`,
+      );
+    }
+    const scope = this.bootstrap.sessionScope(summary.workspaceId, opts.sessionId);
+    const meta = await this.readMetaFromDisk(summary.workspaceId, opts.sessionId);
+    if (meta === undefined) {
+      throw new Error2(
+        ErrorCodes.SESSION_STATE_NOT_FOUND,
+        `Session "${opts.sessionId}" state.json was not found`,
+      );
+    }
+    const next: SessionMeta = {
+      ...meta,
+      ...(opts.title !== undefined
+        ? { title: opts.title.trim(), isCustomTitle: true }
+        : {}),
+      ...(opts.custom !== undefined
+        ? { custom: { ...meta.custom, ...opts.custom } }
+        : {}),
+      updatedAt: Date.now(),
+    };
+    await this.docs.set(scope, 'state.json', next);
+    // The read model may hold a pre-patch summary; delete so the next index
+    // read re-reads state.json and backfills the fresh copy.
+    await this.queryStore.delete('session', opts.sessionId).catch(() => {});
+  }
+
+  async readSessionMeta(sessionId: string): Promise<SessionMeta | undefined> {
+    // Live sessions read through their Session-scoped metadata (flushed,
+    // authoritative); closed ones fall back to the persisted `state.json`.
+    const live = this.sessions.get(sessionId);
+    if (live !== undefined) {
+      return live.accessor.get(ISessionMetadata).read();
+    }
+    const summary = await this.index.get(sessionId);
+    if (summary === undefined) return undefined;
+    return this.readMetaFromDisk(summary.workspaceId, sessionId);
   }
 
   private async announceWillClose(event: SessionWillCloseEvent): Promise<void> {

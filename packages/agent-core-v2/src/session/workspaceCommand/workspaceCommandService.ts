@@ -8,12 +8,14 @@
  */
 
 import { InstantiationType } from '#/_base/di/extensions';
+import { IInstantiationService } from '#/_base/di/instantiation';
 import { Disposable } from '#/_base/di/lifecycle';
 import { LifecycleScope, registerScopedService } from '#/_base/di/scope';
 import { IAgentContextMemoryService } from '#/agent/contextMemory/contextMemory';
 import type { ContextMessage } from '#/agent/contextMemory/types';
 import { IWorkspaceLocalConfigService } from '#/app/workspaceLocalConfig/workspaceLocalConfig';
 import { IAgentLifecycleService, MAIN_AGENT_ID } from '#/session/agentLifecycle/agentLifecycle';
+import { ISessionMetadata } from '#/session/sessionMetadata/sessionMetadata';
 import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
 
 import {
@@ -35,6 +37,7 @@ export class SessionWorkspaceCommandService
     private readonly localConfig: IWorkspaceLocalConfigService,
     @ISessionWorkspaceContext private readonly workspace: ISessionWorkspaceContext,
     @IAgentLifecycleService private readonly agents: IAgentLifecycleService,
+    @IInstantiationService private readonly instantiation: IInstantiationService,
   ) {
     super();
     this._register(
@@ -79,6 +82,14 @@ export class SessionWorkspaceCommandService
       input.path,
     ]);
     this.workspace.setAdditionalDirs([...this.workspace.additionalDirs, ...resolved]);
+    // v1 parity: session-only dirs survive close/resume through the session's
+    // persisted metadata (`state.json`), not the workspace-local config.
+    const metadata = this.instantiation.invokeFunction((accessor) =>
+      accessor.get(ISessionMetadata),
+    );
+    const previous = (await metadata.read()).additionalDirs ?? [];
+    const nextSessionDirs = [...new Set([...previous, ...resolved])];
+    await metadata.update({ additionalDirs: nextSessionDirs });
     this.injectAdditionalDirAdded(input.path, false, workspace.configPath);
     return {
       projectRoot: workspace.projectRoot,

@@ -112,6 +112,29 @@ describe('AgentSkillService', () => {
     await expect(svc.activate({ name: 'missing' })).rejects.toThrow(/not found/i);
   });
 
+  it('blocks skill activation outside the allowed-prefix sandbox and lifts it when cleared', async () => {
+    const svc = ix.get(IAgentSkillService);
+
+    // v1-parity hard gate: outside the sandbox the skill must read as
+    // not-found — it must not leak that it exists.
+    svc.setAllowedSkillPrefixes(['android-']);
+    expect(svc.isSkillAllowed('commit')).toBe(false);
+    await expect(svc.activate({ name: 'commit' })).rejects.toThrow(/not found/i);
+    expect(prompted).toHaveLength(0);
+
+    // A matching prefix keeps activation working; clearing lifts the sandbox.
+    svc.setAllowedSkillPrefixes(['comm']);
+    await expect(svc.activate({ name: 'commit' })).resolves.toBeDefined();
+    expect(prompted).toHaveLength(1);
+
+    svc.setAllowedSkillPrefixes(undefined);
+    expect(svc.isSkillAllowed('anything')).toBe(true);
+
+    // An empty list is treated as "no sandbox", matching v1's null semantics.
+    svc.setAllowedSkillPrefixes([]);
+    expect(svc.isSkillAllowed('anything')).toBe(true);
+  });
+
   it('activate waits for the catalog to be ready before resolving', async () => {
     let resolveReady!: () => void;
     const ready = new Promise<void>((resolve) => {
@@ -199,6 +222,8 @@ describe('SkillTool', () => {
       _serviceBrand: undefined,
       activate: () => Promise.reject(new Error('not implemented')),
       recordModelToolActivation: () => {},
+      setAllowedSkillPrefixes: () => {},
+      isSkillAllowed: () => true,
     };
   }
 

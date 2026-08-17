@@ -29,6 +29,9 @@ import { ITelemetryService } from '#/app/telemetry/telemetry';
 import { ILogService } from '#/_base/log/log';
 import { IAtomicDocumentStore } from '#/persistence/interface/atomicDocumentStore';
 import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
+import { IInstantiationService } from '#/_base/di/instantiation';
+import { IAgentLifecycleService, MAIN_AGENT_ID } from '#/session/agentLifecycle/agentLifecycle';
+import { IAgentSkillService } from '#/agent/skill/skill';
 
 import { ISessionMcpService, type McpGroupInfo, type McpGroupLoadResult } from './sessionMcp';
 
@@ -47,6 +50,7 @@ export class SessionMcpService extends Disposable implements ISessionMcpService 
     @IAtomicDocumentStore private readonly atomicDocs: IAtomicDocumentStore,
     @ILogService private readonly log: ILogService,
     @ITelemetryService private readonly telemetry: ITelemetryService,
+    @IInstantiationService private readonly instantiation: IInstantiationService,
   ) {
     super();
   }
@@ -152,13 +156,24 @@ export class SessionMcpService extends Disposable implements ISessionMcpService 
   }
 
   setGroupMode(name: string | null): void {
+    const registry = this.mcpGroupRegistry;
     if (name !== null) {
-      const registry = this.mcpGroupRegistry;
       if (registry === undefined || !registry.has(name)) {
         throw new Error2(ErrorCodes.MCP_SERVER_NOT_FOUND, `Unknown MCP group: ${name}`);
       }
     }
     this.activeGroupName = name;
+    // v1 parity (session/rpc setMcpGroupMode): switching group mode also
+    // sandboxes the main agent's skill activation to the group's
+    // `skillPrefixes` (hard gate in AgentSkillService / SkillTool). Resolved
+    // lazily through the instantiation service — a constructor injection of
+    // `IAgentLifecycleService` would form a DI cycle
+    // (agentLifecycle → sessionMcp → agentLifecycle).
+    const prefixes = name === null ? undefined : registry!.skillPrefixes(name);
+    const main = this.instantiation.invokeFunction((accessor) =>
+      accessor.get(IAgentLifecycleService).get(MAIN_AGENT_ID),
+    );
+    main?.accessor.get(IAgentSkillService).setAllowedSkillPrefixes(prefixes);
   }
 
   private async connectMcpServers(

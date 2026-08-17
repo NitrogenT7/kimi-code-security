@@ -34,6 +34,8 @@ import { ISessionSkillCatalog } from '#/session/sessionSkillCatalog/skillCatalog
 export class AgentSkillService extends Disposable implements IAgentSkillService {
   declare readonly _serviceBrand: undefined;
 
+  private allowedSkillPrefixes: readonly string[] | undefined;
+
   constructor(
     @ISessionSkillCatalog private readonly skillCatalog: ISessionSkillCatalog,
     @IAgentPromptService private readonly prompt: IAgentPromptService,
@@ -44,10 +46,26 @@ export class AgentSkillService extends Disposable implements IAgentSkillService 
     super();
   }
 
+  setAllowedSkillPrefixes(prefixes: readonly string[] | undefined): void {
+    this.allowedSkillPrefixes =
+      prefixes === undefined || prefixes.length === 0 ? undefined : [...prefixes];
+  }
+
+  isSkillAllowed(name: string): boolean {
+    const prefixes = this.allowedSkillPrefixes;
+    if (prefixes === undefined || prefixes.length === 0 || prefixes.includes('*')) return true;
+    return prefixes.some((prefix) => name.startsWith(prefix));
+  }
+
   async activate(input: SkillActivationInput): Promise<Turn> {
     await this.skillCatalog.ready;
     const skill = this.skillCatalog.catalog.getSkill(input.name);
     if (skill === undefined) {
+      throw new Error2(ErrorCodes.SKILL_NOT_FOUND, `Skill "${input.name}" was not found`);
+    }
+    if (!this.isSkillAllowed(skill.name)) {
+      // v1-parity hard gate: outside the sandbox the skill must not leak that
+      // it exists at all.
       throw new Error2(ErrorCodes.SKILL_NOT_FOUND, `Skill "${input.name}" was not found`);
     }
     if (!isUserActivatableSkillType(skill.metadata.type)) {

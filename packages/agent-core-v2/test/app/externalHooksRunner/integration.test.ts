@@ -207,6 +207,13 @@ function stubSessionLifecycle(): ISessionLifecycleService {
     createChild: async () => {
       throw new Error('not implemented');
     },
+    patchSessionMeta: async () => {
+      throw new Error('not implemented');
+    },
+    delete: async () => {
+      throw new Error('not implemented');
+    },
+    readSessionMeta: async () => undefined,
   };
 }
 

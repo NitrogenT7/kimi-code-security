@@ -41,6 +41,7 @@ function makeService(entries: Record<string, FakeEntry>): SessionMcpService {
     {} as never,
     { warn: () => {}, error: () => {} } as never,
     { track2: () => {} } as never,
+    { invokeFunction: (fn: (accessor: { get: () => undefined }) => unknown) => fn({ get: () => undefined }) } as never,
   );
   (service as unknown as { mcpManager: unknown }).mcpManager =
     manager as unknown as McpConnectionManager;

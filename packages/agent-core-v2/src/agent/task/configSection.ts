@@ -32,6 +32,11 @@ export const AgentTaskConfigSchema = z.object({
   maxRunningTasks: z.number().int().min(1).optional(),
   keepAliveOnExit: z.boolean().optional(),
   bashAutoBackgroundOnTimeout: z.boolean().optional(),
+  /**
+   * Effective background default timeout in seconds
+   * (`background.bash_task_timeout_s` in v1; `0` = no timeout).
+   */
+  bashTaskTimeoutS: z.number().int().min(0).optional(),
   killGracePeriodMs: z.number().int().min(0).optional(),
   printWaitCeilingS: z.number().int().min(1).optional(),
   printBackgroundMode: PrintBackgroundModeSchema.optional(),

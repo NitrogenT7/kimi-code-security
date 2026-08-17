@@ -14,6 +14,8 @@ export const SessionErrors = {
     SESSION_FORK_ACTIVE_TURN: 'session.fork_active_turn',
     SESSION_UNDO_UNAVAILABLE: 'session.undo_unavailable',
     SESSION_INIT_FAILED: 'session.init_failed',
+    SESSION_TITLE_EMPTY: 'session.title_empty',
+    SESSION_STATE_NOT_FOUND: 'session.state_not_found',
   },
   retryable: ['session.fork_active_turn'],
 } as const satisfies ErrorDomain;

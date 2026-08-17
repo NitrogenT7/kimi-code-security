@@ -22,6 +22,7 @@
 import {
   ErrorCodes,
   KimiError,
+  type KimiErrorCode,
   loadRuntimeConfigSafe,
   mergeConfigPatch,
   readConfigFileForUpdate,
@@ -152,11 +153,15 @@ import {
   ISessionMetadata,
   ISessionNotepadService,
   ISessionSkillCatalog,
+  ISessionWorkspaceContext,
   ISessionWorkspaceCommandService,
   ISessionExportService,
   IAgentContextMemoryService,
   IAgentContextSizeService,
+  ISkillDiscovery,
   IWorkspaceRegistry,
+  MERGE_ALL_AVAILABLE_SKILLS_SECTION,
+  projectRoots,
   type IAgentScopeHandle,
   type ISessionScopeHandle,
   type Interaction,
@@ -166,12 +171,104 @@ import {
   encodeWorkDirKey,
   workspaceRootKey,
 } from '@moonshot-ai/agent-core-v2/_base/utils/workdir-slug';
+import {
+  estimateTokensForMessages,
+} from '@moonshot-ai/agent-core-v2/_base/utils/tokens';
+import {
+  escapeXml,
+  escapeXmlAttr,
+} from '@moonshot-ai/agent-core-v2/_base/utils/xml-escape';
+import { USER_PROMPT_ORIGIN, type ContextMessage } from '@moonshot-ai/agent-core-v2';
+import { isError2 } from '@moonshot-ai/agent-core-v2/_base/errors/errors';
+import {
+  GlobalMcpConfigService,
+} from '@moonshot-ai/agent-core-v2/agent/mcp/global-config';
+import { AlreadyAuthorizedError, McpOAuthService } from '@moonshot-ai/agent-core-v2/agent/mcp/oauth/service';
+import { McpConnectionManager } from '@moonshot-ai/agent-core-v2/agent/mcp/connection-manager';
+import { createMcpOAuthStore } from '@moonshot-ai/agent-core-v2/agent/mcp/oauth/store';
+import type { McpServerConfig, McpRemoteServerConfig } from '@moonshot-ai/agent-core-v2/agent/mcp/config-schema';
+import { IAtomicDocumentStore } from '@moonshot-ai/agent-core-v2';
+import type {
+  BeginGlobalMcpServerAuthResult,
+  CancelGlobalMcpServerAuthPayload,
+  CompleteGlobalMcpServerAuthPayload,
+  GlobalMcpServerConfig,
+  GlobalMcpServerNamePayload,
+  GlobalMcpServerTestResult,
+  PutGlobalMcpServerPayload,
+  TestGlobalMcpServerPayload,
+} from '@moonshot-ai/agent-core';
 
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 
+import type { Kaos } from '@moonshot-ai/kaos';
+
 type SessionScopedPayload<P> = P & { readonly sessionId: string };
 type SessionAgentPayload<P> = SessionScopedPayload<P & { readonly agentId: string }>;
+
+const IMPORT_CONTEXT_GUIDANCE =
+  'This is a prior conversation history that may be relevant to the current session. ' +
+  'Please review this context and use it to inform your responses.';
+
+const DEFAULT_GLOBAL_MCP_AUTH_TIMEOUT_MS = 5 * 60 * 1000;
+
+function isPromiseLike(value: unknown): value is Promise<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === 'function'
+  );
+}
+
+function requireRemoteMcpServer(server: GlobalMcpServerConfig): McpRemoteServerConfig {
+  const config = mcpConfigWithoutName(server);
+  if (config.transport !== 'stdio') return config;
+  throw new KimiError(
+    ErrorCodes.REQUEST_INVALID,
+    `MCP server "${server.name}" does not use a remote transport`,
+  );
+}
+
+function requireOAuthMcpServer(server: GlobalMcpServerConfig): McpRemoteServerConfig {
+  const config = requireRemoteMcpServer(server);
+  if (config.bearerTokenEnvVar !== undefined) {
+    throw new KimiError(
+      ErrorCodes.REQUEST_INVALID,
+      `MCP server "${server.name}" uses a static bearer token`,
+    );
+  }
+  // v1 additionally required `auth: 'oauth'` when static headers were set;
+  // the v2 config schema has no `auth` field, so static headers alone do not
+  // disqualify the OAuth flow here.
+  return config;
+}
+
+function mcpConfigWithoutName(server: GlobalMcpServerConfig): McpServerConfig {
+  const { name: _name, ...config } = server;
+  return config;
+}
+
+function standaloneMcpTestResult(
+  name: string,
+  manager: McpConnectionManager,
+): GlobalMcpServerTestResult {
+  const entry = manager.get(name);
+  if (entry?.status !== 'connected') {
+    return {
+      success: false,
+      output:
+        entry?.error ?? `MCP server "${name}" finished with status ${entry?.status ?? 'unknown'}`,
+    };
+  }
+  const tools = manager.resolved(name)?.rawTools ?? [];
+  const lines = [
+    `Connected to MCP server "${name}".`,
+    `Available tools: ${tools.length}`,
+    ...tools.map((tool) => `- ${tool.name}${tool.description ? `: ${tool.description}` : ''}`),
+  ];
+  return { success: true, output: lines.join('\n') };
+}
 
 type AgentConfigData = ReturnType<CoreAPI['getConfig']>;
 type PermissionData = ReturnType<CoreAPI['getPermission']>;
@@ -199,12 +296,53 @@ export class V2CoreBridge {
   private readonly sdk: Promise<RPCMethods<SDKAPI>>;
   private readonly sessionsWired = new Set<string>();
   private readonly pendingInteractions = new Set<string>();
+  /**
+   * Per-create kaos handoff: `V2SDKRpcClient.createSessionWithKaos` parks the
+   * host-supplied kaos here right before dispatching `createSession` through
+   * the RPC pair, and the bridge consumes it exactly once while materializing
+   * that session. The v1 CoreAPI payload type carries no kaos field (it is an
+   * in-process-only object), hence the side channel.
+   */
+  private pendingSessionKaos: Kaos | undefined;
 
   constructor(
     coreRpc: CoreRPCClient,
     private readonly options: V2CoreBridgeOptions,
   ) {
-    this.sdk = coreRpc(this);
+    // v2 services throw `Error2` with v2 error codes; the RPC pair's error
+    // serializer only understands v1 `KimiError` and would collapse anything
+    // else to `internal`. Wrap every bridge method so `Error2`s cross the RPC
+    // boundary as `KimiError`s with their code preserved. (Codes that exist
+    // only in v2's registry map to `internal` — same v1 code string wins.)
+    // Built as an own-properties object because the RPC pair binds through
+    // `getOwnPropertyDescriptor`, which bypasses a Proxy's get trap.
+    const self = this;
+    const errorTranslating: Record<string, unknown> = {};
+    let proto: object | null = Object.getPrototypeOf(this);
+    while (proto !== null && proto !== Object.prototype) {
+      for (const key of Object.getOwnPropertyNames(proto)) {
+        if (key === 'constructor' || Object.hasOwn(errorTranslating, key)) continue;
+        const descriptor = Object.getOwnPropertyDescriptor(proto, key);
+        if (typeof descriptor?.value !== 'function') continue;
+        const method = descriptor.value as (...args: unknown[]) => unknown;
+        errorTranslating[key] = (...args: unknown[]): unknown => {
+          try {
+            const result = method.apply(self, args);
+            if (!isPromiseLike(result)) return result;
+            return result.then(
+              (v) => v,
+              (error: unknown) => {
+                throw self.toKimiError(error);
+              },
+            );
+          } catch (error) {
+            throw self.toKimiError(error);
+          }
+        };
+      }
+      proto = Object.getPrototypeOf(proto);
+    }
+    this.sdk = coreRpc(errorTranslating as unknown as V2CoreBridge);
     const lifecycle = this.app.get(ISessionLifecycleService);
     for (const session of lifecycle.list()) {
       this.wireSession(session);
@@ -215,8 +353,53 @@ export class V2CoreBridge {
     });
   }
 
+  private toKimiError(error: unknown): unknown {
+    if (error instanceof KimiError) return error;
+    if (isError2(error)) {
+      const known = Object.values(ErrorCodes).includes(error.code as never);
+      return new KimiError(
+        known ? (error.code as KimiErrorCode) : ErrorCodes.INTERNAL,
+        error.message,
+        { details: error.details === undefined ? undefined : { ...error.details } },
+      );
+    }
+    return error;
+  }
+
   private get app(): Scope['accessor'] {
     return (this.options.app as Scope).accessor;
+  }
+
+  /**
+   * Park a host-supplied kaos for the next `createSession` dispatch (see
+   * {@link pendingSessionKaos}). Called by `V2SDKRpcClient` immediately
+   * before it forwards the create call.
+   */
+  setSessionKaos(kaos: Kaos | undefined): void {
+    this.pendingSessionKaos = kaos;
+  }
+
+  private globalMcpConfigStore: GlobalMcpConfigService | undefined;
+  private globalMcpOAuthService: McpOAuthService | undefined;
+  private readonly globalMcpOAuthFlows = new Map<
+    string,
+    { readonly flow: Awaited<ReturnType<McpOAuthService['beginAuthorization']>> }
+  >();
+
+  private globalMcpConfig(): GlobalMcpConfigService {
+    if (this.globalMcpConfigStore === undefined) {
+      this.globalMcpConfigStore = new GlobalMcpConfigService(this.options.homeDir);
+    }
+    return this.globalMcpConfigStore;
+  }
+
+  private globalMcpOAuth(): McpOAuthService {
+    if (this.globalMcpOAuthService === undefined) {
+      this.globalMcpOAuthService = new McpOAuthService({
+        store: createMcpOAuthStore(this.app.get(IAtomicDocumentStore)),
+      });
+    }
+    return this.globalMcpOAuthService;
   }
 
   // -------------------------------------------------------------------------
@@ -313,6 +496,7 @@ export class V2CoreBridge {
   private async toSessionSummary(session: ISessionScopeHandle): Promise<SessionSummary> {
     const ctx = session.accessor.get(ISessionContext);
     const meta = await session.accessor.get(ISessionMetadata).read();
+    const additionalDirs = session.accessor.get(ISessionWorkspaceContext).additionalDirs;
     return {
       id: session.id,
       title: meta.title,
@@ -323,6 +507,7 @@ export class V2CoreBridge {
       updatedAt: meta.updatedAt,
       archived: meta.archived,
       metadata: meta.custom as SessionSummary['metadata'],
+      ...(additionalDirs.length > 0 ? { additionalDirs: [...additionalDirs] } : {}),
     };
   }
 
@@ -439,7 +624,9 @@ export class V2CoreBridge {
       workDir: payload.workDir,
       additionalDirs: payload.additionalDirs,
       mcpServers: payload.mcpServers,
+      kaos: this.pendingSessionKaos,
     });
+    this.pendingSessionKaos = undefined;
     this.wireSession(session);
     const agent = await ensureMainAgent(session);
     const profile = agent.accessor.get(IAgentProfileService);
@@ -465,9 +652,8 @@ export class V2CoreBridge {
     await this.app.get(ISessionLifecycleService).archive(payload.sessionId);
   }
 
-  async deleteSession(_payload: DeleteSessionPayload): Promise<void> {
-    // v2 has no session-delete capability (plan/v2-parity-gap.md P0-4).
-    notImplemented('deleteSession');
+  async deleteSession(payload: DeleteSessionPayload): Promise<void> {
+    await this.app.get(ISessionLifecycleService).delete(payload.sessionId);
   }
 
   async resumeSession(payload: ResumeSessionPayload): Promise<ResumeSessionResult> {
@@ -500,8 +686,17 @@ export class V2CoreBridge {
   }
 
   async forkSession(payload: ForkSessionPayload): Promise<ResumeSessionResult> {
-    // v2 fork copies the full wire; v1's turnIndex truncation has no v2
-    // counterpart yet (plan/v2-parity-gap.md P0-3).
+    // v2 fork copies the full wire. v1's `turnIndex` truncation (per-turn
+    // wire slicing + orphaned-subagent cleanup) has no v2 counterpart yet
+    // (plan/v2-parity-gap.md P0-3) — reject explicitly instead of silently
+    // forking the whole history when the caller asked for a truncation point.
+    if (payload.turnIndex !== undefined) {
+      throw new KimiError(
+        ErrorCodes.NOT_IMPLEMENTED,
+        'forkSession with turnIndex is not yet supported on the v2 engine; ' +
+          'fork the full history instead (omit turnIndex)',
+      );
+    }
     const session = await this.app.get(ISessionLifecycleService).fork({
       sourceSessionId: payload.sessionId,
       newSessionId: payload.id,
@@ -567,19 +762,36 @@ export class V2CoreBridge {
   // -------------------------------------------------------------------------
 
   async renameSession(payload: SessionScopedPayload<RenameSessionPayload>): Promise<void> {
-    await this.session(payload.sessionId).accessor.get(ISessionMetadata).setTitle(payload.title);
+    const lifecycle = this.app.get(ISessionLifecycleService);
+    await lifecycle.patchSessionMeta({ sessionId: payload.sessionId, title: payload.title });
   }
 
   async updateSessionMetadata(
     payload: SessionScopedPayload<UpdateSessionMetadataPayload>,
   ): Promise<void> {
-    await this.session(payload.sessionId).accessor.get(ISessionMetadata).update({
-      custom: payload.metadata as Record<string, unknown>,
+    const lifecycle = this.app.get(ISessionLifecycleService);
+    // v1 semantics: the SDK merges the patch over the existing custom map
+    // (rpc.ts updateSessionMetadata), so the incoming metadata is already the
+    // full custom map — pass it through as-is.
+    await lifecycle.patchSessionMeta({
+      sessionId: payload.sessionId,
+      custom: (payload.metadata as { custom?: Record<string, unknown> }).custom,
     });
   }
 
   async getSessionMetadata(payload: SessionScopedPayload<EmptyPayload>): Promise<SessionMeta> {
-    const meta = await this.session(payload.sessionId).accessor.get(ISessionMetadata).read();
+    // Live-or-disk read (lifecycle.readSessionMeta) so read-modify-write
+    // metadata flows (e.g. updateSessionMetadata's merge) work on closed
+    // sessions too — v1 semantics where the store reads state.json directly.
+    const meta = await this.app
+      .get(ISessionLifecycleService)
+      .readSessionMeta(payload.sessionId);
+    if (meta === undefined) {
+      throw new KimiError(
+        ErrorCodes.SESSION_NOT_FOUND,
+        `Session "${payload.sessionId}" was not found`,
+      );
+    }
     return this.toSessionMeta(meta);
   }
 
@@ -810,9 +1022,66 @@ export class V2CoreBridge {
     this.agent(payload.sessionId, payload.agentId).accessor.get(IAgentContextMemoryService).clear();
   }
 
-  importContext(_payload: SessionAgentPayload<ImportContextPayload>): void {
-    // No v2 counterpart (plan/v2-parity-gap.md P0-2).
-    notImplemented('importContext');
+  importContext(payload: SessionAgentPayload<ImportContextPayload>): void {
+    // v1 parity (agent/context importContext): raw host-supplied text wrapped
+    // in an <imported_context> envelope preceded by a system-guidance block,
+    // appended to the agent's context memory as a user message. No file I/O.
+    const content = payload.content;
+    if (content.trim().length === 0) {
+      throw new KimiError(ErrorCodes.REQUEST_INVALID, 'Imported context cannot be empty', {
+        details: { reason: 'import_content_empty' },
+      });
+    }
+    const source = payload.source.trim();
+    if (source.length === 0) {
+      throw new KimiError(ErrorCodes.REQUEST_INVALID, 'Imported context source cannot be empty', {
+        details: { reason: 'import_source_empty' },
+      });
+    }
+    const agent = this.agent(payload.sessionId, payload.agentId);
+    const message: ContextMessage = {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text:
+            `<system>The user has imported context from ${escapeXml(source)}. ` +
+            `${IMPORT_CONTEXT_GUIDANCE}</system>`,
+        },
+        {
+          type: 'text',
+          text:
+            `<imported_context source="${escapeXmlAttr(source)}">\n` +
+            `${content}\n</imported_context>`,
+        },
+      ],
+      toolCalls: [],
+      origin: USER_PROMPT_ORIGIN,
+    };
+    const contextSize = agent.accessor.get(IAgentContextSizeService).get();
+    const importTokenCount = estimateTokensForMessages([message]);
+    const totalTokenCount = contextSize.size + importTokenCount;
+    const maxContextTokens =
+      agent.accessor.get(IAgentProfileService).getModelCapabilities().max_context_tokens;
+    if (maxContextTokens > 0 && totalTokenCount > maxContextTokens) {
+      throw new KimiError(
+        ErrorCodes.CONTEXT_OVERFLOW,
+        'Imported content is too large for the current model context ' +
+          `(~${String(importTokenCount)} import tokens + ${String(contextSize.size)} existing ` +
+          `= ~${String(totalTokenCount)} total > ${String(maxContextTokens)} token limit). ` +
+          'Please import a smaller file or session.',
+        {
+          details: {
+            reason: 'import_context_overflow',
+            importTokenCount,
+            currentTokenCount: contextSize.size,
+            totalTokenCount,
+            maxContextTokens,
+          },
+        },
+      );
+    }
+    agent.accessor.get(IAgentContextMemoryService).append(message);
   }
 
   async activateSkill(payload: SessionAgentPayload<{ name: string; args?: string }>): Promise<void> {
@@ -1039,47 +1308,119 @@ export class V2CoreBridge {
     return loadRuntimeConfigSafe(this.options.configPath).config;
   }
 
-  listGlobalMcpServers(): never {
-    // v2 has no global MCP CRUD RPC surface (plan/v2-parity-gap.md P0-1).
-    return notImplemented('listGlobalMcpServers');
+  listGlobalMcpServers(): Promise<readonly GlobalMcpServerConfig[]> {
+    return this.globalMcpConfig().list();
   }
 
-  addGlobalMcpServer(): never {
-    return notImplemented('addGlobalMcpServer');
+  addGlobalMcpServer(payload: PutGlobalMcpServerPayload): Promise<readonly GlobalMcpServerConfig[]> {
+    return this.globalMcpConfig().add(payload.server);
   }
 
-  updateGlobalMcpServer(): never {
-    return notImplemented('updateGlobalMcpServer');
+  updateGlobalMcpServer(
+    payload: PutGlobalMcpServerPayload,
+  ): Promise<readonly GlobalMcpServerConfig[]> {
+    return this.globalMcpConfig().update(payload.server);
   }
 
-  removeGlobalMcpServer(): never {
-    return notImplemented('removeGlobalMcpServer');
+  removeGlobalMcpServer(
+    payload: GlobalMcpServerNamePayload,
+  ): Promise<readonly GlobalMcpServerConfig[]> {
+    return this.globalMcpConfig().remove(payload.name);
   }
 
-  beginGlobalMcpServerAuth(): never {
-    return notImplemented('beginGlobalMcpServerAuth');
+  async beginGlobalMcpServerAuth(
+    payload: GlobalMcpServerNamePayload,
+  ): Promise<BeginGlobalMcpServerAuthResult> {
+    // v1 parity: OAuth flows only make sense for remote (http/sse) servers
+    // without static credentials.
+    const server = await this.globalMcpConfig().get(payload.name);
+    const config = requireOAuthMcpServer(server);
+    try {
+      const flow = await this.globalMcpOAuth().beginAuthorization(server.name, config.url);
+      const flowId = randomUUID();
+      this.globalMcpOAuthFlows.set(flowId, { flow });
+      return {
+        status: 'authorization-required',
+        flowId,
+        authorizationUrl: flow.authorizationUrl.toString(),
+      };
+    } catch (error) {
+      if (error instanceof AlreadyAuthorizedError) {
+        return { status: 'already-authorized' };
+      }
+      throw error;
+    }
   }
 
-  completeGlobalMcpServerAuth(): never {
-    return notImplemented('completeGlobalMcpServerAuth');
+  async completeGlobalMcpServerAuth(
+    payload: CompleteGlobalMcpServerAuthPayload,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<void> {
+    const active = this.globalMcpOAuthFlows.get(payload.flowId);
+    if (active === undefined) {
+      throw new KimiError(ErrorCodes.REQUEST_INVALID, `Unknown MCP OAuth flow: ${payload.flowId}`);
+    }
+    try {
+      await active.flow.complete({
+        signal: options.signal,
+        timeoutMs: payload.timeoutMs ?? DEFAULT_GLOBAL_MCP_AUTH_TIMEOUT_MS,
+      });
+    } finally {
+      this.globalMcpOAuthFlows.delete(payload.flowId);
+    }
   }
 
-  cancelGlobalMcpServerAuth(): never {
-    return notImplemented('cancelGlobalMcpServerAuth');
+  async cancelGlobalMcpServerAuth(payload: CancelGlobalMcpServerAuthPayload): Promise<void> {
+    const active = this.globalMcpOAuthFlows.get(payload.flowId);
+    if (active === undefined) return;
+    this.globalMcpOAuthFlows.delete(payload.flowId);
+    await active.flow.cancel();
   }
 
-  resetGlobalMcpServerAuth(): never {
-    return notImplemented('resetGlobalMcpServerAuth');
+  async resetGlobalMcpServerAuth(payload: GlobalMcpServerNamePayload): Promise<void> {
+    const server = await this.globalMcpConfig().get(payload.name);
+    const config = requireRemoteMcpServer(server);
+    this.globalMcpOAuth().invalidate(server.name, config.url);
   }
 
-  testGlobalMcpServer(): never {
-    return notImplemented('testGlobalMcpServer');
+  async testGlobalMcpServer(payload: TestGlobalMcpServerPayload): Promise<GlobalMcpServerTestResult> {
+    // v1 parity: ad-hoc connection attempt in a throwaway manager.
+    const server = await this.globalMcpConfig().get(payload.name);
+    const config = mcpConfigWithoutName(server);
+    const manager = new McpConnectionManager({
+      stdioCwd: payload.cwd,
+      oauthService: this.globalMcpOAuth(),
+    });
+    try {
+      await manager.connectAll({ [server.name]: config });
+      return standaloneMcpTestResult(server.name, manager);
+    } finally {
+      await manager.shutdown();
+    }
   }
 
   async listWorkspaceSkills(
-    _payload: ListWorkspaceSkillsPayload,
+    payload: ListWorkspaceSkillsPayload,
   ): Promise<readonly SkillSummary[]> {
-    notImplemented('listWorkspaceSkills');
+    // v1 parity (core-impl listWorkspaceSkills): resolve the workspace skill
+    // roots without materializing a Session — the App-scoped filesystem
+    // discovery backend scans them directly.
+    const workDir = payload.workDir?.trim() ?? '';
+    if (workDir.length === 0) {
+      throw new KimiError(
+        ErrorCodes.REQUEST_WORK_DIR_REQUIRED,
+        'listWorkspaceSkills requires workDir',
+      );
+    }
+    const config = this.app.get(IConfigService);
+    await config.ready;
+    const mergeAllAvailableSkills =
+      config.get<boolean>(MERGE_ALL_AVAILABLE_SKILLS_SECTION) ?? true;
+    const discovery = this.app.get(ISkillDiscovery);
+    const result = await discovery.discover(
+      await projectRoots(resolve(workDir), { mergeAllAvailableSkills }),
+    );
+    return result.skills.map(summarizeSkill);
   }
 
   listPlugins(_payload: EmptyPayload): Promise<readonly PluginSummary[]> {

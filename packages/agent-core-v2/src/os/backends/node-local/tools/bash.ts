@@ -204,6 +204,17 @@ export class BashTool implements BuiltinTool<BashInput> {
     return resolveAgentTaskConfig(this.config)?.bashAutoBackgroundOnTimeout ?? true;
   }
 
+  /**
+   * Default deadline for background tasks when the call omits `timeout`, and
+   * the re-armed deadline for foreground commands moved to the background.
+   * `undefined` arms no timer at all (`background.bash_task_timeout_s = 0`).
+   */
+  private backgroundTimeoutMs(): number | undefined {
+    const timeoutS =
+      resolveAgentTaskConfig(this.config)?.bashTaskTimeoutS ?? DEFAULT_BACKGROUND_TIMEOUT_S;
+    return timeoutS === 0 ? undefined : timeoutS * MS_PER_SECOND;
+  }
+
   get description(): string {
     if (!this.allowBackground()) return withoutBackgroundDescription(this.renderedDescription);
     if (!this.autoBackgroundOnTimeout()) {
@@ -304,7 +315,7 @@ export class BashTool implements BuiltinTool<BashInput> {
         {
           detached: startsInBackground,
           timeoutMs,
-          detachTimeoutMs: DEFAULT_BACKGROUND_TIMEOUT_S * MS_PER_SECOND,
+          detachTimeoutMs: this.backgroundTimeoutMs(),
           autoBackgroundOnTimeout: this.allowBackground() && this.autoBackgroundOnTimeout(),
           signal: startsInBackground ? undefined : signal,
         },

@@ -8,6 +8,7 @@ import { IConfigRegistry, IConfigService } from '#/app/config/config';
 import { ConfigRegistry, ConfigService } from '#/app/config/configService';
 import {
   EXPERIMENTAL_SECTION,
+  experimentalFromToml,
   IFlagService,
 } from '#/app/flag/flag';
 import { IFlagRegistry, type FlagDefinitionInput } from '#/app/flag/flagRegistry';
@@ -115,6 +116,22 @@ describe('FlagService', () => {
     expect(state?.enabled).toBe(false);
     expect(state?.source).toBe('config');
     expect(state?.configValue).toBe(false);
+  });
+
+  it('folds a snake_case config key onto its kebab-case flag id', async () => {
+    // v1 config.toml spells ids in snake_case; v2 registry ids are kebab-case.
+    // `experimentalFromToml` runs on the disk-load path (transformTomlData) and
+    // folds snake keys onto their kebab spelling so old configs keep working.
+    expect(experimentalFromToml({ retention_plan_compaction: true })).toEqual({
+      'retention-plan-compaction': true,
+    });
+    // An explicit kebab key is preserved; a key that already has a kebab twin
+    // in the same block never overwrites it.
+    expect(experimentalFromToml({ 'retention-plan-compaction': false })).toEqual({
+      'retention-plan-compaction': false,
+    });
+    // Unknown keys pass through untouched (kept for round-trip).
+    expect(experimentalFromToml({ typo_key: true })).toEqual({ 'typo-key': true });
   });
 
   it('lets per-feature env override config', async () => {

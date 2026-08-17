@@ -22,6 +22,11 @@ export interface SessionArchivedPayload {
   readonly sessionId: string;
 }
 
+/** Payload of `event.session.deleted` on the global bus. */
+export interface SessionDeletedPayload {
+  readonly sessionId: string;
+}
+
 /** Payload of `session.meta.updated` on the global bus (`agent/rpc/prompt-metadata.ts`). */
 export interface SessionMetaUpdatedPayload {
   readonly agentId: string;
@@ -47,6 +52,7 @@ export interface KlientEventPayloads {
   'models.changed': ModelsChangedEvent;
   'plugins.reloaded': ReloadSummary;
   'session.archived': SessionArchivedPayload;
+  'session.deleted': SessionDeletedPayload;
   'session.metaUpdated': SessionMetaUpdatedPayload;
   'catalog.changed': CatalogChangedPayload;
 }
@@ -125,6 +131,11 @@ export const globalEvents = {
   'session.archived': {
     kind: 'bus',
     type: 'event.session.archived',
+    schema: z.object({ sessionId: z.string() }),
+  },
+  'session.deleted': {
+    kind: 'bus',
+    type: 'event.session.deleted',
     schema: z.object({ sessionId: z.string() }),
   },
   'session.metaUpdated': {

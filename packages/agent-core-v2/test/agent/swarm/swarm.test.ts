@@ -159,7 +159,7 @@ describe('AgentSwarmService', () => {
     expect(swarm.isActive).toBe(true);
     expect(swarm.activeVariant).toBe('audit');
     const context = ix.get(IAgentContextMemoryService);
-    const reminder = context.messages.at(-1);
+    const reminder = context.get().at(-1);
     expect(reminder?.origin).toEqual({ kind: 'injection', variant: 'swarm_mode' });
     expect(JSON.stringify(reminder)).toContain('Swarm Audit Mode');
     expect(JSON.stringify(reminder)).toContain('Blind spots');
@@ -173,7 +173,7 @@ describe('AgentSwarmService', () => {
     swarm.enter('manual');
 
     const context = ix.get(IAgentContextMemoryService);
-    const reminder = context.messages.at(-1);
+    const reminder = context.get().at(-1);
     expect(JSON.stringify(reminder)).toContain('agent swarm');
     expect(JSON.stringify(reminder)).not.toContain('Swarm Audit Mode');
   });

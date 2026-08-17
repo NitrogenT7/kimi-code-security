@@ -135,6 +135,11 @@ export async function executeModelSkill(
   if (skill === undefined) {
     return errorResult(`Skill "${args.skill}" not found in the current skill listing.`);
   }
+  if (!skillService.isSkillAllowed(skill.name)) {
+    // v1-parity hard gate: outside the sandbox the skill must not leak that it
+    // exists — same message as the not-found branch.
+    return errorResult(`Skill "${args.skill}" not found in the current skill listing.`);
+  }
   if (skill.metadata.disableModelInvocation === true) {
     return errorResult(
       `Skill "${args.skill}" can only be triggered by the user (model invocation is disabled).`,

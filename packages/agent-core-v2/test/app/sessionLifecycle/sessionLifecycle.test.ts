@@ -38,6 +38,7 @@ import { ISessionSkillCatalog } from '#/session/sessionSkillCatalog/skillCatalog
 import { ISessionIndex, type SessionSummary } from '#/app/sessionIndex/sessionIndex';
 import { IAppendLogStore } from '#/persistence/interface/appendLogStore';
 import { IAtomicDocumentStore } from '#/persistence/interface/atomicDocumentStore';
+import { IQueryStore } from '#/persistence/interface/queryStore';
 import { IWorkspaceLocalConfigService } from '#/app/workspaceLocalConfig/workspaceLocalConfig';
 import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
 import { SessionWorkspaceContextService } from '#/session/workspaceContext/workspaceContextService';
@@ -257,6 +258,28 @@ function appendLogStoreStub(): IAppendLogStore {
   };
 }
 
+function queryStoreStub() {
+  const deleted: string[] = [];
+  const stub: IQueryStore = {
+    _serviceBrand: undefined,
+    put: () => Promise.resolve(),
+    batch: () => Promise.resolve(),
+    delete: (_collection: string, key: string) => {
+      deleted.push(key);
+      return Promise.resolve();
+    },
+    get: () => Promise.resolve(undefined),
+    query: () => {
+      throw new Error('not implemented');
+    },
+    ensureIndex: () => Promise.resolve(),
+    getCheckpoint: () => Promise.resolve(undefined),
+    setCheckpoint: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+  };
+  return { stub, deleted };
+}
+
 function atomicDocumentStoreStub(): IAtomicDocumentStore {
   return {
     _serviceBrand: undefined,
@@ -447,6 +470,7 @@ describe('SessionLifecycleService', () => {
       stubPair(ISessionIndex, sessionIndexStub()),
       stubPair(IAppendLogStore, appendLogStoreStub()),
       stubPair(IAtomicDocumentStore, atomicDocumentStoreStub()),
+      stubPair(IQueryStore, queryStoreStub().stub),
       stubPair(IEventService, eventStub()),
       stubPair(IAgentLifecycleService, agentLifecycleStub()),
       stubPair(ISessionMcpService, sessionMcpServiceStub()),
@@ -712,6 +736,214 @@ describe('SessionLifecycleService', () => {
 
     expect(restored?.id).toBe('s1');
     expect(archived).toBe(false);
+  });
+
+  describe('patchSessionMeta', () => {
+    it('patches the title through sessionMetadata on a live session', async () => {
+      const setTitle = vi.fn(() => Promise.resolve());
+      const svc = build([
+        stubPair(ISessionMetadata, {
+          ...metadataStub(),
+          setTitle,
+          read: () =>
+            Promise.resolve({ custom: {} } as Awaited<ReturnType<ISessionMetadata['read']>>),
+          update: () => Promise.resolve(),
+        }),
+      ]);
+      await svc.create({ sessionId: 's1', workDir: '/tmp/proj' });
+
+      await svc.patchSessionMeta({ sessionId: 's1', title: 'renamed' });
+
+      expect(setTitle).toHaveBeenCalledWith('renamed');
+    });
+
+    it('patches title and merges custom on a closed session via state.json', async () => {
+      const root = await makeTmpRoot();
+      const stored = new Map<string, unknown>();
+      const { stub: queryStore, deleted } = queryStoreStub();
+      const svc = build([
+        stubPair(IBootstrapService, tmpBootstrapStub(root)),
+        stubPair(ISessionIndex, sessionIndexWithSummary('s1', '/tmp/proj')),
+        stubPair(IQueryStore, queryStore),
+        stubPair(IAtomicDocumentStore, {
+          ...atomicDocumentStoreStub(),
+          get: (_scope: string, key: string) =>
+            Promise.resolve(key === 'state.json' ? stored.get('state.json') : undefined),
+          set: (_scope: string, key: string, value: unknown) => {
+            stored.set(key, value);
+            return Promise.resolve();
+          },
+        } as IAtomicDocumentStore),
+      ]);
+      stored.set('state.json', {
+        id: 's1',
+        version: 2,
+        title: 'old',
+        cwd: '/tmp/proj',
+        createdAt: 1,
+        updatedAt: 1,
+        archived: false,
+        custom: { keep: 'yes' },
+      });
+
+      await svc.patchSessionMeta({ sessionId: 's1', title: 'renamed', custom: { pin: true } });
+
+      expect(stored.get('state.json')).toMatchObject({
+        title: 'renamed',
+        isCustomTitle: true,
+        custom: { keep: 'yes', pin: true },
+      });
+      expect(deleted).toEqual(['s1']);
+    });
+
+    it('throws SESSION_NOT_FOUND when the session is neither live nor persisted', async () => {
+      const svc = build();
+      await expect(svc.patchSessionMeta({ sessionId: 'ghost', title: 'x' })).rejects.toMatchObject(
+        { code: ErrorCodes.SESSION_NOT_FOUND },
+      );
+    });
+
+    it('rejects an empty title', async () => {
+      const svc = build();
+      await expect(
+        svc.patchSessionMeta({ sessionId: 's1', title: '   ' }),
+      ).rejects.toMatchObject({ code: ErrorCodes.SESSION_TITLE_EMPTY });
+    });
+  });
+
+  describe('delete', () => {
+    it('removes a persisted session directory, tombstones the v1 index, purges the read model, drops cron tasks, and publishes the event', async () => {
+      const root = await makeTmpRoot();
+      const sessionDir = join(root, 'sessions', 'ws1', 's1');
+      await mkdir(sessionDir, { recursive: true });
+      await writeFile(join(sessionDir, 'state.json'), '{}', 'utf-8');
+      const appended: { scope: string; key: string; record: unknown }[] = [];
+      const { stub: queryStore, deleted } = queryStoreStub();
+      const cron = cronStoreStub([
+        {
+          id: 'cron-a',
+          cron: '*/5 * * * *',
+          prompt: 'tick',
+          createdAt: 1,
+          tags: { [CRON_SESSION_TAG]: 's1' },
+        },
+        {
+          id: 'cron-other',
+          cron: '*/5 * * * *',
+          prompt: 'tick',
+          createdAt: 1,
+          tags: { [CRON_SESSION_TAG]: 's2' },
+        },
+      ]);
+      const published: { type: string; payload: unknown }[] = [];
+      const svc = build([
+        stubPair(IBootstrapService, tmpBootstrapStub(root)),
+        stubPair(ISessionIndex, sessionIndexWithSummary('s1', '/tmp/proj', 'ws1')),
+        stubPair(IQueryStore, queryStore),
+        stubPair(ICronTaskPersistence, cron),
+        stubPair(IAppendLogStore, {
+          ...appendLogStoreStub(),
+          append: (scope: string, key: string, record: unknown) => {
+            appended.push({ scope, key, record });
+          },
+        }),
+        stubPair(IEventService, {
+          ...eventStub(),
+          publish: (event: { type: string; payload: unknown }) => published.push(event),
+        }),
+      ]);
+
+      await svc.delete('s1');
+
+      await expect(stat(sessionDir)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(appended).toEqual([
+        { scope: '', key: 'session_index.jsonl', record: { sessionId: 's1', deleted: true } },
+      ]);
+      expect(deleted).toEqual(['s1']);
+      expect([...cron.docs.keys()]).toEqual(['cron-other']);
+      expect(published).toEqual([
+        { type: 'event.session.deleted', payload: { sessionId: 's1' } },
+      ]);
+      expect(svc.get('s1')).toBeUndefined();
+    });
+
+    it('closes a live session before deleting it', async () => {
+      const root = await makeTmpRoot();
+      const published: { type: string; payload: unknown }[] = [];
+      const svc = build([
+        stubPair(IBootstrapService, tmpBootstrapStub(root)),
+        stubPair(IEventService, {
+          ...eventStub(),
+          publish: (event: { type: string; payload: unknown }) => published.push(event),
+        }),
+      ]);
+      await svc.create({ sessionId: 's1', workDir: '/tmp/proj' });
+
+      await svc.delete('s1');
+
+      expect(svc.get('s1')).toBeUndefined();
+      expect(published.at(-1)).toEqual({
+        type: 'event.session.deleted',
+        payload: { sessionId: 's1' },
+      });
+    });
+
+    it('throws SESSION_NOT_FOUND when the session is neither live nor persisted', async () => {
+      const svc = build();
+      await expect(svc.delete('ghost')).rejects.toMatchObject({
+        code: ErrorCodes.SESSION_NOT_FOUND,
+      });
+    });
+  });
+
+  describe('readSessionMeta', () => {
+    it('reads through sessionMetadata on a live session', async () => {
+      const read = vi.fn(() =>
+        Promise.resolve({ title: 'live title', custom: { keep: 1 } } as never),
+      );
+      const svc = build([
+        stubPair(ISessionMetadata, { ...metadataStub(), read }),
+      ]);
+      await svc.create({ sessionId: 's1', workDir: '/tmp/proj' });
+
+      const meta = await svc.readSessionMeta('s1');
+
+      expect(read).toHaveBeenCalled();
+      expect(meta).toMatchObject({ title: 'live title', custom: { keep: 1 } });
+    });
+
+    it('reads state.json from disk for a closed session', async () => {
+      const root = await makeTmpRoot();
+      const stored: Record<string, unknown> = {
+        'state.json': {
+          id: 's1',
+          version: 2,
+          title: 'closed title',
+          cwd: '/tmp/proj',
+          createdAt: 1,
+          updatedAt: 1,
+          archived: false,
+          custom: { pinned: true },
+        },
+      };
+      const svc = build([
+        stubPair(IBootstrapService, tmpBootstrapStub(root)),
+        stubPair(ISessionIndex, sessionIndexWithSummary('s1', '/tmp/proj', 'ws1')),
+        stubPair(IAtomicDocumentStore, {
+          ...atomicDocumentStoreStub(),
+          get: (_scope: string, key: string) => Promise.resolve(stored[key]),
+        } as IAtomicDocumentStore),
+      ]);
+
+      const meta = await svc.readSessionMeta('s1');
+
+      expect(meta).toMatchObject({ title: 'closed title', custom: { pinned: true } });
+    });
+
+    it('resolves undefined when the session is neither live nor persisted', async () => {
+      const svc = build();
+      await expect(svc.readSessionMeta('ghost')).resolves.toBeUndefined();
+    });
   });
 
   it('forks successfully even while the source has a busy agent (crash-equivalent copy)', async () => {

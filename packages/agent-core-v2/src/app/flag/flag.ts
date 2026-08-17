@@ -14,7 +14,7 @@ import { z } from 'zod';
 
 import { createDecorator, type ServiceIdentifier } from '#/_base/di/instantiation';
 import { registerConfigSection } from '#/app/config/configSectionContributions';
-import { cloneRecord, isPlainObject, setDefined } from '#/app/config/toml';
+import { isPlainObject, setDefined } from '#/app/config/toml';
 
 import type { FlagId, FlagSurface, IFlagRegistry } from './flagRegistry';
 
@@ -28,8 +28,19 @@ export const ExperimentalConfigSchema = z.record(z.string(), z.boolean());
 
 export type ExperimentalConfig = z.infer<typeof ExperimentalConfigSchema>;
 
-export const experimentalFromToml = (rawSnake: unknown): unknown =>
-  isPlainObject(rawSnake) ? cloneRecord(rawSnake) : rawSnake;
+export const experimentalFromToml = (rawSnake: unknown): unknown => {
+  if (!isPlainObject(rawSnake)) return rawSnake;
+  // v1 config.toml spells flag ids in snake_case (`retention_plan_compaction`);
+  // v2 registry ids are kebab-case. Accept both — a snake key whose kebab
+  // form matches a registered flag id is folded onto it, otherwise preserved
+  // verbatim (unknown keys are kept so typo'd entries still round-trip).
+  const folded: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rawSnake)) {
+    const kebab = key.replaceAll('_', '-');
+    folded[Object.hasOwn(rawSnake, kebab) ? key : kebab] = value;
+  }
+  return folded;
+};
 
 export const experimentalToToml = (value: unknown, _rawSnake: unknown): unknown => {
   if (!isPlainObject(value)) return value;

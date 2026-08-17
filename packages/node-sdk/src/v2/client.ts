@@ -37,6 +37,13 @@ import {
 import { KimiAuthFacade } from '#/auth';
 import { ClientAPI, SDKRpcClientBase } from '#/rpc';
 import type { SDKRpcClientOptions } from '#/sdk-rpc-client';
+import type {
+  CreateSessionOptions,
+  ResumedSessionSummary,
+  ResumeSessionInput,
+  SessionSummary,
+} from '#/types';
+import type { Kaos } from '@moonshot-ai/kaos';
 
 import { V2CoreBridge } from './bridge';
 
@@ -91,6 +98,35 @@ export class V2SDKRpcClient extends SDKRpcClientBase {
       version: this.identity?.version,
     });
     this.ready = sdkRpc(new ClientAPI(this));
+  }
+
+  override async createSessionWithKaos(
+    input: CreateSessionOptions,
+    kaos: Kaos,
+    persistenceKaos?: Kaos,
+  ): Promise<SessionSummary> {
+    // v2 has a single persistence channel that always stays on the local
+    // registry; `persistenceKaos` is therefore ignored (v1 used it to reroute
+    // state.json / wire storage, which v2 keeps on the App-scoped stores).
+    void persistenceKaos;
+    this.bridge.setSessionKaos(kaos);
+    try {
+      return await this.createSession(input);
+    } finally {
+      this.bridge.setSessionKaos(undefined);
+    }
+  }
+
+  override async resumeSessionWithKaos(
+    input: ResumeSessionInput,
+    kaos: Kaos,
+    persistenceKaos?: Kaos,
+  ): Promise<ResumedSessionSummary> {
+    // v2 resume does not re-materialize through the kaos channel yet (see
+    // plan/v2-parity-gap.md); it falls back to the plain resume path.
+    void kaos;
+    void persistenceKaos;
+    return this.resumeSession(input);
   }
 
   private createKimiRequestHeaders(): Record<string, string> | undefined {
