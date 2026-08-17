@@ -7,6 +7,7 @@ import type {
   ApprovalResponse,
   BackgroundTaskInfo,
   CreateSessionOptions,
+  JsonObject,
   KimiHarness,
   PermissionMode,
   PromptPart,
@@ -63,6 +64,8 @@ import { CompactionComponent } from './components/dialogs/compaction';
 import { HelpPanelComponent } from './components/dialogs/help-panel';
 import { QuestionDialogComponent } from './components/dialogs/question-dialog';
 import { SessionPickerComponent, type SessionRow } from './components/dialogs/session-picker';
+import { SessionRenameDialogComponent } from './components/dialogs/session-rename-dialog';
+import { PINNED_AT_KEY, PINNED_KEY } from './utils/session-picker-rows';
 import {
   FileMentionProvider,
   type SlashAutocompleteCommand,
@@ -2872,8 +2875,83 @@ export class KimiTUI {
         onToggleScope: (selectedSessionId: string) => {
           void this.toggleSessionPickerScope(selectedSessionId);
         },
+        onRename: (session: SessionRow) => {
+          this.showSessionRenameDialog(session, options);
+        },
+        onTogglePin: (session: SessionRow) => {
+          void this.toggleSessionPinned(session, options);
+        },
       }),
     );
+  }
+
+  /**
+   * `Ctrl+R` from the session picker: swap the picker for a rename dialog
+   * prefilled with the selected session's title. On submit the session is
+   * renamed through the engine (live or on-disk) and the picker is re-fetched
+   * and re-mounted with the same row selected; on cancel the picker returns
+   * unchanged.
+   */
+  private showSessionRenameDialog(
+    session: SessionRow,
+    pickerOptions: Parameters<KimiTUI['mountSessionPicker']>[0],
+  ): void {
+    const currentTitle = (session.title ?? session.id).trim() || session.id;
+    this.state.activeDialog = 'session-rename';
+    this.mountEditorReplacement(
+      new SessionRenameDialogComponent(currentTitle, (result) => {
+        if (result.kind === 'cancel') {
+          this.mountSessionPicker({
+            ...pickerOptions,
+            initialSelectedSessionId: session.id,
+          });
+          return;
+        }
+        void (async () => {
+          try {
+            await this.harness.renameSession({ id: session.id, title: result.value });
+          } catch (error) {
+            this.showError(`Failed to rename session: ${formatErrorMessage(error)}`);
+          }
+          await this.fetchSessions();
+          this.mountSessionPicker({
+            ...pickerOptions,
+            initialSelectedSessionId: session.id,
+          });
+        })();
+      }),
+    );
+  }
+
+  /**
+   * `Ctrl+P` from the session picker: flip the selected session's pin flag in
+   * its persisted custom metadata (shallow-merged; other custom keys
+   * survive), then re-fetch and re-mount the picker with the same row
+   * selected so the row visibly moves to/from the pinned block.
+   */
+  private async toggleSessionPinned(
+    session: SessionRow,
+    pickerOptions: Parameters<KimiTUI['mountSessionPicker']>[0],
+  ): Promise<void> {
+    const pinned = session.metadata?.[PINNED_KEY] === true;
+    // Pin writes `true`; unpin writes `false` (the flag is only honored on
+    // `=== true`), avoiding key-deletion semantics the JSON patch type can't
+    // express.
+    const patch: JsonObject = pinned
+      ? { [PINNED_KEY]: false }
+      : { [PINNED_KEY]: true, [PINNED_AT_KEY]: Date.now() };
+    try {
+      await this.harness.updateSessionMetadata({ sessionId: session.id, metadata: patch });
+    } catch (error) {
+      this.showError(`Failed to ${pinned ? 'unpin' : 'pin'} session: ${formatErrorMessage(error)}`);
+      return;
+    }
+    await this.fetchSessions();
+    if (this.state.activeDialog !== 'session-picker') return;
+    this.mountSessionPicker({
+      ...pickerOptions,
+      initialSelectedSessionId: session.id,
+    });
   }
 
   private async handleSessionPickerSelect(

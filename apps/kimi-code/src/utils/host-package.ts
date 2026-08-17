@@ -4,6 +4,9 @@
  * The official CLI ships as `@moonshot-ai/kimi-code`; forked distributions
  * (for example the security-research fork installed as `ksec`) rewrite the
  * host package.json name, which is how runtime code tells them apart.
+ * When running from this repository's source tree (dev / `tsx`), the
+ * package.json keeps the official name — the fork identity there comes from
+ * the tree itself (see {@link isForkSourceTree}).
  */
 
 import { readFileSync } from 'node:fs';
@@ -31,10 +34,32 @@ export function getHostPackageName(): string | undefined {
 }
 
 /**
- * True when this build runs as a forked distribution (the host package.json
- * name is not the official package). Forks get their own branding and stay
- * out of the official update channel.
+ * True when running from the security fork's own source tree. Dev runs
+ * (`tsx src/main.ts` / `scripts/dev.mjs`) keep the official package.json name,
+ * so the install-time rewrite cannot distinguish them; the tree path is the
+ * reliable signal there.
  */
-export function isForkBuild(hostPackageName: string | undefined = getHostPackageName()): boolean {
-  return hostPackageName !== undefined && hostPackageName !== NPM_PACKAGE_NAME;
+function isForkSourceTree(): boolean {
+  const pkgPath = getHostPackageJsonPath();
+  return /kimi-code-security/i.test(pkgPath);
+}
+
+/**
+ * True when this build runs as a forked distribution — either the host
+ * package.json name was rewritten (installed fork), or the process runs from
+ * the security fork's source tree (dev). Forks get their own branding and
+ * stay out of the official update channel. An explicit override (the test
+ * seam) always wins over the tree-path signal.
+ */
+export function isForkBuild(hostPackageName?: string): boolean {
+  // An explicit caller-supplied name is authoritative (the test seam uses it
+  // to pin identity regardless of where the tree lives).
+  if (hostPackageName !== undefined) return hostPackageName !== NPM_PACKAGE_NAME;
+  // No name supplied: read the tree. The source tree of this fork keeps the
+  // official package.json name in dev, so consult the path signal first —
+  // `getHostPackageName()` alone cannot distinguish "official install" from
+  // "dev run inside the security fork's checkout".
+  if (override === undefined && isForkSourceTree()) return true;
+  const name = override ?? getHostPackageName();
+  return name !== undefined && name !== NPM_PACKAGE_NAME;
 }

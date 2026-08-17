@@ -12,3 +12,6 @@ export const FAILURE_MARK = '✗ ';
 // row that is the currently-active value. See .agents/skills/write-tui/DESIGN.md.
 export const SELECT_POINTER = '❯';
 export const CURRENT_MARK = '← current';
+// Leading marker for a pinned row in the session picker (width is accounted
+// for in the row's visible-width budget).
+export const PIN_MARK = '★ ';
