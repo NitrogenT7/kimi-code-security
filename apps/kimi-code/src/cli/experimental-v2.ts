@@ -1,15 +1,17 @@
 /**
- * Experimental agent-core-v2 engine gate for `kimi -p` (print mode).
+ * Engine gate for `kimi -p` (print mode).
  *
- * When the master switch `KIMI_CODE_EXPERIMENTAL_FLAG` is truthy, print mode
- * routes to the native agent-core-v2 runner instead of the default v1
- * harness (see `run-prompt.ts`). Read directly from the env (matching
- * `cli/update/rollout.ts`) because the CLI must not depend on the core flag
- * registry. Unset / any non-truthy value keeps the v1 harness.
+ * The v2 engine (agent-core-v2 native print runner) is the default; the
+ * legacy env switch `KIMI_CODE_EXPERIMENTAL_FLAG` still forces it on, and
+ * `KIMI_CODE_ENGINE=v1` selects the v1 harness fallback while the migration
+ * completes. Read directly from the env (matching `cli/update/rollout.ts`)
+ * because the CLI must not depend on the core flag registry.
  *
  * Note: `kimi server run` always boots kap-server (the agent-core-v2 engine
- * server) — it no longer consults this switch.
+ * server) — it never consulted any switch.
  */
+
+import { isV1EngineOverride } from '#/cli/engine';
 
 export const KIMI_V2_ENV = 'KIMI_CODE_EXPERIMENTAL_FLAG';
 
@@ -25,5 +27,6 @@ function isTruthyEnv(
 export function isKimiV2Enabled(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): boolean {
-  return isTruthyEnv(KIMI_V2_ENV, env);
+  if (isTruthyEnv(KIMI_V2_ENV, env)) return true;
+  return !isV1EngineOverride(env);
 }

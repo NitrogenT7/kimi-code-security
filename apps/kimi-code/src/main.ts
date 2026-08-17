@@ -6,7 +6,6 @@
  */
 
 import {
-  createKimiHarness,
   flushDiagnosticLogs,
   installGlobalProxyDispatcher,
   log,
@@ -23,6 +22,7 @@ import {
 } from '@moonshot-ai/kimi-telemetry';
 
 import { createProgram } from './cli/commands';
+import { createDefaultHarness } from './cli/engine';
 import { finalizeHeadlessRun } from './cli/headless-exit';
 import type { CLIOptions } from './cli/options';
 import { OptionConflictError, validateOptions } from './cli/options';
@@ -95,7 +95,7 @@ export async function handleUpgradeCommand(version: string): Promise<void> {
     withContext: withTelemetryContext,
     setContext: setTelemetryContext,
   };
-  const harness = createKimiHarness({
+  const harness = createDefaultHarness({
     homeDir: telemetryBootstrap.homeDir,
     identity: createKimiCodeHostIdentity(version),
     telemetry: telemetryClient,

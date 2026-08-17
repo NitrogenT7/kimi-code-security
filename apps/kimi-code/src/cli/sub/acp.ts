@@ -27,9 +27,10 @@ import {
   type AvailableCommand,
   type SlashCommandsSnapshot,
 } from '@moonshot-ai/acp-adapter';
-import { createKimiHarness, type Session, type SkillSummary } from '@moonshot-ai/kimi-code-sdk';
+import { type Session, type SkillSummary } from '@moonshot-ai/kimi-code-sdk';
 
 import { KIMI_CODE_HOME_ENV } from '#/constant/app';
+import { createDefaultHarness } from '#/cli/engine';
 import { createKimiCodeHostIdentity, getVersion } from '#/cli/version';
 import { buildSkillSlashCommands } from '#/tui/commands/skills';
 
@@ -50,7 +51,7 @@ export function registerAcpCommand(parent: Command): void {
         return;
       }
       const identity = createKimiCodeHostIdentity();
-      const harness = createKimiHarness({
+      const harness = createDefaultHarness({
         identity,
         uiMode: 'acp',
       });

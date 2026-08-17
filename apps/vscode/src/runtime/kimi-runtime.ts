@@ -1,5 +1,5 @@
 import {
-  createKimiHarness,
+  createKimiHarnessV2,
   type KimiHarness,
   type Session,
   type SessionSummary,
@@ -57,7 +57,9 @@ export class KimiRuntime {
     this.log = options.log;
     this.harness =
       options.harness ??
-      createKimiHarness({
+      // v2 engine is the default (mirrors the CLI's engine selection; the
+      // extension has no env escape hatch — reinstall to pin v1).
+      createKimiHarnessV2({
         ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }),
         identity: {
           userAgentProduct: "kimi-code-vscode",

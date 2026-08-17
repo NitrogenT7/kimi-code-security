@@ -24,7 +24,6 @@ import {
   catalogBaseUrl,
   catalogProviderModels,
   CatalogFetchError,
-  createKimiHarness,
   DEFAULT_CATALOG_URL,
   fetchCatalog,
   inferWireType,
@@ -36,6 +35,7 @@ import {
 } from '@moonshot-ai/kimi-code-sdk';
 import type { Command } from 'commander';
 
+import { createDefaultHarness } from '#/cli/engine';
 import { createKimiCodeHostIdentity, createKimiCodeUserAgent } from '#/cli/version';
 
 interface WritableLike {
@@ -508,7 +508,7 @@ function resolveDeps(overrides: Partial<ProviderDeps> = {}): ProviderDeps {
     getHarness:
       overrides.getHarness ??
       (() => {
-        harness ??= createKimiHarness({ identity });
+        harness ??= createDefaultHarness({ identity });
         return harness;
       }),
     stdout: overrides.stdout ?? process.stdout,
