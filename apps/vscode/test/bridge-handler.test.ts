@@ -74,7 +74,7 @@ vi.mock("vscode", () => ({
 
 vi.mock("@moonshot-ai/kimi-code-sdk", async (importOriginal) => {
   const original = await importOriginal<typeof import("@moonshot-ai/kimi-code-sdk")>();
-  return { ...original, createKimiHarness: () => host.harness };
+  return { ...original, createKimiHarnessV2: () => host.harness };
 });
 
 let bridge: BridgeHandler;

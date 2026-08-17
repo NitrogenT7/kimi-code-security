@@ -507,13 +507,13 @@ describe('SessionPickerComponent', () => {
     expect(searchOutput).not.toContain('Sessions  (type to search)');
   });
 
-  it('fuzzy-filters by session name only when typing', () => {
+  it('fuzzy-filters by title and last prompt when typing', () => {
     const component = new SessionPickerComponent({
       sessions: [
         {
           id: 'ses_alpha',
           title: 'Alpha session',
-          last_prompt: 'needleprompt do not match',
+          last_prompt: 'needleprompt matches now',
           work_dir: '/tmp/needleprompt',
           updated_at: 1,
         },
@@ -548,8 +548,10 @@ describe('SessionPickerComponent', () => {
     const output = renderPlain(component);
 
     expect(output).toContain('Search: needle');
+    // Title fuzzy-match.
     expect(output).toContain('N1e2e3d4l5e session');
-    expect(output).not.toContain('Alpha session');
+    // last_prompt is part of the searchable text now.
+    expect(output).toContain('Alpha session');
     expect(output).not.toContain('Beta session');
   });
 
@@ -708,5 +710,127 @@ describe('SessionPickerComponent', () => {
 
     expect(onToggleScope).toHaveBeenCalledOnce();
     expect(onToggleScope).toHaveBeenCalledWith('ses_beta');
+  });
+
+  it('fuzzy-filters by last prompt as well as title', () => {
+    const component = new SessionPickerComponent({
+      sessions: [
+        {
+          id: 'ses_login_bug',
+          title: 'bug hunt',
+          last_prompt: 'fix the login race condition',
+          work_dir: '/tmp/project',
+          updated_at: 1,
+        },
+        {
+          id: 'ses_other',
+          title: 'unrelated',
+          last_prompt: 'refactor exports',
+          work_dir: '/tmp/project',
+          updated_at: 2,
+        },
+      ],
+      loading: false,
+      currentSessionId: '',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    component.handleInput('l');
+    component.handleInput('o');
+    component.handleInput('g');
+    component.handleInput('i');
+    component.handleInput('n');
+
+    const output = renderPlain(component);
+    expect(output).toContain('ses_login_bug');
+    expect(output).not.toContain('ses_other');
+  });
+
+  it('renders the pin marker on pinned rows and lists the pin/rename hints when wired', () => {
+    const component = new SessionPickerComponent({
+      sessions: [
+        {
+          id: 'ses_pinned',
+          title: 'pinned one',
+          work_dir: '/tmp/project',
+          updated_at: 1,
+          metadata: { pinned: true, pinnedAt: 5 },
+        },
+        {
+          id: 'ses_plain',
+          title: 'plain one',
+          work_dir: '/tmp/project',
+          updated_at: 2,
+        },
+      ],
+      loading: false,
+      currentSessionId: '',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+      onRename: vi.fn(),
+      onTogglePin: vi.fn(),
+    });
+
+    const output = renderPlain(component);
+    expect(output).toContain('★');
+    expect(output).toContain('pinned one');
+    expect(output).toContain('Ctrl+R rename');
+    expect(output).toContain('Ctrl+P pin');
+  });
+
+  it('omits the pin/rename hints when the callbacks are not wired', () => {
+    const component = new SessionPickerComponent({
+      sessions: [
+        { id: 'ses_a', title: 'a', work_dir: '/tmp/project', updated_at: 1 },
+      ],
+      loading: false,
+      currentSessionId: '',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    const output = renderPlain(component);
+    expect(output).not.toContain('Ctrl+R rename');
+    expect(output).not.toContain('Ctrl+P pin');
+  });
+
+  it('invokes onRename with the selected session when Ctrl+R is pressed', () => {
+    const onRename = vi.fn();
+    const component = new SessionPickerComponent({
+      sessions: [
+        { id: 'ses_alpha', title: 'alpha', work_dir: '/tmp/project', updated_at: 1 },
+        { id: 'ses_beta', title: 'beta', work_dir: '/tmp/project', updated_at: 2 },
+      ],
+      loading: false,
+      currentSessionId: '',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+      onRename,
+    });
+
+    component.handleInput(''); // Ctrl+R
+
+    expect(onRename).toHaveBeenCalledOnce();
+    expect(onRename).toHaveBeenCalledWith(expect.objectContaining({ id: 'ses_alpha' }));
+  });
+
+  it('invokes onTogglePin with the selected session when Ctrl+P is pressed', () => {
+    const onTogglePin = vi.fn();
+    const component = new SessionPickerComponent({
+      sessions: [
+        { id: 'ses_alpha', title: 'alpha', work_dir: '/tmp/project', updated_at: 1 },
+      ],
+      loading: false,
+      currentSessionId: '',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+      onTogglePin,
+    });
+
+    component.handleInput(''); // Ctrl+P
+
+    expect(onTogglePin).toHaveBeenCalledOnce();
+    expect(onTogglePin).toHaveBeenCalledWith(expect.objectContaining({ id: 'ses_alpha' }));
   });
 });

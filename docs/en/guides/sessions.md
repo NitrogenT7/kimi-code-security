@@ -63,6 +63,18 @@ You can manage sessions without leaving the terminal. The following slash comman
 - **`/fork`**: fork the current session (see below).
 - **`/title <text>`** (alias `/rename`): set a session title for easier identification; without arguments, displays the current title.
 
+## Managing sessions from the session picker
+
+Inside the `/sessions` picker you can manage sessions directly, without switching to them first:
+
+- **Pin (`Ctrl+P`)**: pin the highlighted session to the top of the list (marked with a leading `★`); press again to unpin. The pin lives in the session's own metadata, so it survives terminal restarts; the most recently pinned session sorts first.
+- **Rename (`Ctrl+R`)**: open a rename input for the highlighted session, prefilled with its current title — Enter to save, `Esc` to cancel. Once renamed, the custom title is no longer overwritten by auto-generated ones.
+- **Search**: just start typing while the picker is open for a fuzzy search across session titles *and* last prompts — typing keywords from what a session was about finds it. `Backspace` deletes characters; `Esc` clears the query first, then closes the picker.
+
+::: tip
+Pinning and renaming work on closed sessions too (metadata is written to disk directly) — no need to resume a session before renaming it.
+:::
+
 ## Context compression
 
 As a conversation grows, Kimi Code CLI automatically compresses the message history when the context approaches the window limit, freeing up token space. You can also trigger compression manually at any time:

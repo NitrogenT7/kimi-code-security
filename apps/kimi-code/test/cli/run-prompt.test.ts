@@ -233,9 +233,12 @@ async function waitForAssertion(assertion: () => void): Promise<void> {
 
 describe('runPrompt', () => {
   beforeEach(() => {
-    // Pin the experimental engine flag off so the default v1 path is
-    // deterministic regardless of the host environment. Tests that exercise the
-    // experimental path opt back in explicitly with `vi.stubEnv(..., '1')`.
+    // Pin the engine to v1: this file is the behavioral spec of the v1
+    // PromptHarness path, which `runPrompt` only takes when the v2 default is
+    // explicitly overridden. Tests that exercise the v2 dispatch opt back in
+    // explicitly with `vi.stubEnv('KIMI_CODE_EXPERIMENTAL_FLAG', '1')` (which
+    // forces v2 on regardless of this pin).
+    vi.stubEnv('KIMI_CODE_ENGINE', 'v1');
     vi.stubEnv('KIMI_CODE_EXPERIMENTAL_FLAG', '');
     vi.stubEnv('KIMI_MODEL_OUTPUT_FORMAT', '');
   });

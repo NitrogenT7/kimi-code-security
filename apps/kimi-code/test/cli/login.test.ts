@@ -11,13 +11,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockLogin = vi.fn();
 
-vi.mock('@moonshot-ai/kimi-code-sdk', async () => {
-  const actual = await vi.importActual<typeof import('@moonshot-ai/kimi-code-sdk')>(
-    '@moonshot-ai/kimi-code-sdk',
-  );
+vi.mock('#/cli/engine', async () => {
+  const actual = await vi.importActual<typeof import('#/cli/engine')>('#/cli/engine');
   return {
     ...actual,
-    createKimiHarness: vi.fn(() => ({
+    createDefaultHarness: vi.fn(() => ({
       auth: {
         login: mockLogin,
       },
@@ -27,7 +25,7 @@ vi.mock('@moonshot-ai/kimi-code-sdk', async () => {
 
 vi.mock('#/utils/open-url', () => ({ openUrl: vi.fn() }));
 
-import { createKimiHarness } from '@moonshot-ai/kimi-code-sdk';
+import { createDefaultHarness } from '#/cli/engine';
 
 import { registerLoginCommand } from '#/cli/sub/login';
 import { openUrl } from '#/utils/open-url';
@@ -45,7 +43,7 @@ describe('kimi login', () => {
   beforeEach(() => {
     mockLogin.mockReset();
     vi.mocked(openUrl).mockReset();
-    vi.mocked(createKimiHarness).mockClear();
+    vi.mocked(createDefaultHarness).mockClear();
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number | string | null) => {
       throw new ExitCalled(code);
     }) as never);

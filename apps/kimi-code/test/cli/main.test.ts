@@ -77,15 +77,18 @@ vi.mock('@moonshot-ai/kimi-code-sdk', async () => {
   }
   return {
     ...actual,
-    createKimiHarness: (...args: unknown[]) => {
-      mocks.createKimiHarness(...args);
-      return mocks.harness;
-    },
     flushDiagnosticLogs: mocks.flushDiagnosticLogs,
     KimiHarness: MockKimiHarness,
     log: mocks.log,
   };
 });
+
+vi.mock('../../src/cli/engine', () => ({
+  createDefaultHarness: (...args: unknown[]) => {
+    mocks.createKimiHarness(...args);
+    return mocks.harness;
+  },
+}));
 
 vi.mock('../../src/cli/telemetry', () => ({
   createCliTelemetryBootstrap: mocks.createCliTelemetryBootstrap,

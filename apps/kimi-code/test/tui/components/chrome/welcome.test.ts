@@ -67,6 +67,11 @@ describe('WelcomeComponent', () => {
 
   beforeEach(() => {
     chalk.level = 3;
+    // The welcome banner's fork branch is keyed off the host package identity;
+    // these cases exercise the official-logo paths, so pin the identity to the
+    // official package. The tree this test file runs inside is the security
+    // fork's checkout, which `isForkBuild()` otherwise treats as a fork.
+    setHostPackageNameOverride('@moonshot-ai/kimi-code');
   });
 
   afterEach(() => {

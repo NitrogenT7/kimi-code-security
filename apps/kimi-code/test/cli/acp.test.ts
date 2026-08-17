@@ -135,14 +135,14 @@ describe('kimi acp', () => {
     // `importOriginal` preserves the other named exports (`ErrorCodes`, etc.)
     // that constant/app.ts depends on at module load.
     const loginStub = vi.fn(async () => ({ providerName: 'kimi-code' }));
-    vi.doMock(import('@moonshot-ai/kimi-code-sdk'), async (importOriginal) => {
-      const actual = await importOriginal();
+    vi.doMock(import('#/cli/engine'), async (importOriginal) => {
+      const actual = await importOriginal<typeof import('#/cli/engine')>();
       return {
         ...actual,
-        createKimiHarness: () =>
+        createDefaultHarness: () =>
           ({
             auth: { login: loginStub },
-          }) as unknown as ReturnType<typeof actual.createKimiHarness>,
+          }) as unknown as ReturnType<typeof actual.createDefaultHarness>,
       };
     });
     vi.resetModules();
@@ -159,7 +159,7 @@ describe('kimi acp', () => {
       expect(runAcpServer).not.toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(0);
     } finally {
-      vi.doUnmock('@moonshot-ai/kimi-code-sdk');
+      vi.doUnmock('#/cli/engine');
       vi.resetModules();
     }
   });

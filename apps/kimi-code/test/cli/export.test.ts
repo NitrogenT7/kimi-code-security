@@ -52,7 +52,14 @@ vi.mock('@moonshot-ai/kimi-code-sdk', async (importOriginal) => {
   return {
     ...actual,
     resolveKimiHome: mocks.resolveKimiHome,
-    createKimiHarness: (...args: unknown[]) => {
+  };
+});
+
+vi.mock('#/cli/engine', async () => {
+  const actual = await vi.importActual<typeof import('#/cli/engine')>('#/cli/engine');
+  return {
+    ...actual,
+    createDefaultHarness: (...args: unknown[]) => {
       const options = args[0] as { readonly homeDir?: string } | undefined;
       const homeDir = options?.homeDir ?? '/tmp/kimi-export-home';
       if (mocks.harnessCreatesDeviceIdOnConstruction) {
