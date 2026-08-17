@@ -18,11 +18,11 @@ import { isForkBuild } from '#/utils/host-package';
  * Fork (ksec) logo: the security fork's mark in ASCII — a blue left arm
  * (`v`, #3F47CC like the source SVG) sweeping down-right, crossed by the
  * primary-colored band (`@`) that runs from the top-right all the way down
- * into the left-leaning stem. Downsampled from the full-size ASCII original.
+ * into the left-leaning stem. Downsampled from the full-size ASCII original;
+ * the top two rows of the original (a long horizontal `v` run) read as a
+ * detached "head" in the box, so the mark starts from the arm's bend.
  */
 const KSEC_LOGO = [
-  'vvvvvvvvvvvvvvvvvvvvv     -@@@@@@@@@@@@@',
-  '        vvvvvvvvvvvv       @@@@@@@@@@@+',
   '          vvvvvvvv       @@@@@@@@@@@=',
   '            vvvv       @@@@@@@@@@@-',
   '             v        @@@@@@@@@@.',
@@ -107,8 +107,8 @@ export class WelcomeComponent implements Component {
       // Center the title/tagline against the taller fork logo.
       renderedHeaderLines = logo.map((row, index) => {
         const base = colorKsecLogoRow(row.padEnd(logoWidth));
-        if (index === 3) return base + gap + rightRow0;
-        if (index === 4) return base + gap + rightRow1;
+        if (index === 1) return base + gap + rightRow0;
+        if (index === 2) return base + gap + rightRow1;
         return base;
       });
     } else {
