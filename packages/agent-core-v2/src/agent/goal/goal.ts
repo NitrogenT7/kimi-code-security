@@ -43,6 +43,8 @@ export interface IAgentGoalService {
   ): Promise<GoalSnapshot>;
   markComplete(input?: GoalReasonInput, actor?: GoalActor): Promise<GoalSnapshot | null>;
   markBlocked(input?: GoalReasonInput, actor?: GoalActor): Promise<GoalSnapshot | null>;
+  getCompletionRetries(): number;
+  incrementCompletionRetries(): void;
 }
 
 export const IAgentGoalService = createDecorator<IAgentGoalService>('agentGoalService');

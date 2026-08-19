@@ -19,6 +19,13 @@ import { registerConfigSection } from '#/app/config/configSectionContributions';
 
 export const SUBAGENT_SECTION = 'subagent';
 
+/**
+ * Wildcard key in `[subagent.routing]`: the fallback model for subagents
+ * whose profile has no dedicated routing entry and no profile default
+ * `model`. Sits just above the caller's model in the resolution chain.
+ */
+export const SUBAGENT_ROUTING_WILDCARD = '*';
+
 export const SubagentConfigSchema = z.object({
   /** Per-run subagent timeout in milliseconds; set a large value to effectively disable the cap. */
   timeoutMs: z.number().int().min(1).optional(),
@@ -26,8 +33,9 @@ export const SubagentConfigSchema = z.object({
    * Static model routing for subagents, keyed by profile name (the value of
    * `subagent_type`). Each value must be an id from the `models` config
    * section. Resolution priority: the `model` argument on the Agent /
-   * AgentSwarm call, then this routing entry, then the profile's own default
-   * `model`, then the caller's model.
+   * AgentSwarm call, then the routing entry keyed by the profile name, then
+   * the profile's own default `model`, then the `'*'` wildcard routing
+   * entry, then the caller's model.
    */
   routing: z.record(z.string(), z.string()).optional(),
 });

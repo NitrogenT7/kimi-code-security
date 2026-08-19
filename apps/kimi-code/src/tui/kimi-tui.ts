@@ -1761,7 +1761,7 @@ export class KimiTUI {
     void this.showSessionWarnings(session);
   }
 
-  async createNewSession(): Promise<void> {
+  async createNewSession(title?: string): Promise<void> {
     if (this.state.appState.isReplaying) {
       this.showError('Cannot start a new session while history is replaying.');
       return;
@@ -1794,9 +1794,20 @@ export class KimiTUI {
     } catch {
       /* keep the new session usable even if dynamic skills fail */
     }
+    if (title !== undefined && title.length > 0) {
+      try {
+        await this.harness.renameSession({ id: session.id, title });
+      } catch {
+        /* non-fatal: the session works without a title */
+      }
+    }
     this.sessionEventHandler.startSubscription();
     this.clearTranscriptAndRedraw();
-    this.showStatus(`Started a new session (${session.id}).`);
+    this.showStatus(
+      title !== undefined && title.length > 0
+        ? `Started a new session "${title}" (${session.id}).`
+        : `Started a new session (${session.id}).`,
+    );
     void this.showSessionWarnings(session);
     void this.showConfigWarningsIfAny();
   }

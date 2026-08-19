@@ -219,6 +219,7 @@ export class AgentGoalService extends Disposable implements IAgentGoalService {
   private liveWallClockStartedAt?: number;
   private pendingContinuation?: PendingContinuation;
   private resumeContinuation?: { readonly turnId: number; readonly goalId: string };
+  private completionRetries = 0;
 
   constructor(
     @IWireService private readonly wire: IWireService,
@@ -338,6 +339,7 @@ export class AgentGoalService extends Disposable implements IAgentGoalService {
     this.assertSupportedAgent();
     const objective = this.validateObjective(input.objective);
     this.prepareForGoalCreation(input.replace === true);
+    this.completionRetries = 0;
     const wallClockResumedAt = Date.now();
     this.wire.dispatch(
       createGoal({
@@ -548,6 +550,14 @@ export class AgentGoalService extends Disposable implements IAgentGoalService {
     this.trackStatusChanged(completed, actor);
     this.clearInternal(actor, { preserveLiveContinuation: true });
     return snapshot;
+  }
+
+  getCompletionRetries(): number {
+    return this.completionRetries;
+  }
+
+  incrementCompletionRetries(): void {
+    this.completionRetries += 1;
   }
 
   private dispatchCompletion(state: GoalState, reason: string | undefined, actor: GoalActor): void {
@@ -921,6 +931,7 @@ export class AgentGoalService extends Disposable implements IAgentGoalService {
     this.cancelPendingContinuation(opts.preserveLiveContinuation === true);
     this.wallClockDeadline.clear();
     this.liveWallClockStartedAt = undefined;
+    this.completionRetries = 0;
     this.wire.dispatch(clearGoal({}));
     if (opts.emit !== false) this.emitGoalUpdated(null);
     if (opts.track !== false) this.telemetry.track2('goal_cleared', { actor });

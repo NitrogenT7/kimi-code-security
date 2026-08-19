@@ -463,6 +463,78 @@ describe('SessionSubagentHost', () => {
     expect(child.agent.config.modelAlias).toBe('explicit-model');
   });
 
+  it('falls back to the wildcard routing entry when no profile rule matches', async () => {
+    const parent = testAgent({
+      initialConfig: {
+        ...modelAliasConfig(['mock-model', 'routed-model']),
+        subagent: { routing: { '*': 'routed-model' } },
+      },
+    });
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    const child = testAgent({
+      type: 'sub',
+      permission: { parent: parent.agent.permission },
+      initialConfig: modelAliasConfig(['mock-model', 'routed-model']),
+    });
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Investigated the request and completed the child task end to end. The relevant module was located, its behavior traced through every call site, and the requested change applied and verified against the existing test suite.',
+    });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn({
+      profileName: 'explore',
+      parentToolCallId: 'call_agent',
+      prompt: 'Find the cause',
+      description: 'Find cause',
+      runInBackground: false,
+      signal,
+    });
+
+    expect(handle.modelAlias).toBe('routed-model');
+    await expect(handle.completion).resolves.toMatchObject({ result: expect.any(String) });
+    expect(child.agent.config.modelAlias).toBe('routed-model');
+  });
+
+  it('prefers the profile routing entry over the wildcard entry', async () => {
+    const parent = testAgent({
+      initialConfig: {
+        ...modelAliasConfig(['mock-model', 'routed-model', 'wildcard-model']),
+        subagent: { routing: { explore: 'routed-model', '*': 'wildcard-model' } },
+      },
+    });
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    const child = testAgent({
+      type: 'sub',
+      permission: { parent: parent.agent.permission },
+      initialConfig: modelAliasConfig(['mock-model', 'routed-model', 'wildcard-model']),
+    });
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Investigated the request and completed the child task end to end. The relevant module was located, its behavior traced through every call site, and the requested change applied and verified against the existing test suite.',
+    });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn({
+      profileName: 'explore',
+      parentToolCallId: 'call_agent',
+      prompt: 'Find the cause',
+      description: 'Find cause',
+      runInBackground: false,
+      signal,
+    });
+
+    expect(handle.modelAlias).toBe('routed-model');
+    await expect(handle.completion).resolves.toMatchObject({ result: expect.any(String) });
+    expect(child.agent.config.modelAlias).toBe('routed-model');
+  });
+
   it('rejects an unknown model alias before creating the child agent', async () => {
     const parent = testAgent();
     parent.configure();

@@ -22,6 +22,7 @@ import type { BuiltinTool, ToolExecution } from '#/tool/toolContract';
 import { registerTool } from '#/agent/toolRegistry/toolContribution';
 
 import { IAgentGoalService } from '#/agent/goal/goal';
+import { ISessionTodoService } from '#/session/todo/sessionTodo';
 import {
   buildGoalBlockedReasonPrompt,
   buildGoalCompletionSummaryPrompt,
@@ -77,7 +78,10 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
   readonly description: string = DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(UpdateGoalToolInputSchema);
 
-  constructor(@IAgentGoalService private readonly goal: IAgentGoalService) {}
+  constructor(
+    @IAgentGoalService private readonly goal: IAgentGoalService,
+    @ISessionTodoService private readonly todo: ISessionTodoService,
+  ) {}
 
   resolveExecution(args: UpdateGoalToolInput): ToolExecution {
     const hasContentUpdate =
@@ -144,6 +148,22 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
           return { output: 'Goal resumed.' };
         }
         if (status === 'complete') {
+          const MAX_COMPLETION_RETRIES = 5;
+          const todos = this.todo.getTodos();
+          const open = todos.filter(
+            (t) => t.status === 'pending' || t.status === 'investigating',
+          );
+          if (open.length > 0 && this.goal.getCompletionRetries() < MAX_COMPLETION_RETRIES) {
+            this.goal.incrementCompletionRetries();
+            const list = open
+              .slice(0, 10)
+              .map((t, i) => `${String(i + 1)}. [${t.status}] ${t.question}`)
+              .join('\n');
+            return {
+              isError: true,
+              output: `Goal not completed: ${String(open.length)} open question(s) remain:\n${list}\n\nInvestigate and answer these questions before marking the goal complete. Do not repeat completed work.`,
+            };
+          }
           const completed = await this.goal.markComplete({}, 'model');
           if (completed === null) {
             return { output: 'Goal not completed: no active goal.' };

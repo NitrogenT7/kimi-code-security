@@ -37,7 +37,11 @@ import {
 } from '#/session/agentLifecycle/subagentMetadata';
 import { emitAgentRunSpawned, mirrorAgentRun } from '#/session/subagent/mirrorAgentRun';
 import { ISessionSubagentService } from '#/session/subagent/subagent';
-import { SUBAGENT_SECTION, type SubagentConfig } from '#/session/subagent/configSection';
+import {
+  SUBAGENT_ROUTING_WILDCARD,
+  SUBAGENT_SECTION,
+  type SubagentConfig,
+} from '#/session/subagent/configSection';
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
 import { ISessionMetadata, type AgentMeta } from '#/session/sessionMetadata/sessionMetadata';
 import { ISessionProcessRunner } from '#/session/process/processRunner';
@@ -226,7 +230,7 @@ export class SessionSwarmService implements ISessionSwarmService {
   /**
    * Resolve the model id for a freshly spawned subagent: explicit argument,
    * `[subagent.routing]` entry keyed by profile name, the profile's default
-   * `model`, then the caller's model.
+   * `model`, the `'*'` wildcard routing entry, then the caller's model.
    */
   private resolveSpawnedChildModel(
     profile: AgentProfile,
@@ -234,7 +238,12 @@ export class SessionSwarmService implements ISessionSwarmService {
     callerModel: string,
   ): string {
     const routing = this.config.get<SubagentConfig | undefined>(SUBAGENT_SECTION)?.routing;
-    const alias = requested ?? routing?.[profile.name] ?? profile.model ?? callerModel;
+    const alias =
+      requested ??
+      routing?.[profile.name] ??
+      profile.model ??
+      routing?.[SUBAGENT_ROUTING_WILDCARD] ??
+      callerModel;
     // The caller's own model is already in use; only explicit routing targets
     // (argument, routing entry, profile default) need existence validation.
     if (alias === callerModel) return alias;

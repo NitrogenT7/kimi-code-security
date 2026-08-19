@@ -58,6 +58,7 @@ import { ISessionSubagentService } from '../subagent';
 import {
   formatSubagentTimeoutDescription,
   resolveSubagentTimeoutMs,
+  SUBAGENT_ROUTING_WILDCARD,
   SUBAGENT_SECTION,
   type SubagentConfig,
 } from '../configSection';
@@ -322,7 +323,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
   /**
    * Resolve the model id for a freshly spawned subagent: explicit argument,
    * `[subagent.routing]` entry keyed by profile name, the profile's default
-   * `model`, then the caller's model.
+   * `model`, the `'*'` wildcard routing entry, then the caller's model.
    */
   private resolveSpawnedChildModel(
     profile: AgentProfile,
@@ -330,7 +331,12 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     callerModel: string,
   ): string {
     const routing = this.config.get<SubagentConfig | undefined>(SUBAGENT_SECTION)?.routing;
-    const alias = requested ?? routing?.[profile.name] ?? profile.model ?? callerModel;
+    const alias =
+      requested ??
+      routing?.[profile.name] ??
+      profile.model ??
+      routing?.[SUBAGENT_ROUTING_WILDCARD] ??
+      callerModel;
     // The caller's own model is already in use; only explicit routing targets
     // (argument, routing entry, profile default) need existence validation.
     if (alias === callerModel) return alias;

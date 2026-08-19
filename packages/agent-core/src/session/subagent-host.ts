@@ -21,6 +21,7 @@ import {
 } from '../utils/abort';
 import { collectGitContext } from './git-context';
 import type { Session } from './index';
+import { SUBAGENT_ROUTING_WILDCARD } from '../config/schema';
 import {
   SubagentBatch,
   resolveSwarmMaxConcurrency,
@@ -336,8 +337,8 @@ export class SessionSubagentHost {
   /**
    * Resolve the model alias for a freshly spawned subagent, following the
    * priority chain: explicit argument, `[subagent.routing]` entry keyed by
-   * the profile name, the profile's default `model`, then the caller's
-   * model (the historical behavior).
+   * the profile name, the profile's default `model`, the `'*'` wildcard
+   * routing entry, then the caller's model (the historical behavior).
    */
   private resolveChildModelAlias(
     parent: Agent,
@@ -345,7 +346,12 @@ export class SessionSubagentHost {
     requested?: string,
   ): string {
     const routing = parent.kimiConfig?.subagent?.routing;
-    const alias = requested ?? routing?.[profile.name] ?? profile.model ?? parent.config.modelAlias;
+    const alias =
+      requested ??
+      routing?.[profile.name] ??
+      profile.model ??
+      routing?.[SUBAGENT_ROUTING_WILDCARD] ??
+      parent.config.modelAlias;
     if (alias === undefined) {
       throw new Error(
         `Cannot resolve a model alias for subagent "${profile.name}": the caller agent has no model configured`,

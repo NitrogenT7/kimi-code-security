@@ -643,6 +643,38 @@ describe('Agent tool execution contract', () => {
     expect(result.output).toContain('model_alias: ds-flash');
   });
 
+  it('falls back to the wildcard routing entry when no profile rule matches', async () => {
+    const lifecycle = createAgentLifecycleStub({
+      createAgentIds: ['agent-child'],
+      runCompletion: async () => ({ summary: 'child result' }),
+    });
+    const modelResolver = {
+      _serviceBrand: undefined,
+      resolve: vi.fn(() => ({}) as never),
+      resolveWithProvider: vi.fn(),
+      findByName: vi.fn(() => []),
+    } as unknown as IModelResolver;
+    const context = createAgentToolContext(
+      lifecycle,
+      sessionService(IModelResolver, modelResolver),
+      { initialConfig: { subagent: { routing: { '*': 'ds-flash' } } } },
+    );
+
+    const result = await executeAgentTool(context, {
+      prompt: 'Investigate',
+      description: 'Find cause',
+      subagent_type: 'explore',
+    });
+
+    expect(lifecycle.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        binding: expect.objectContaining({ profile: 'explore', model: 'ds-flash' }),
+      }),
+    );
+    expect(modelResolver.resolve).toHaveBeenCalledWith('ds-flash');
+    expect(result.output).toContain('model_alias: ds-flash');
+  });
+
   it('rejects an unknown model alias before creating the child agent', async () => {
     const lifecycle = createAgentLifecycleStub();
     const modelResolver = {

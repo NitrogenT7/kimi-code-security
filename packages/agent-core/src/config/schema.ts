@@ -162,13 +162,21 @@ export const SubagentConfigSchema = z.object({
    * Static model routing for subagents, keyed by profile name (the value of
    * `subagent_type`). Each value must be a key of `models` in the config.
    * Resolution priority: the `model` argument on the Agent / AgentSwarm
-   * call, then this routing entry, then the profile's own default `model`,
+   * call, then the routing entry keyed by the profile name, then the
+   * profile's own default `model`, then the `'*'` wildcard routing entry,
    * then the caller's model.
    */
   routing: z.record(z.string(), z.string()).optional(),
 });
 
 export type SubagentConfig = z.infer<typeof SubagentConfigSchema>;
+
+/**
+ * Wildcard key in `[subagent.routing]`: the fallback model for subagents
+ * whose profile has no dedicated routing entry and no profile default
+ * `model`. Sits just above the caller's model in the resolution chain.
+ */
+export const SUBAGENT_ROUTING_WILDCARD = '*';
 
 export const ImageConfigSchema = z.object({
   /**

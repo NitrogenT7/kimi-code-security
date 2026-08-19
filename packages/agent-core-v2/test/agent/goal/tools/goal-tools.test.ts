@@ -36,9 +36,12 @@ import {
   agentService,
   createTestAgent,
   permissionModeServices,
+  sessionService,
   type TestAgentContext,
 } from '../../../harness';
 import { stubLoopWithHooks } from '../../loop/stubs';
+import { ISessionTodoService } from '#/session/todo/sessionTodo';
+import type { TodoItem } from '#/session/todo/todoItem';
 
 const signal = new AbortController().signal;
 
@@ -50,18 +53,29 @@ describe('goal tools', () => {
   let toolExecutor: IAgentToolExecutorService;
   let setGoalBudgetTool: SetGoalBudgetTool;
   let updateGoalTool: UpdateGoalTool;
+  let todoItems: TodoItem[];
 
   beforeEach(() => {
     loopService = stubLoopWithHooks({ hasActiveTurn: true });
+    todoItems = [];
+    const todoStub: ISessionTodoService = {
+      _serviceBrand: undefined,
+      getTodos: () => todoItems,
+      setTodos: (todos) => { todoItems = [...todos]; },
+      clear: () => { todoItems = []; },
+      getFindings: () => [],
+      onDidChange: (() => ({ dispose: () => {} })) as never,
+    };
     ctx = createTestAgent(
       agentService(IAgentLoopService, loopService),
       permissionModeServices('auto'),
+      sessionService(ISessionTodoService, todoStub),
     );
     goals = ctx.get(IAgentGoalService);
     eventBus = ctx.get(IEventBus);
     toolExecutor = ctx.get(IAgentToolExecutorService);
     setGoalBudgetTool = new SetGoalBudgetTool(goals);
-    updateGoalTool = new UpdateGoalTool(goals);
+    updateGoalTool = new UpdateGoalTool(goals, todoStub);
   });
 
   afterEach(async () => {
@@ -334,6 +348,82 @@ describe('goal tools', () => {
     expect(result.output).toContain('Goal completed successfully');
     expect(result.output).toContain('Worked');
     expect(result.output).toContain('Write a concise final message for the user');
+  });
+
+  it('UpdateGoal complete is rejected when open questions remain', async () => {
+    await goals.createGoal({ objective: 'ship it' });
+    todoItems = [
+      {
+        type: 'question', id: 'q1', question: 'Is the auth flow secure?',
+        status: 'pending', confidence: 'medium', depth: 'deep',
+        evidence: [], blockers: [], subQuestions: [],
+      },
+      {
+        type: 'question', id: 'q2', question: 'Does the API handle rate limits?',
+        status: 'investigating', confidence: 'low', depth: 'quick',
+        evidence: [], blockers: [], subQuestions: [],
+      },
+    ];
+    const execution = updateGoalTool.resolveExecution({ status: 'complete' });
+    if (execution.isError === true) throw new Error('execution should not be an error');
+    const result = await execution.execute({ turnId: 0, toolCallId: 'call_open', signal });
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('2 open question(s) remain');
+    expect(result.output).toContain('Is the auth flow secure?');
+    expect(result.output).toContain('Does the API handle rate limits?');
+    expect(result.output).toContain('[pending]');
+    expect(result.output).toContain('[investigating]');
+    expect(result.stopTurn).toBeFalsy();
+    expect(goals.getGoal().goal?.status).toBe('active');
+  });
+
+  it('UpdateGoal complete passes when all questions are resolved or inconclusive', async () => {
+    await goals.createGoal({ objective: 'ship it' });
+    todoItems = [
+      {
+        type: 'question', id: 'q1', question: 'Is the auth flow secure?',
+        status: 'resolved', confidence: 'high', depth: 'deep',
+        evidence: [{ status: 'confirmed', description: 'tested' }],
+        conclusion: 'Yes', blockers: [], subQuestions: [],
+      },
+      {
+        type: 'question', id: 'q2', question: 'Can we prove X?',
+        status: 'inconclusive', confidence: 'low', depth: 'deep',
+        evidence: [], blockers: ['external dependency'], subQuestions: [],
+      },
+    ];
+    const execution = updateGoalTool.resolveExecution({ status: 'complete' });
+    if (execution.isError === true) throw new Error('execution should not be an error');
+    const result = await execution.execute({ turnId: 0, toolCallId: 'call_done', signal });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.stopTurn).toBe(true);
+    expect(result.output).toContain('Goal completed successfully');
+  });
+
+  it('UpdateGoal complete passes through after exhausting retries', async () => {
+    await goals.createGoal({ objective: 'ship it' });
+    todoItems = [
+      {
+        type: 'question', id: 'q1', question: 'Unanswerable question?',
+        status: 'pending', confidence: 'low', depth: 'deep',
+        evidence: [], blockers: [], subQuestions: [],
+      },
+    ];
+    const execution = updateGoalTool.resolveExecution({ status: 'complete' });
+    if (execution.isError === true) throw new Error('execution should not be an error');
+
+    // Exhaust all 5 retries.
+    for (let i = 0; i < 5; i++) {
+      goals.incrementCompletionRetries();
+    }
+
+    const result = await execution.execute({ turnId: 0, toolCallId: 'call_retry', signal });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.stopTurn).toBe(true);
+    expect(result.output).toContain('Goal completed successfully');
   });
 
   it('UpdateGoal blocked returns the blocked-reason prompt and stops the turn', async () => {

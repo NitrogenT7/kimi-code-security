@@ -15,6 +15,7 @@ import { IAgentGoalService } from '#/agent/goal/goal';
 import { IGoalDeadlineScheduler } from '#/agent/goal/goalDeadlineScheduler';
 import { type AgentGoalService } from '#/agent/goal/goalService';
 import { UpdateGoalTool, UpdateGoalToolInputSchema } from '#/agent/goal/tools/update-goal';
+import { ISessionTodoService } from '#/session/todo/sessionTodo';
 import { IAgentLoopService, type AfterStepContext, type EnqueueReceipt, type Step, type Turn } from '#/agent/loop/loop';
 import { MessageStepRequest } from '#/agent/loop/stepRequest';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
@@ -570,7 +571,14 @@ describe('AgentGoalService', () => {
 
     it('forbids model-driven goal pauses', async () => {
       await goals.createGoal({ objective: 'work' });
-      const tool = new UpdateGoalTool(goals);
+      const tool = new UpdateGoalTool(goals, {
+        _serviceBrand: undefined,
+        getTodos: () => [],
+        setTodos: () => {},
+        clear: () => {},
+        getFindings: () => [],
+        onDidChange: (() => ({ dispose: () => {} })) as never,
+      } as ISessionTodoService);
 
       for (const status of ['active', 'complete', 'blocked']) {
         expect(UpdateGoalToolInputSchema.safeParse({ status }).success).toBe(true);

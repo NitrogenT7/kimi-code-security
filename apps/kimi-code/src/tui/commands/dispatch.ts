@@ -155,7 +155,7 @@ export interface SlashCommandHost {
   stop(exitCode?: number): Promise<void>;
   setExitOpenUrl(url: string): void;
   showHelpPanel(): void;
-  createNewSession(): Promise<void>;
+  createNewSession(title?: string): Promise<void>;
   showSessionPicker(): Promise<void>;
   sendNormalUserInput(text: string): void;
   sendSkillActivation(session: Session, skillName: string, skillArgs: string): void;
@@ -324,7 +324,7 @@ async function handleBuiltInSlashCommand(
       host.showStatus(`Kimi Code v${host.state.appState.version}`);
       return;
     case 'new':
-      await host.createNewSession();
+      await host.createNewSession(args.trim() || undefined);
       host.state.ui.requestRender();
       return;
     case 'sessions':
