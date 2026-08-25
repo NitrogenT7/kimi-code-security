@@ -131,6 +131,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
   declare readonly _serviceBrand: undefined;
 
   private lastConfigLogSignature: string | undefined;
+  private lastSeenModelAlias: string | undefined;
   private readonly turnConfigs = new Map<number, TurnRequestConfig>();
   private readonly mediaDegradedTurns = new Set<number>();
   private readonly mediaStrippedTurns = new Map<number, MediaStripSnapshot>();
@@ -150,7 +151,22 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     @IWireService private readonly wire: IWireService,
     @IFaultInjectionService private readonly faultInjection: IFaultInjectionService,
     @IEventBus private readonly eventBus: IEventBus,
-  ) {}
+  ) {
+    // Mid-turn model switch: a model change (e.g. `/model` while a turn is
+    // streaming) must take effect from the next LLM request. The per-turn
+    // config snapshot exists to keep one turn on one model; when the model
+    // actually changes we drop the snapshots so the next `resolveRequest`
+    // re-resolves from the profile.
+    this.eventBus.subscribe('agent.status.updated', (event) => {
+      if (event.model !== undefined && event.model !== this.lastSeenModelAlias) {
+        this.lastSeenModelAlias = event.model;
+        if (this.turnConfigs.size > 0) {
+          this.turnConfigs.clear();
+        }
+      }
+    });
+    this.lastSeenModelAlias = this.profile.data().modelAlias;
+  }
 
   async request(
     overrides: LLMRequestOverrides = {},

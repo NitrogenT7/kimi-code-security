@@ -203,6 +203,7 @@ export * from '#/agent/toolDedupe/toolDedupeService';
 import '#/agent/toolSelect/flag';
 import '#/agent/fullCompaction/flag';
 import '#/agent/faultInjection/flag';
+import '#/agent/profile/flag';
 import '#/agent/toolSelect/tools/select-tools';
 export * from '#/agent/toolSelect/dynamicTools';
 export * from '#/agent/toolSelect/toolSelect';

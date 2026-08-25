@@ -140,13 +140,17 @@ function createService(
   options: {
     readonly flagEnabled?: boolean;
     readonly thinkingLevel?: ThinkingEffort;
+    readonly modelForAlias?: (alias: string) => Model;
+    readonly getAlias?: () => string;
   } = {},
 ) {
   const ix = disposables.add(new TestInstantiationService());
   const thinkingLevel = options.thinkingLevel ?? 'off';
+  const getAlias = options.getAlias ?? (() => 'm');
+  const modelForAlias = options.modelForAlias ?? (() => model);
   const profile: Partial<IAgentProfileService> = {
     resolveModelContext: () => ({
-      modelAlias: 'm',
+      modelAlias: getAlias(),
       modelCapabilities: capabilities,
       maxOutputSize: undefined,
       alwaysThinking: undefined,
@@ -154,11 +158,11 @@ function createService(
       reservedContextSize: undefined,
       compactionTriggerRatio: undefined,
     }),
-    getProvider: () => model,
+    getProvider: () => modelForAlias(getAlias()),
     getSystemPrompt: () => 'system',
     data: () => ({
       cwd: '',
-      modelAlias: 'm',
+      modelAlias: getAlias(),
       modelCapabilities: capabilities,
       thinkingLevel,
       systemPrompt: 'system',
@@ -186,10 +190,23 @@ function createService(
   const flagEnabled = options.flagEnabled ?? true;
   const testSnapshot = Object.freeze({}) as MediaStripSnapshot;
   const events: DomainEvent[] = [];
+  const subscribers = new Map<string, (event: DomainEvent) => void>();
   const eventBus: IEventBus = {
     _serviceBrand: undefined,
-    publish: (event) => events.push(event),
-    subscribe: () => toDisposable(() => {}),
+    publish: (event) => {
+      events.push(event);
+      subscribers.get(event.type)?.(event);
+    },
+    subscribe: ((typeOrHandler: unknown, maybeHandler?: unknown) => {
+      if (typeof typeOrHandler === 'string') {
+        const handler = maybeHandler as (event: DomainEvent) => void;
+        subscribers.set(typeOrHandler, handler);
+        return toDisposable(() => {
+          subscribers.delete(typeOrHandler);
+        });
+      }
+      return toDisposable(() => {});
+    }) as IEventBus['subscribe'],
   };
 
   ix.stub(IAgentContextMemoryService, context);
@@ -229,6 +246,7 @@ function createService(
     wire: ix.get(IWireService),
     records,
     events,
+    eventBus,
     telemetryRecords,
   };
 }
@@ -847,5 +865,81 @@ describe('AgentLLMRequesterService trace id', () => {
     expect(
       telemetryRecords.find((record) => record.event === 'api_error')?.properties?.['trace_id'],
     ).toBeUndefined();
+  });
+});
+
+describe('AgentLLMRequesterService mid-turn model switch', () => {
+  function createSwitchableModel(id: string): Model {
+    const build = (): Model => ({
+      id,
+      name: id,
+      aliases: [],
+      protocol: 'anthropic',
+      baseUrl: 'https://example.test',
+      headers: {},
+      capabilities,
+      maxContextSize: 1000,
+      thinkingEffort: null,
+      alwaysThinking: false,
+      providerName: 'p',
+      authProvider: { getAuth: async () => undefined },
+      withThinking: () => build(),
+      withMaxCompletionTokens: () => build(),
+      withGenerationKwargs: () => build(),
+      withProviderOptions: () => build(),
+      withThinkingKeep: () => build(),
+      request: async function* () {
+        yield {
+          type: 'finish',
+          message: { role: 'assistant', content: [{ type: 'text', text: `from-${id}` }], toolCalls: [] },
+          providerFinishReason: 'completed',
+          rawFinishReason: 'stop',
+          id: 'resp-1',
+        };
+      },
+    });
+    return build();
+  }
+
+  it('uses the new model on the next request after a mid-turn model switch', async () => {
+    const modelA = createSwitchableModel('model-a');
+    const modelB = createSwitchableModel('model-b');
+    // The mutable alias mirrors profileService.setModel: flip it, then the
+    // service publishes agent.status.updated with the new alias.
+    const aliasRef = { value: 'model-a' };
+    const { service, eventBus } = createService(modelA, undefined, {
+      getAlias: () => aliasRef.value,
+      modelForAlias: (a) => (a === 'model-b' ? modelB : modelA),
+    });
+
+    // Step 1: request resolves and snapshots model A for turn 1.
+    const first = await service.request({ source: { type: 'turn', turnId: 1, step: 1 } });
+    expect(first.message.content).toEqual([{ type: 'text', text: 'from-model-a' }]);
+
+    // Mid-turn switch: alias flips, status event fires, snapshot is cleared.
+    aliasRef.value = 'model-b';
+    eventBus.publish({ type: 'agent.status.updated', model: 'model-b' } as DomainEvent);
+
+    // Step 2: same turn, next request — resolves model B, not the snapshot.
+    const second = await service.request({ source: { type: 'turn', turnId: 1, step: 2 } });
+    expect(second.message.content).toEqual([{ type: 'text', text: 'from-model-b' }]);
+  });
+
+  it('keeps the per-turn snapshot when the model does not change', async () => {
+    const modelA = createSwitchableModel('model-a');
+    const modelB = createSwitchableModel('model-b');
+    const aliasRef = { value: 'model-a' };
+    const { service, eventBus } = createService(modelA, undefined, {
+      getAlias: () => aliasRef.value,
+      modelForAlias: (a) => (a === 'model-b' ? modelB : modelA),
+    });
+
+    await service.request({ source: { type: 'turn', turnId: 1, step: 1 } });
+    // Same model re-published (e.g. a status refresh) — no invalidation, the
+    // turn keeps its snapshot even if the alias were to flip later.
+    eventBus.publish({ type: 'agent.status.updated', model: 'model-a' } as DomainEvent);
+
+    const second = await service.request({ source: { type: 'turn', turnId: 1, step: 2 } });
+    expect(second.message.content).toEqual([{ type: 'text', text: 'from-model-a' }]);
   });
 });

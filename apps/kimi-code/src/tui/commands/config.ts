@@ -27,7 +27,7 @@ import { NO_ACTIVE_SESSION_MESSAGE } from '../constant/kimi-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import { thinkingEffortToConfig } from '../utils/thinking-config';
 import { showUsage } from './info';
-import { setExperimentalFeatures } from './experimental-flags';
+import { setExperimentalFeatures, isExperimentalFlagEnabled } from './experimental-flags';
 import type { SlashCommandHost } from './dispatch';
 
 // ---------------------------------------------------------------------------
@@ -434,7 +434,10 @@ export async function performModelSwitch(
   effort: ThinkingEffort,
   persist: boolean,
 ): Promise<void> {
-  if (host.state.appState.streamingPhase !== 'idle') {
+  if (
+    host.state.appState.streamingPhase !== 'idle' &&
+    !isExperimentalFlagEnabled('mid-turn-model-switch')
+  ) {
     // Defer to the next turn boundary: the switch is applied when the current
     // stream finishes, before any queued message is dispatched, so the next
     // message starts on the new model (see drainPendingModelSwitch). The
@@ -449,6 +452,10 @@ export async function performModelSwitch(
     );
     return;
   }
+  // Mid-turn switch (experimental flag): fall through and apply immediately.
+  // The engine drops the per-turn model snapshot on the model-change event,
+  // so the next LLM request in this turn already uses the new model. The
+  // in-flight request keeps streaming on the old model.
 
   const prevModel = host.state.appState.model;
   const prevEffort = host.state.appState.thinkingEffort;
