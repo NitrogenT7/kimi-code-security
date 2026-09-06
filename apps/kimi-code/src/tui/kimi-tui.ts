@@ -29,6 +29,7 @@ import { copyTextToClipboard } from '#/utils/clipboard/clipboard-text';
 import { appendInputHistory, loadInputHistory } from '#/utils/history/input-history';
 import { openUrl } from '#/utils/open-url';
 import { getInputHistoryFile } from '#/utils/paths';
+import { productDisplayName } from '#/utils/host-package';
 import { detectFdPath, ensureFdPath } from '#/utils/process/fd-detect';
 import { quoteShellArg } from '#/utils/shell-quote';
 import { restoreTerminalModes } from '#/utils/terminal-restore';
@@ -96,7 +97,6 @@ import {
   LLM_NOT_SET_MESSAGE,
   MAIN_AGENT_ID,
   NO_ACTIVE_SESSION_MESSAGE,
-  PRODUCT_NAME,
 } from './constant/kimi-tui';
 import { CHROME_GUTTER } from './constant/rendering';
 import { MAX_TERMINAL_TITLE_LENGTH } from './constant/terminal';
@@ -755,16 +755,10 @@ export class KimiTUI {
             throw new Error(`Session "${startup.sessionFlag}" not found.`);
           }
           if (resolve(target.workDir) !== resolve(workDir)) {
-            this.state.ui.stop();
-            process.stderr.write(
-              `${currentTheme.fg(
-                'warning',
-                `Session "${startup.sessionFlag}" was created under a different directory.\n` +
-                  `  cd "${target.workDir}" && kimi -r ${startup.sessionFlag}`,
-              )}\n\n`,
-            );
-            throw new Error(
-              `Session "${startup.sessionFlag}" was created under a different directory.`,
+            this.setAppState({ workDir: target.workDir });
+            this.startupNotice = combineStartupNotice(
+              this.startupNotice,
+              `Session "${startup.sessionFlag}" resumed from ${target.workDir}.`,
             );
           }
           session = await this.harness.resumeSession({
@@ -1641,7 +1635,10 @@ export class KimiTUI {
 
   updateTerminalTitle(): void {
     const trimmed = this.state.appState.sessionTitle?.trim() ?? '';
-    const label = trimmed.length > 0 ? trimmed.slice(0, MAX_TERMINAL_TITLE_LENGTH) : PRODUCT_NAME;
+    const label =
+      trimmed.length > 0
+        ? trimmed.slice(0, MAX_TERMINAL_TITLE_LENGTH)
+        : productDisplayName();
     this.state.terminal.setTitle(label);
   }
 

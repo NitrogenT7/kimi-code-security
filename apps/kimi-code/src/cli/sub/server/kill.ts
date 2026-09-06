@@ -19,6 +19,7 @@ import type { Command } from 'commander';
 import { getLiveLock, type LockContents } from '@moonshot-ai/kap-server';
 
 import { getDataDir } from '#/utils/paths';
+import { cliCommandDisplayName } from '#/utils/host-package';
 
 import { lockConnectHost } from './daemon';
 import { authHeaders, serverOrigin, tryResolveServerToken } from './shared';
@@ -80,19 +81,19 @@ export async function handleKillCommand(deps: KillCommandDeps): Promise<void> {
   deps.signalPid(pid, 'SIGTERM');
 
   if (await waitForExit(pid, TERM_GRACE_MS, deps)) {
-    deps.stdout.write(`Kimi server (pid ${String(pid)}) stopped.\n`);
+    deps.stdout.write(`${cliCommandDisplayName()} server (pid ${String(pid)}) stopped.\n`);
     return;
   }
 
   deps.signalPid(pid, 'SIGKILL');
 
   if (await waitForExit(pid, KILL_GRACE_MS, deps)) {
-    deps.stdout.write(`Kimi server (pid ${String(pid)}) killed.\n`);
+    deps.stdout.write(`${cliCommandDisplayName()} server (pid ${String(pid)}) killed.\n`);
     return;
   }
 
   throw new Error(
-    `Failed to stop Kimi server (pid ${String(pid)}); insufficient permissions?`,
+    `Failed to stop ${cliCommandDisplayName()} server (pid ${String(pid)}); insufficient permissions?`,
   );
 }
 

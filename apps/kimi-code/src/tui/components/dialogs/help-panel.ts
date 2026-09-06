@@ -17,6 +17,7 @@ import {
   truncateToWidth,
 } from '@moonshot-ai/pi-tui';
 import { currentTheme } from '#/tui/theme';
+import { productDisplayName } from '#/utils/host-package';
 
 export interface KeyboardShortcut {
   readonly keys: string;
@@ -110,7 +111,7 @@ export class HelpPanelComponent extends Container implements Focusable {
       currentTheme.boldFg('primary', ' help ') + muted('· Esc / Enter / q to cancel · ↑↓ scroll'),
       '',
       // Greeting
-      `  ${dim('Sure, Kimi is ready to help! Just send a message to get started.')}`,
+      `  ${dim(`Sure, ${productDisplayName()} is ready to help! Just send a message to get started.`)}`,
       '',
       // Section: keyboard shortcuts
       `  ${currentTheme.bold('Keyboard shortcuts')}`,

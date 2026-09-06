@@ -435,7 +435,7 @@ describe('`kimi server run` background start', () => {
     );
 
     const plain = stripAnsi(stdout);
-    expect(plain).toContain('Kimi server ready');
+    expect(plain).toContain('ksec server ready');
     expect(plain).toContain('Local:');
     expect(plain).toContain('http://127.0.0.1:58627/');
     // Loopback bind shows a Network hint for enabling network access.
@@ -460,7 +460,7 @@ describe('`kimi server run` background start', () => {
     expect(plain).not.toContain('Kimi server:');
 
     // Title is above the URLs; Logs/Stop are at the bottom.
-    expect(plain.indexOf('Kimi server ready')).toBeLessThan(plain.indexOf('Local:'));
+    expect(plain.indexOf('ksec server ready')).toBeLessThan(plain.indexOf('Local:'));
     expect(plain.indexOf('Logs:')).toBeLessThan(plain.indexOf('Stop:'));
   });
 
@@ -495,7 +495,7 @@ describe('`kimi server run` background start', () => {
 
     const color = new Chalk({ level: 3 });
     expect(stdout).toContain(color.hex(darkColors.primary)('▐█▛█▛█▌'));
-    expect(stdout).toContain(color.bold.hex(darkColors.primary)('Kimi server ready'));
+    expect(stdout).toContain(color.bold.hex(darkColors.primary)('ksec server ready'));
     expect(stdout).toContain(color.hex(darkColors.accent)('http://127.0.0.1:58627/'));
     expect(stdout).toContain(color.bold.hex(darkColors.textDim)('Local:    '));
     expect(stdout).toContain(color.hex(darkColors.textMuted)('off'));
@@ -640,7 +640,7 @@ describe('`kimi server run --foreground`', () => {
     );
 
     const plain = stripAnsi(stdout);
-    expect(plain).toContain('Kimi server ready');
+    expect(plain).toContain('ksec server ready');
     expect(plain).toContain('http://127.0.0.1:58627/');
     expect(openUrl).toHaveBeenCalledWith('http://127.0.0.1:58627');
   });
@@ -1020,7 +1020,7 @@ describe('ready banner reflects the bind class (M6.3)', () => {
     );
 
     const raw = stripAnsi(stdout);
-    expect(raw).toContain('Kimi server ready');
+    expect(raw).toContain('ksec server ready');
     expect(raw).toContain('Local:');
     expect(raw).toContain('Network:');
     // Full token-bearing URLs are printed plainly (no box, no truncation) so
@@ -1054,7 +1054,7 @@ describe('ready banner reflects the bind class (M6.3)', () => {
     );
 
     const raw = stripAnsi(stdout);
-    expect(raw).toContain('Kimi server ready');
+    expect(raw).toContain('ksec server ready');
     expect(raw).toContain('Local:');
     // Full token-bearing URL, printed plainly for copying.
     expect(raw).toContain('http://127.0.0.1:58627/#token=tok-loop');
@@ -1372,7 +1372,7 @@ describe('kimi web (shares `server run` call stack)', () => {
       },
     );
 
-    expect(stripAnsi(stdout)).toContain('Kimi server ready');
+    expect(stripAnsi(stdout)).toContain('ksec server ready');
     expect(openUrl).toHaveBeenCalledWith('http://127.0.0.1:58627');
   });
 

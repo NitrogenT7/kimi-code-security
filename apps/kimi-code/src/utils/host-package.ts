@@ -11,7 +11,7 @@
 
 import { readFileSync } from 'node:fs';
 
-import { NPM_PACKAGE_NAME } from '#/cli/update/types';
+import { CLI_COMMAND_NAME, NPM_PACKAGE_NAME, PRODUCT_NAME } from '#/constant/app';
 import { getHostPackageJsonPath } from '#/cli/version';
 
 let override: string | undefined;
@@ -62,4 +62,27 @@ export function isForkBuild(hostPackageName?: string): boolean {
   if (override === undefined && isForkSourceTree()) return true;
   const name = override ?? getHostPackageName();
   return name !== undefined && name !== NPM_PACKAGE_NAME;
+}
+
+const FORK_PRODUCT_NAME = 'Kimi Code Security';
+const FORK_COMMAND_NAME = 'ksec';
+
+/**
+ * User-facing product display name: the fork's own branding when running as
+ * ksec, the official name otherwise. UI copy (panel titles, login labels,
+ * status lines) should use this instead of the raw `PRODUCT_NAME` constant so
+ * the fork presents itself under its own identity.
+ */
+export function productDisplayName(): string {
+  return isForkBuild() ? FORK_PRODUCT_NAME : PRODUCT_NAME;
+}
+
+/**
+ * CLI command name as the user invokes it: `ksec` for the fork, `kimi` for
+ * the official CLI. Copy that embeds the command (help text, doctor/server
+ * messages) should use this so instructions match what the user actually
+ * types.
+ */
+export function cliCommandDisplayName(): string {
+  return isForkBuild() ? FORK_COMMAND_NAME : CLI_COMMAND_NAME;
 }

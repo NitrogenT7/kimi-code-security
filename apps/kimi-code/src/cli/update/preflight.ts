@@ -8,7 +8,7 @@ import {
   NATIVE_INSTALL_COMMAND_WIN,
 } from '#/constant/app';
 import { loadTuiConfig } from '#/tui/config';
-import { getHostPackageName, isForkBuild } from '#/utils/host-package';
+import { getHostPackageName, isForkBuild, productDisplayName } from '#/utils/host-package';
 
 import { readUpdateCache } from './cache';
 import { tryAcquireUpdateInstallLock } from './install-lock';
@@ -182,7 +182,7 @@ export function renderInstallSuccessMessage(target: UpdateTarget): string {
 
 function renderBackgroundInstallSuccessNotice(version: string): string {
   const displayVersion = version.startsWith('v') ? version : `v${version}`;
-  return `Kimi Code updated to ${displayVersion}\nChangelog: ${CHANGELOG_URL}\n`;
+  return `${productDisplayName()} updated to ${displayVersion}\nChangelog: ${CHANGELOG_URL}\n`;
 }
 
 function refreshInBackground(): void {

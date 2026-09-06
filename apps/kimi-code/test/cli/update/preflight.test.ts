@@ -835,7 +835,7 @@ describe('runUpdatePreflight', () => {
     await expect(runUpdatePreflight('0.5.0', { ...options, track, logger })).resolves.toBe('continue');
 
     const rendered = stdout.join('');
-    expect(rendered).toContain('Kimi Code updated to v0.5.0');
+    expect(rendered).toContain('Kimi Code Security updated to v0.5.0');
     expect(rendered).toContain(
       'https://moonshotai.github.io/kimi-code/en/release-notes/changelog.html',
     );
@@ -870,7 +870,7 @@ describe('runUpdatePreflight', () => {
 
     await expect(runUpdatePreflight('0.5.0', options)).resolves.toBe('continue');
 
-    expect(stdout.join('')).toContain('Kimi Code updated to v0.5.0');
+    expect(stdout.join('')).toContain('Kimi Code Security updated to v0.5.0');
     expect(writeUpdateInstallState).toHaveBeenCalledWith(expect.objectContaining({
       active: null,
       lastFailure: null,

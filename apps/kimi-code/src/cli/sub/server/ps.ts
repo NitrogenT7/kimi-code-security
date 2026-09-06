@@ -12,6 +12,7 @@ import type { Command } from 'commander';
 import { getLiveLock } from '@moonshot-ai/kap-server';
 
 import { getDataDir } from '#/utils/paths';
+import { cliCommandDisplayName } from '#/utils/host-package';
 
 import { lockConnectHost } from './daemon';
 import { authHeaders, isServerHealthy, resolveServerToken, serverOrigin } from './shared';
@@ -61,7 +62,7 @@ async function handlePsCommand(opts: { json?: boolean }): Promise<void> {
 
   const origin = serverOrigin(lockConnectHost(lock), lock.port);
   if (!(await isServerHealthy(origin, HEALTH_TIMEOUT_MS))) {
-    throw new Error(`Kimi server at ${origin} is not responding.`);
+    throw new Error(`${cliCommandDisplayName()} server at ${origin} is not responding.`);
   }
 
   // The `/api/v1/connections` route is gated by bearer auth (M5.1). Read the

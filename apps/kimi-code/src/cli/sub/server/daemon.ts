@@ -22,7 +22,13 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
-import { DEFAULT_LOCK_DIR, getLiveLock, type LockContents } from '@moonshot-ai/kap-server';
+import {
+  DEFAULT_LOCK_DIR,
+  getLiveLock,
+  type LockContents,
+} from '@moonshot-ai/kap-server';
+
+import { cliCommandDisplayName } from '#/utils/host-package';
 
 import {
   DEFAULT_SERVER_HOST,
@@ -377,7 +383,7 @@ export async function ensureDaemon(options: EnsureDaemonOptions = {}): Promise<E
   }
 
   throw new Error(
-    `Kimi server daemon failed to start within ${String(SPAWN_TIMEOUT_MS)}ms.\n\n` +
+    `${cliCommandDisplayName()} server daemon failed to start within ${String(SPAWN_TIMEOUT_MS)}ms.\n\n` +
       formatLogTail(daemonLogPath()),
   );
 }
@@ -390,7 +396,7 @@ function formatDaemonBootFailure(
     exit.signal === null
       ? `exited with code ${String(exit.code)}`
       : `was terminated by signal ${exit.signal}`;
-  return `Kimi server daemon ${reason} during startup.\n\n${formatLogTail(logPath)}`;
+  return `${cliCommandDisplayName()} server daemon ${reason} during startup.\n\n${formatLogTail(logPath)}`;
 }
 
 function formatLogTail(logPath: string): string {

@@ -1,6 +1,7 @@
-import { CLI_COMMAND_NAME } from '#/constant/app';
-import { registerMigrateCommand } from '#/migration/index';
 import { Command, Option } from 'commander';
+
+import { registerMigrateCommand } from '#/migration/index';
+import { cliCommandDisplayName } from '#/utils/host-package';
 
 import type { CLIOptions } from './options';
 import { registerAcpCommand } from './sub/acp';
@@ -23,7 +24,7 @@ export function createProgram(
   onPluginNodeRunner: PluginNodeRunnerHandler = () => {},
   onUpgrade: UpgradeCommandHandler = () => {},
 ): Command {
-  const program = new Command(CLI_COMMAND_NAME)
+  const program = new Command(cliCommandDisplayName())
     .description('The Starting Point for Next-Gen Agents')
     .version(version, '-V, --version')
     .allowUnknownOption(false)
@@ -113,7 +114,7 @@ export function createProgram(
 
   program.argument('[args...]').action((args: string[]) => {
     if (args.length > 0) {
-      program.error(`unknown command '${args[0]}'. See '${CLI_COMMAND_NAME} --help'.`);
+      program.error(`unknown command '${args[0]}'. See '${cliCommandDisplayName()} --help'.`);
     }
 
     const raw = program.opts<Record<string, unknown>>();

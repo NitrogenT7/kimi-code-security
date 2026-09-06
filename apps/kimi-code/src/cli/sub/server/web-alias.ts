@@ -16,7 +16,7 @@ export function registerWebAliasCommand(program: Command): void {
   buildRunCommand(
     program
       .command('web')
-      .description('Open the Kimi web UI (starts a background daemon if needed).'),
+      .description('Open the web UI (starts a background daemon if needed).'),
     { defaultOpen: true },
   );
 }

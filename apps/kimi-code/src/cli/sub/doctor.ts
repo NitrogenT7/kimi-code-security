@@ -11,6 +11,7 @@ import type { Command } from 'commander';
 import { z } from 'zod';
 
 import { getTuiConfigPath, parseTuiConfig } from '#/tui/config';
+import { cliCommandDisplayName } from '#/utils/host-package';
 
 interface WritableLike {
   write(chunk: string): boolean;
@@ -249,7 +250,7 @@ function formatSuccess(results: readonly CheckResult[]): string {
 
 function formatFailure(results: readonly CheckResult[], issueCount: number): string {
   return [
-    `Kimi doctor found ${String(issueCount)} ${issueCount === 1 ? 'issue' : 'issues'}.`,
+    `${cliCommandDisplayName()} doctor found ${String(issueCount)} ${issueCount === 1 ? 'issue' : 'issues'}.`,
     '',
     ...formatResults(results),
     '',

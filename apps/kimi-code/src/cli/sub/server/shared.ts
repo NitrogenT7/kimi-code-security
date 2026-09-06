@@ -8,7 +8,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { ServerLogLevel } from '@moonshot-ai/kap-server';
+import { type ServerLogLevel } from '@moonshot-ai/kap-server';
+
+import { cliCommandDisplayName } from '#/utils/host-package';
 
 export const LOCAL_SERVER_HOST = '127.0.0.1';
 export const DEFAULT_LAN_HOST = '0.0.0.0';
@@ -232,7 +234,7 @@ export async function ensureServerWebReady(origin: string): Promise<void> {
   } catch (error) {
     const reason = error instanceof Error ? ` (${error.message})` : '';
     throw new Error(
-      `Server at ${origin} does not serve the Kimi web UI${reason}. Stop the existing server and rerun \`kimi server run\`.`,
+      `Server at ${origin} does not serve the web UI${reason}. Stop the existing server and rerun \`${cliCommandDisplayName()} server run\`.`,
       { cause: error },
     );
   } finally {
