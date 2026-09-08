@@ -21,6 +21,10 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   return stdout.trim();
 }
 
+async function readFileLf(path: string): Promise<string> {
+  return (await readFile(path, 'utf8')).replaceAll('\r\n', '\n');
+}
+
 async function commitFile(
   cwd: string,
   rel: string,
@@ -988,9 +992,9 @@ describe('dirty base checkout', () => {
 
     expect(added.spawnBase).toBeDefined();
     const wt = worktreeOf(mission!);
-    expect(await readFile(join(wt, 'README.md'), 'utf8')).toBe('# fixture\nwip edit\n');
-    expect(await readFile(join(wt, 'staged.ts'), 'utf8')).toBe('export const staged = 1;\n');
-    expect(await readFile(join(wt, 'untracked.ts'), 'utf8')).toBe('export const untracked = 1;\n');
+    expect(await readFileLf(join(wt, 'README.md'))).toBe('# fixture\nwip edit\n');
+    expect(await readFileLf(join(wt, 'staged.ts'))).toBe('export const staged = 1;\n');
+    expect(await readFileLf(join(wt, 'untracked.ts'))).toBe('export const untracked = 1;\n');
     expect(await git(wt, 'status', '--porcelain')).toBe('');
 
     expect(await git(repo, 'rev-parse', `${added.spawnBase}^`)).toBe(baseTip);
@@ -1039,7 +1043,7 @@ describe('dirty base checkout', () => {
     ).split('\n');
     expect(snapshotFiles).toEqual(['sub/wip.ts']);
     const wt = join(sub, '.tower/worktrees', mission!.worktree);
-    expect(await readFile(join(wt, 'sub/wip.ts'), 'utf8')).toBe('export const wip = 1;\n');
+    expect(await readFileLf(join(wt, 'sub/wip.ts'))).toBe('export const wip = 1;\n');
   });
 
   it('refuses to create a worktree while the base checkout has unmerged paths', async () => {
@@ -1110,8 +1114,8 @@ describe('dirty base checkout', () => {
     const { mergeCommit } = await store.merge(mission!.branch);
     expect(mergeCommit).toBe(await git(repo, 'rev-parse', 'HEAD'));
     expect((await store.load()).missions[0]?.status).toBe('merged');
-    expect(await readFile(join(repo, 'wip.ts'), 'utf8')).toBe('export const wip = 1;\n');
-    expect(await readFile(join(repo, 'src/x/x.ts'), 'utf8')).toBe('export const x = 1;\n');
+    expect(await readFileLf(join(repo, 'wip.ts'))).toBe('export const wip = 1;\n');
+    expect(await readFileLf(join(repo, 'src/x/x.ts'))).toBe('export const x = 1;\n');
   });
 
   it('falls back to the base branch for the scope diff after a rebase drops the snapshot', async () => {
@@ -1140,10 +1144,8 @@ describe('dirty base checkout', () => {
     const { mergeCommit } = await store.merge(mission!.branch);
     expect(mergeCommit).toBe(await git(repo, 'rev-parse', 'HEAD'));
     expect((await store.load()).missions[0]?.status).toBe('merged');
-    expect(await readFile(join(repo, 'src/x/x.ts'), 'utf8')).toBe('export const x = 1;\n');
-    expect(await readFile(join(repo, 'src/other/base.ts'), 'utf8')).toBe(
-      'export const other = 1;\n',
-    );
+    expect(await readFileLf(join(repo, 'src/x/x.ts'))).toBe('export const x = 1;\n');
+    expect(await readFileLf(join(repo, 'src/other/base.ts'))).toBe('export const other = 1;\n');
   });
 
   it('merges when checkout dirt does not intersect the files the merge touches', async () => {
@@ -1315,11 +1317,15 @@ describe('teardown', () => {
     await writeFile(join(wt, 'uncommitted.txt'), 'dirty\n');
 
     const report = await store.teardown();
-    expect(report.join('\n')).toContain(`kept .tower/worktrees/${mission.worktree}`);
+    expect(report.join('\n').replaceAll('\\', '/')).toContain(
+      `kept .tower/worktrees/${mission.worktree}`,
+    );
     expect((await stat(wt)).isDirectory()).toBe(true);
 
     const forced = await store.teardown({ force: true });
-    expect(forced.join('\n')).toContain(`removed .tower/worktrees/${mission.worktree}`);
+    expect(forced.join('\n').replaceAll('\\', '/')).toContain(
+      `removed .tower/worktrees/${mission.worktree}`,
+    );
     await expect(stat(wt)).rejects.toThrow();
   });
 
@@ -1332,7 +1338,9 @@ describe('teardown', () => {
     });
     const wt = worktreeOf(mission);
     const report = await store.teardown();
-    expect(report.join('\n')).toContain(`removed .tower/worktrees/${mission.worktree}`);
+    expect(report.join('\n').replaceAll('\\', '/')).toContain(
+      `removed .tower/worktrees/${mission.worktree}`,
+    );
     await expect(stat(wt)).rejects.toThrow();
   });
 
@@ -1356,7 +1364,9 @@ describe('teardown', () => {
       await git(wt, '-c', 'protocol.file.allow=always', 'submodule', 'update', '--init');
 
       const report = await store.teardown();
-      expect(report.join('\n')).toContain(`removed .tower/worktrees/${mission.worktree}`);
+      expect(report.join('\n').replaceAll('\\', '/')).toContain(
+        `removed .tower/worktrees/${mission.worktree}`,
+      );
       await expect(stat(wt)).rejects.toThrow();
     } finally {
       await rm(subRepo, { recursive: true, force: true });

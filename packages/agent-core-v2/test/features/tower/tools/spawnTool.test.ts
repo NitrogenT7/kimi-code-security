@@ -558,7 +558,9 @@ describe('TowerSpawnTool', () => {
     expect(result.isError).toBeUndefined();
     expect(result.output).toContain('base snapshot:');
     const worktreeAbs = join(repo, '.tower/worktrees/wt-1');
-    expect(await readFile(join(worktreeAbs, 'wip.ts'), 'utf8')).toBe('export const wip = 1;\n');
+    expect(await readFile(join(worktreeAbs, 'wip.ts'), 'utf8').then((s) => s.replaceAll('\r\n', '\n'))).toBe(
+      'export const wip = 1;\n',
+    );
     expect(runAgent).toHaveBeenCalledWith(
       expect.objectContaining({ agentId: 'agent-7' }),
       { kind: 'prompt', prompt: expect.stringContaining('snapshot commit') },

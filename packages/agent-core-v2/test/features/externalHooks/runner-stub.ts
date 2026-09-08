@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { Event } from '#/_base/event';
 import { ExternalHooksRunnerService } from '#/features/externalHooks/app/externalHooksRunnerService';
 import { HOOKS_SECTION } from '#/features/externalHooks/configSection';
@@ -6,6 +10,8 @@ import { IBootstrapService } from '#/app/bootstrap/bootstrap';
 import { IConfigService } from '#/app/config/config';
 import { IPluginService } from '#/app/plugin/plugin';
 import { HostProcessService } from '#/os/backends/node-local/hostProcessService';
+
+const WIN32_NODE_EVAL_HOOK_RE = /^node(?:\.(?:exe|cmd|bat))? -e (.+)$/s;
 
 export function makeHookRunner(
   hooks: readonly HookDef[],
@@ -21,6 +27,7 @@ export function makeHookRunner(
     ) => void;
   } = {},
 ): ExternalHooksRunnerService {
+  const hostProcess = new HostProcessService();
   return new ExternalHooksRunnerService(
     {
       _serviceBrand: undefined,
@@ -37,7 +44,35 @@ export function makeHookRunner(
       cwd: options.cwd ?? '',
       clientIdentity: { productName: 'test', version: '0.0.0-test', platform: 'test_platform' },
     } as unknown as IBootstrapService,
-    new HostProcessService(),
+    process.platform === 'win32' ? win32NodeEvalHookHost(hostProcess) : hostProcess,
     { onTriggered: options.onTriggered, onResolved: options.onResolved },
   );
+}
+
+const hookScriptDir =
+  process.platform === 'win32' ? mkdtempSync(join(tmpdir(), 'kimi-hook-scripts-')) : undefined;
+let hookScriptSeq = 0;
+
+function win32NodeEvalHookHost(host: HostProcessService): HostProcessService {
+  const wrapper = Object.create(host) as HostProcessService;
+  (wrapper as { spawn: unknown }).spawn = async (
+    command: string,
+    args: readonly string[],
+    options: object,
+  ) => {
+    const match = WIN32_NODE_EVAL_HOOK_RE.exec(command);
+    if (match === null) return host.spawn(command, args, options);
+    const scriptFile = join(hookScriptDir ?? '', `hook-${String(++hookScriptSeq)}.js`);
+    writeFileSync(scriptFile, JSON.parse(match[1] ?? '') as string);
+    return host.spawn(JSON.stringify(process.execPath), [scriptFile], options);
+  };
+  return wrapper;
+}
+
+if (process.platform === 'win32') {
+  process.on('exit', () => {
+    if (hookScriptDir !== undefined) {
+      rmSync(hookScriptDir, { recursive: true, force: true });
+    }
+  });
 }

@@ -2,46 +2,39 @@ import {
   normalizeAgentProfile,
   type AgentProfile,
 } from '#/app/agentProfileCatalog/agentProfileCatalog';
+import { getAgentProfileContributions } from '#/app/agentProfileCatalog/contribution';
 import {
   renderSystemPromptResult,
   skillActiveFor,
   TASK_AGENT_ROLE_PREFIX,
 } from '#/app/agentProfileCatalog/profile-shared';
 
+import '#/session/agentLifecycle/profile/profiles';
+
 import { TOWER_WORKER_PROFILE } from './tower';
 import TOWER_WORKER_ROLE_OVERLAY from './tower-worker-overlay.md?raw';
 
-const TOWER_WORKER_TOOLS = [
-  'Agent',
-  'Bash',
+const TOWER_EXCLUDED_CODER_TOOLS = new Set(['AgentSwarm']);
+
+const TOWER_SHARED_TOOLS = [
   'TowerFinding',
   'TowerInbox',
   'TowerMission',
   'TowerReview',
   'TowerSend',
   'TowerStatus',
-  'CronCreate',
-  'CronDelete',
-  'CronList',
-  'Edit',
-  'EnterPlanMode',
-  'ExitPlanMode',
-  'Glob',
-  'Grep',
-  'Read',
-  'ReadMediaFile',
-  'Skill',
-  'TaskList',
-  'TaskOutput',
-  'TaskStop',
-  'TodoList',
-  'NotifyUser',
-  'WaitFor',
-  'WebSearch',
-  'FetchURL',
-  'Write',
-  'mcp__*',
 ] as const;
+
+function towerWorkerTools(): readonly string[] {
+  const coder = getAgentProfileContributions().find((profile) => profile.name === 'coder');
+  if (coder === undefined) {
+    throw new Error('the tower-worker profile requires the builtin coder profile');
+  }
+  return [
+    ...(coder.tools ?? []).filter((name) => !TOWER_EXCLUDED_CODER_TOOLS.has(name)),
+    ...TOWER_SHARED_TOOLS,
+  ];
+}
 
 const CODER_ROLE =
   `${TASK_AGENT_ROLE_PREFIX}\n\n` +
@@ -52,6 +45,8 @@ const CODER_ROLE =
   'you have written so far, so keep the handoff current.';
 
 const TOWER_WORKER_ROLE = `${CODER_ROLE}\n\n${TOWER_WORKER_ROLE_OVERLAY.trim()}`;
+
+const TOWER_WORKER_TOOLS = towerWorkerTools();
 
 export const TOWER_WORKER_PROFILE_DEF: AgentProfile = normalizeAgentProfile({
   name: TOWER_WORKER_PROFILE,
