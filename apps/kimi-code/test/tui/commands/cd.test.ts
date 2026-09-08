@@ -46,7 +46,7 @@ describe('handleCdCommand', () => {
     await handleCdCommand(host, '');
 
     expect(host.showStatus).toHaveBeenCalledWith(
-      'Current working directory: /repo/work\nUsage: /cd <absolute path> [--persist]',
+      'Current working directory: /repo/work\nUsage: /cd <absolute path> [--session-only]',
     );
     expect(host.session?.changeWorkDir).not.toHaveBeenCalled();
   });
@@ -62,30 +62,30 @@ describe('handleCdCommand', () => {
     expect(session.changeWorkDir).not.toHaveBeenCalled();
   });
 
-  it('calls session.changeWorkDir and updates appState.workDir on success', async () => {
+  it('persists by default and updates appState.workDir on success', async () => {
     const { host } = makeHost();
 
     await handleCdCommand(host, '/repo/other');
 
-    expect(host.session?.changeWorkDir).toHaveBeenCalledWith('/repo/other', { persist: false });
+    expect(host.session?.changeWorkDir).toHaveBeenCalledWith('/repo/other', { persist: true });
     expect(host.setAppState).toHaveBeenCalledWith({ workDir: '/repo/other' });
     expect(host.state.appState.workDir).toBe('/repo/other');
     expect(host.refreshSlashCommandAutocomplete).toHaveBeenCalled();
     expect(host.showStatus).toHaveBeenCalledWith(
-      'Working directory changed:\n  /repo/work\n  →\n  /repo/other',
+      'Working directory changed:\n  /repo/work\n  →\n  /repo/other\nBinding persisted across restart/resume.',
       'success',
     );
   });
 
-  it('forwards --persist and surfaces the persisted confirmation', async () => {
+  it('keeps the switch session-only with --session-only', async () => {
     const { host } = makeHost();
 
-    await handleCdCommand(host, '/repo/other --persist');
+    await handleCdCommand(host, '/repo/other --session-only');
 
-    expect(host.session?.changeWorkDir).toHaveBeenCalledWith('/repo/other', { persist: true });
+    expect(host.session?.changeWorkDir).toHaveBeenCalledWith('/repo/other', { persist: false });
     expect(host.state.appState.workDir).toBe('/repo/other');
     expect(host.showStatus).toHaveBeenCalledWith(
-      'Working directory changed:\n  /repo/work\n  →\n  /repo/other\nBinding persisted across restart/resume.',
+      'Working directory changed:\n  /repo/work\n  →\n  /repo/other\nSession-only: restart/resume returns to the previous directory.',
       'success',
     );
   });
