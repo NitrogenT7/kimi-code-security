@@ -52,10 +52,18 @@ function formatAge(updatedAt: number): string {
   return `${String(days)} days ago`;
 }
 
+/**
+ * Short display id. v1 ids are `session_<uuid>` and v2 ids are `ses_<uuid>` —
+ * stripping the prefix first keeps the column meaningful.
+ */
+function shortId(id: string): string {
+  return id.replace(/^session_|^ses_/, '').slice(0, 8);
+}
+
 function formatList(sessions: readonly SessionSummary[]): string {
   const lines = sessions.map(
     (s) =>
-      `  ${s.id.slice(0, 8)}  ${formatAge(s.updatedAt).padEnd(12)} ${(s.title ?? '(untitled)').slice(0, 48)}`,
+      `  ${shortId(s.id)}  ${formatAge(s.updatedAt).padEnd(12)} ${(s.title ?? '(untitled)').slice(0, 48)}`,
   );
   return lines.join('\n');
 }
@@ -66,7 +74,7 @@ function formatPreview(sessions: readonly SessionSummary[]): string {
     .slice(0, PREVIEW_LIMIT)
     .map(
       (s) =>
-        `${s.id.slice(0, 8)}  ${formatAge(s.updatedAt)}  ${(s.title ?? '(untitled)').slice(0, 44)}`,
+        `${shortId(s.id)}  ${formatAge(s.updatedAt)}  ${(s.title ?? '(untitled)').slice(0, 44)}`,
     );
   if (sessions.length > PREVIEW_LIMIT) {
     lines.push(`… and ${String(sessions.length - PREVIEW_LIMIT)} more`);
@@ -183,7 +191,7 @@ async function executeClean(
   });
 
   if (failedIds.length > 0) {
-    const sample = failedIds.slice(0, FAILED_SAMPLE_LIMIT).map((id) => `  ${id.slice(0, 8)}`);
+    const sample = failedIds.slice(0, FAILED_SAMPLE_LIMIT).map((id) => `  ${shortId(id)}`);
     const more = failedIds.length > FAILED_SAMPLE_LIMIT
       ? `\n  … and ${String(failedIds.length - FAILED_SAMPLE_LIMIT)} more`
       : '';

@@ -148,8 +148,10 @@ describe('handleCleanCommand', () => {
   });
 
   it('previews the targets inside the confirm dialog', async () => {
+    // Realistic engine ids (`session_<uuid>` v1, `ses_<uuid>` v2) — the short
+    // id column must strip the prefix instead of showing near-identical values.
     const many = Array.from({ length: 8 }, (_, i) =>
-      summary({ id: `aaaaaaaa-0${String(i)}`, title: `auto title ${String(i)}` }),
+      summary({ id: `ses_aaaaaaa0-0000-4000-8000-00000000000${String(i)}`, title: `auto title ${String(i)}` }),
     );
     const { host, deleteSession, renderPicker } = makeHost(many);
 
@@ -159,7 +161,8 @@ describe('handleCleanCommand', () => {
     expect(rendered).toContain('Delete 8 auto-named session(s)?');
     expect(rendered).toContain('Yes, delete 8 session(s)');
     expect(rendered).toContain('… and 2 more');
-    expect(rendered).toContain('auto title 0');
+    expect(rendered).toContain('aaaaaaa0');
+    expect(rendered).not.toContain('ses_');
     expect(deleteSession).not.toHaveBeenCalled();
   });
 
