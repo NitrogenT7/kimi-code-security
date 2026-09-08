@@ -1067,6 +1067,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       title: meta.title,
       titleKind: meta.titleKind,
       lastPrompt: meta.lastPrompt,
+      isCustomTitle: meta.titleKind === 'custom',
       workDir: ctx.cwd,
       sessionDir: ctx.sessionDir,
       createdAt: meta.createdAt,

@@ -47,6 +47,7 @@ export function v2SummaryToSessionSummary(
     id: summary.id,
     title: summary.title,
     lastPrompt: summary.lastPrompt,
+    isCustomTitle: summary.isCustomTitle === true,
     workDir: facts.workDir,
     sessionDir: facts.sessionDir,
     createdAt: summary.createdAt,

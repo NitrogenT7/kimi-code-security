@@ -13,6 +13,7 @@ export interface SessionSummary {
   readonly cwd?: string;
   readonly title?: string;
   readonly lastPrompt?: string;
+  readonly isCustomTitle?: boolean;
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly archived: boolean;

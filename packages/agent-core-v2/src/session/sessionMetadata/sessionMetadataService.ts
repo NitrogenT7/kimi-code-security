@@ -158,6 +158,7 @@ export class SessionMetadata extends Service implements ISessionMetadata {
           cwd: this.data.cwd ?? this.ctx.cwd,
           title: this.data.title,
           lastPrompt: this.data.lastPrompt,
+          isCustomTitle: this.data.titleKind === 'custom',
           createdAt: this.data.createdAt,
           updatedAt: this.data.updatedAt,
           archived: this.data.archived === true,

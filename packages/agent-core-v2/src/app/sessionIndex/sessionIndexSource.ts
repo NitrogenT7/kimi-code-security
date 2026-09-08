@@ -45,6 +45,7 @@ export function buildSessionSummary(fields: {
   cwd?: string;
   title?: string;
   lastPrompt?: string;
+  isCustomTitle?: boolean;
   createdAt: number;
   updatedAt: number;
   archived: boolean;
@@ -58,6 +59,7 @@ export function buildSessionSummary(fields: {
     cwd: fields.cwd,
     title: fields.title,
     lastPrompt: fields.lastPrompt,
+    isCustomTitle: fields.isCustomTitle,
     createdAt: fields.createdAt,
     updatedAt: fields.updatedAt,
     archived: fields.archived,
@@ -86,6 +88,7 @@ export function summaryEquals(a: SessionSummary, b: SessionSummary): boolean {
     a.cwd === b.cwd &&
     a.title === b.title &&
     a.lastPrompt === b.lastPrompt &&
+    a.isCustomTitle === b.isCustomTitle &&
     a.createdAt === b.createdAt &&
     a.updatedAt === b.updatedAt &&
     a.archived === b.archived &&
@@ -138,6 +141,7 @@ export async function readSessionSummary(
     cwd: recoverCwd(meta),
     title: typeof meta['title'] === 'string' ? meta['title'] : undefined,
     lastPrompt: typeof meta['lastPrompt'] === 'string' ? meta['lastPrompt'] : undefined,
+    isCustomTitle: meta['isCustomTitle'] === true,
     createdAt: parseTime(meta['createdAt']),
     updatedAt: parseTime(meta['updatedAt']),
     archived: meta['archived'] === true,

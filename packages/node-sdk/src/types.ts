@@ -433,6 +433,7 @@ export interface SessionSummary {
   readonly title?: string | undefined;
   readonly titleKind?: SessionTitleKind;
   readonly lastPrompt?: string;
+  readonly isCustomTitle?: boolean;
   readonly workDir: string;
   readonly sessionDir: string;
   readonly createdAt: number;

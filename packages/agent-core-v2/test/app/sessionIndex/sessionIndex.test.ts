@@ -57,7 +57,7 @@ const WORK_DIR = '/home/user/repo';
 
 function canonicalIds(summaries: readonly SessionSummary[]): string[] {
   return [...summaries]
-    .sort((a, b) => (a.updatedAt !== b.updatedAt ? b.updatedAt - a.updatedAt : a.id < b.id ? 1 : -1))
+    .toSorted((a, b) => (a.updatedAt !== b.updatedAt ? b.updatedAt - a.updatedAt : a.id < b.id ? 1 : -1))
     .map((s) => s.id);
 }
 
@@ -148,6 +148,17 @@ describe('FileSessionIndex (legacy)', () => {
     expect(summary?.id).toBe('active');
     expect(summary?.title).toBe('hello');
     expect(await store.get('missing')).toBeUndefined();
+  });
+
+  it('summary surfaces isCustomTitle from the metadata document', async () => {
+    await seedSession('named', { title: 'mine', isCustomTitle: true });
+    await seedSession('auto', { title: 'hi' });
+    await seedSession('legacy', {});
+
+    const store = build();
+    expect((await store.get('named'))?.isCustomTitle).toBe(true);
+    expect((await store.get('auto'))?.isCustomTitle).toBe(false);
+    expect((await store.get('legacy'))?.isCustomTitle).toBe(false);
   });
 
   it('recovers cwd from the metadata document (v2 cwd, v1 workDir, custom.cwd)', async () => {
@@ -502,6 +513,23 @@ describe('FileSessionIndex (read model)', () => {
     expect(await store.get('active')).toMatchObject({ id: 'active', title: 'hello' });
     expect(await store.count({ workspaceIds: [workspaceId] })).toBe(1);
     expect(await store.count({ workspaceIds: [workspaceId], includeArchived: true })).toBe(2);
+  });
+
+  it('read-model summaries surface isCustomTitle from the metadata document', async () => {
+    await seedSession('named', { title: 'mine', isCustomTitle: true });
+    await seedSession('auto', { title: 'hi' });
+    await seedSession('legacy', {});
+
+    const store = build();
+    await store.prepare();
+    expect((await store.get('named'))?.isCustomTitle).toBe(true);
+    expect((await store.get('auto'))?.isCustomTitle).toBe(false);
+    expect((await store.get('legacy'))?.isCustomTitle).toBe(false);
+
+    const page = await store.listRecent({ workspaceIds: [workspaceId] });
+    expect(page.items.find((s) => s.id === 'named')?.isCustomTitle).toBe(true);
+    expect(page.items.find((s) => s.id === 'auto')?.isCustomTitle).toBe(false);
+    expect(page.items.find((s) => s.id === 'legacy')?.isCustomTitle).toBe(false);
   });
 
   it('prepare skips stray files and state-less directories instead of failing the projection', async () => {
