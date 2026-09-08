@@ -142,9 +142,10 @@ describe('kimi web', () => {
       exitSpy.mockRestore();
 
       expect(exitCalls).toEqual([1]);
-      expect(stderr).toContain('`kimi server` has been deprecated and no longer works.');
-      expect(stderr).toContain('kimi web');
-      expect(stderr).toContain('kimi server kill');
+      // The fork renders the notice with its own command name (ksec).
+      expect(stderr).toContain('`ksec server` has been deprecated and no longer works.');
+      expect(stderr).toContain('ksec web');
+      expect(stderr).toContain('ksec server kill');
       expect(stderr).toContain('0.28.0');
       expect(stderr).toContain('next major version');
     }
@@ -171,7 +172,7 @@ describe('`kimi web` ready banner', () => {
     );
 
     const plain = stripAnsi(readStdout());
-    expect(plain).toContain('Kimi server ready');
+    expect(plain).toContain('ksec server ready');
     expect(plain).toContain('Local:');
     expect(plain).toContain('http://127.0.0.1:58628/#token=tok');
     expect(plain).toContain('Token:');
@@ -188,10 +189,10 @@ describe('`kimi web` ready banner', () => {
     expect(plain).not.toContain('╰');
     expect(plain).toContain('▐█▛█▛█▌');
     expect(plain).toContain('▐█████▌');
-    expect(plain).not.toContain('Kimi server:');
+    expect(plain).not.toContain('ksec server:');
 
     // Title is above the URLs; Logs/Stop are at the bottom.
-    expect(plain.indexOf('Kimi server ready')).toBeLessThan(plain.indexOf('Local:'));
+    expect(plain.indexOf('ksec server ready')).toBeLessThan(plain.indexOf('Local:'));
     expect(plain.indexOf('Logs:')).toBeLessThan(plain.indexOf('Stop:'));
   });
 
@@ -214,7 +215,7 @@ describe('`kimi web` ready banner', () => {
     const out = readStdout();
     const color = new Chalk({ level: 3 });
     expect(out).toContain(color.hex(darkColors.primary)('▐█▛█▛█▌'));
-    expect(out).toContain(color.bold.hex(darkColors.primary)('Kimi server ready'));
+    expect(out).toContain(color.bold.hex(darkColors.primary)('ksec server ready'));
     expect(out).toContain(color.hex(darkColors.accent)('http://127.0.0.1:58627/'));
     expect(out).toContain(color.bold.hex(darkColors.textDim)('Local:    '));
     expect(out).toContain(color.hex(darkColors.textMuted)('off'));
@@ -297,7 +298,7 @@ describe('ready banner reflects the bind class', () => {
     );
 
     const raw = stripAnsi(readStdout());
-    expect(raw).toContain('Kimi server ready');
+    expect(raw).toContain('ksec server ready');
     expect(raw).toContain('Local:');
     expect(raw).toContain('Network:');
     // Full token-bearing URLs are printed plainly (no box, no truncation) so
@@ -329,7 +330,7 @@ describe('ready banner reflects the bind class', () => {
     );
 
     const raw = stripAnsi(readStdout());
-    expect(raw).toContain('Kimi server ready');
+    expect(raw).toContain('ksec server ready');
     expect(raw).toContain('Local:');
     expect(raw).toContain('http://127.0.0.1:58627/#token=tok-loop');
     expect(raw).toContain('Token:');
@@ -648,8 +649,8 @@ describe('`kimi web` option threading', () => {
     );
 
     const plain = stripAnsi(readStdout());
-    expect(plain).toContain('Kimi server: http://127.0.0.1:58627/#token=tok');
-    expect(plain).not.toContain('Kimi server ready');
+    expect(plain).toContain('ksec server: http://127.0.0.1:58627/#token=tok');
+    expect(plain).not.toContain('ksec server ready');
     expect(plain).not.toContain('Local:');
   });
 

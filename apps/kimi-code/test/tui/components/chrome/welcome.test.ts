@@ -6,6 +6,7 @@ import { WelcomeComponent } from '#/tui/components/chrome/welcome';
 import { setRainbowDance, type RainbowDanceController } from '#/tui/easter-eggs/dance';
 import { darkColors } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
+import { setHostPackageNameOverride } from '#/utils/host-package';
 
 const TRUECOLOR_PATTERN = /\u001B\[38;2;(\d+);(\d+);(\d+)m/g;
 
@@ -67,11 +68,15 @@ describe('WelcomeComponent', () => {
   const previousChalkLevel = chalk.level;
 
   beforeEach(() => {
+    // These tests cover the upstream banner behavior; pin the official package
+    // identity so the fork logo / no-rainbow branch stays out of the way.
+    setHostPackageNameOverride('@moonshot-ai/kimi-code');
     chalk.level = 3;
   });
 
   afterEach(() => {
     chalk.level = previousChalkLevel;
+    setHostPackageNameOverride(undefined);
     setRainbowDance(undefined);
   });
 

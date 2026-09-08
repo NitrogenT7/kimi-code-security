@@ -22,7 +22,8 @@ describe('Remote Control output', () => {
     vi.stubEnv('FORCE_HYPERLINK', '1');
     const output = formatRemoteControlOutput(outputOptions);
     const url = outputOptions.url;
-    expect(output).toContain('Use Kimi Code on this machine');
+    // Fork branding: the output names the fork's product identity.
+    expect(output).toContain('Use Kimi Code Security on this machine');
     expect(output).toContain('1.');
     expect(output).toContain('2.');
     expect(output).toContain('3.');
