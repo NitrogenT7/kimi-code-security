@@ -12,6 +12,39 @@ import { effectiveModelAlias } from '@moonshot-ai/kimi-code-sdk';
 import { isRainbowDancing, renderDanceWelcomeHeader } from '#/tui/easter-eggs/dance';
 import type { AppState } from '#/tui/types';
 import { currentTheme } from '#/tui/theme';
+import { isForkBuild } from '#/utils/host-package';
+
+/**
+ * Fork (ksec) logo: the security fork's mark in ASCII — a blue left arm
+ * (`v`, #3F47CC like the source SVG) sweeping down-right, crossed by the
+ * primary-colored band (`@`) that runs from the top-right all the way down
+ * into the left-leaning stem. Downsampled from the full-size ASCII original;
+ * the top two rows of the original (a long horizontal `v` run) read as a
+ * detached "head" in the box, so the mark starts from the arm's bend.
+ */
+const KSEC_LOGO = [
+  '          vvvvvvvv       @@@@@@@@@@@=',
+  '            vvvv       @@@@@@@@@@@-',
+  '             v        @@@@@@@@@@.',
+  '                    @@@@@@@@@@.',
+  '                  @@@@@@@@@@',
+  '              @@@@@@@@@@@@',
+  '              @@@@@@@@@@',
+  '              @@@@@@@%',
+  '              @@@@@#',
+  '              @@@*',
+] as const;
+const KSEC_LOGO_BLUE = '#3F47CC';
+
+function colorKsecLogoRow(row: string): string {
+  const blue = chalk.hex(KSEC_LOGO_BLUE);
+  const primary = chalk.hex(currentTheme.palette.primary);
+  // Rows are `<spaces><v-run><@-run>`; color the v arm blue, the rest primary.
+  const match = /^(\s*)(v*)(.*)$/.exec(row);
+  if (match === null) return primary(row);
+  const [, spaces = '', vs = '', rest = ''] = match;
+  return spaces + (vs.length > 0 ? blue(vs) : '') + (rest.length > 0 ? primary(rest) : '');
+}
 
 export class WelcomeComponent implements Component {
   private state: AppState;
@@ -45,8 +78,9 @@ export class WelcomeComponent implements Component {
     const innerWidth = Math.max(1, safeWidth - 4);
     const pad = '  ';
 
-    // Logo + side-by-side text.
-    const logo = ['▐█▛█▛█▌', '▐█████▌'] as const;
+    // Logo + side-by-side text. The fork ships its own taller mark.
+    const fork = isForkBuild();
+    const logo: readonly string[] = fork ? KSEC_LOGO : ['▐█▛█▛█▌', '▐█████▌'];
     const logoWidth = Math.max(...logo.map((row) => visibleWidth(row)));
     const gap = '  ';
     const textWidth = Math.max(4, innerWidth - logoWidth - gap.length);
@@ -64,12 +98,27 @@ export class WelcomeComponent implements Component {
       '…',
     );
 
-    let renderedHeaderLines = [
-      primary(logo[0].padEnd(logoWidth)) + gap + rightRow0,
-      primary(logo[1].padEnd(logoWidth)) + gap + rightRow1,
-    ];
-    if (isRainbowDancing()) {
-      renderedHeaderLines = renderDanceWelcomeHeader(logo, textWidth, rightRow1);
+    let renderedHeaderLines: string[];
+    if (fork) {
+      // Center the title/tagline against the taller fork logo.
+      renderedHeaderLines = logo.map((row, index) => {
+        const base = colorKsecLogoRow(row.padEnd(logoWidth));
+        if (index === 1) return base + gap + rightRow0;
+        if (index === 2) return base + gap + rightRow1;
+        return base;
+      });
+    } else {
+      renderedHeaderLines = [
+        primary((logo[0] ?? '').padEnd(logoWidth)) + gap + rightRow0,
+        primary((logo[1] ?? '').padEnd(logoWidth)) + gap + rightRow1,
+      ];
+      if (isRainbowDancing()) {
+        renderedHeaderLines = renderDanceWelcomeHeader(
+          logo as readonly [string, string],
+          textWidth,
+          rightRow1,
+        );
+      }
     }
 
     const modelValue = isLoggedOut

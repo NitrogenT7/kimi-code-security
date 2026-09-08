@@ -7,7 +7,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { ServerLogLevel } from '@moonshot-ai/kap-server';
+import { type ServerLogLevel } from '@moonshot-ai/kap-server';
+
+import { cliCommandDisplayName } from '#/utils/host-package';
 
 export const LOCAL_SERVER_HOST = '127.0.0.1';
 export const DEFAULT_LAN_HOST = '0.0.0.0';
@@ -123,6 +125,43 @@ export function normalizeServerOrigin(value: string): string {
   url.search = '';
   url.hash = '';
   return url.toString().replace(/\/$/, '');
+}
+
+
+/**
+ * Probe `/` and confirm the bundled web UI is being served.
+ *
+ * A different build that runs on the same port serves its own bundle — opening
+ * a browser at that origin lands on stale code. Catching that here lets the
+ * caller surface a clear "stop the running server" message instead of silently
+ * handing the user the wrong UI.
+ */
+export async function ensureServerWebReady(origin: string): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 3000);
+  try {
+    const response = await fetch(`${origin}/`, {
+      headers: { accept: 'text/html' },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const body = await response.text();
+    if (!body.includes('<div id="app"')) {
+      throw new Error('missing app root');
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? ` (${error.message})` : '';
+    throw new Error(
+      `Server at ${origin} does not serve the web UI${reason}. Stop the existing server and rerun \`${cliCommandDisplayName()} server run\`.`,
+      { cause: error },
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /**

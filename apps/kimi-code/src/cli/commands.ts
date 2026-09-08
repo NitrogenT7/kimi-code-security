@@ -1,6 +1,7 @@
-import { CLI_COMMAND_NAME } from '#/constant/app';
 import { registerMigrateCommand, type MigrateCommandOptions } from '#/migration/index';
 import { Command, InvalidArgumentError, Option } from 'commander';
+
+import { cliCommandDisplayName, productDisplayName } from '#/utils/host-package';
 
 import type { CLIOptions } from './options';
 import { registerAcpCommand } from './sub/acp';
@@ -27,7 +28,7 @@ export function createProgram(
   onUpgrade: UpgradeCommandHandler = () => {},
   onUpdateDownload: UpdateDownloadHandler = () => {},
 ): Command {
-  const program = new Command(CLI_COMMAND_NAME)
+  const program = new Command(cliCommandDisplayName())
     .description('The Starting Point for Next-Gen Agents')
     .version(version, '-V, --version')
     .allowUnknownOption(false)
@@ -130,7 +131,7 @@ export function createProgram(
   program
     .command('upgrade')
     .alias('update')
-    .description('Upgrade Kimi Code to the latest version.')
+    .description(`Upgrade ${productDisplayName()} to the latest version.`)
     .action(async () => {
       await onUpgrade();
     });
@@ -157,7 +158,7 @@ export function createProgram(
 
   program.argument('[args...]').action((args: string[]) => {
     if (args.length > 0) {
-      program.error(`unknown command '${args[0]}'. See '${CLI_COMMAND_NAME} --help'.`);
+      program.error(`unknown command '${args[0]}'. See '${cliCommandDisplayName()} --help'.`);
     }
 
     const raw = program.opts<Record<string, unknown>>();

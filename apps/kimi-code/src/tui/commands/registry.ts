@@ -6,6 +6,7 @@ import type { AutocompleteItem } from '@moonshot-ai/pi-tui';
 
 import { completeLeadingArg, type ArgCompletionSpec } from './complete-args';
 import type { KimiSlashCommand, SlashCommandAvailability } from './types';
+import { productDisplayName } from '#/utils/host-package';
 
 /** Subcommands offered when autocompleting `/goal <…>`. */
 const GOAL_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
@@ -367,7 +368,7 @@ export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'feedback',
     aliases: ['bug'],
-    description: 'Send feedback to make Kimi Code better',
+    description: `Send feedback to make ${productDisplayName()} better`,
     priority: 60,
     availability: 'always',
   },

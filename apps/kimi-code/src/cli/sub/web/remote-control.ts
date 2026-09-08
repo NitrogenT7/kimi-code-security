@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 
 import { getVersion } from '../../version';
+import { productDisplayName } from '../../../utils/host-package';
 import { darkColors } from '../../../tui/theme/colors';
 import { supportsHyperlinks, toTerminalHyperlink } from '../../../utils/terminal-hyperlink';
 import type { RemoteControlStatus } from '@moonshot-ai/remote-control';
@@ -50,7 +51,7 @@ export function formatRemoteControlOutput(options: RemoteControlOutputOptions): 
   return [
     '',
     `  ${title('Kimi Remote Control ready')}  ${muted(getVersion())}`,
-    `  ${muted('Use Kimi Code on this machine from your phone or another computer.')}`,
+    `  ${muted(`Use ${productDisplayName()} on this machine from your phone or another computer.`)}`,
     '',
     `  ${label('1.')} Scan the QR code, or open ${link(options.url)}`,
     `  ${label('2.')} Log in with your Kimi account`,

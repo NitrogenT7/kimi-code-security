@@ -5,6 +5,7 @@ import type { KimiHarness, Session } from '@moonshot-ai/kimi-code-sdk';
 import type { ColorToken, ThemeName } from '#/tui/theme';
 
 import { LLM_NOT_SET_MESSAGE } from '../constant/kimi-tui';
+import { productDisplayName } from '#/utils/host-package';
 import type { AuthFlowController } from '../controllers/auth-flow';
 import type { BtwPanelController } from '../controllers/btw-panel';
 import type { StreamingUIController } from '../controllers/streaming-ui';
@@ -459,7 +460,7 @@ async function handleBuiltInSlashCommand(
       host.showHelpPanel();
       return;
     case 'version':
-      host.showStatus(`Kimi Code v${host.state.appState.version}`);
+      host.showStatus(`${productDisplayName()} v${host.state.appState.version}`);
       return;
     case 'new': {
       // A first-use lazy creation may still be in flight: wait it out so /new

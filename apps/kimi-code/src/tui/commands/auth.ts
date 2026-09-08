@@ -13,7 +13,8 @@ import {
 import { log } from '@moonshot-ai/kimi-code-sdk';
 
 import type { ChoiceOption } from '../components/dialogs/choice-picker';
-import { DEFAULT_OAUTH_PROVIDER_NAME, PRODUCT_NAME } from '../constant/kimi-tui';
+import { DEFAULT_OAUTH_PROVIDER_NAME } from '../constant/kimi-tui';
+import { productDisplayName } from '#/utils/host-package';
 import { formatErrorMessage } from '../utils/event-payload';
 import {
   KIMI_CODE_GLOBAL_PLATFORM_VALUE,
@@ -151,7 +152,7 @@ async function handleOpenPlatformLogin(
       error.status === 401
     ) {
       host.showStatus(
-        'Hint: If your API key was obtained from Kimi Code, please select "Kimi Code" instead.',
+        `Hint: If your API key was obtained from ${productDisplayName()}, please select "${productDisplayName()}" instead.`,
       );
     }
     return;
@@ -215,7 +216,7 @@ export async function handleLogoutCommand(host: SlashCommandHost): Promise<void>
   if (hasManagedRemnant) {
     options.push({
       value: DEFAULT_OAUTH_PROVIDER_NAME,
-      label: PRODUCT_NAME,
+      label: productDisplayName(),
       description: 'OAuth login',
     });
   }
@@ -257,6 +258,6 @@ export async function handleLogoutCommand(host: SlashCommandHost): Promise<void>
   refreshKimiRegion();
 
   host.track('logout', { provider: target });
-  const label = target === DEFAULT_OAUTH_PROVIDER_NAME ? PRODUCT_NAME : target;
+  const label = target === DEFAULT_OAUTH_PROVIDER_NAME ? productDisplayName() : target;
   host.showStatus(`Logged out from ${label}.`);
 }

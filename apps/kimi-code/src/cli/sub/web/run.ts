@@ -22,6 +22,7 @@ import { darkColors } from '#/tui/theme/colors';
 import { openUrl as defaultOpenUrl } from '#/utils/open-url';
 import { getDataDir } from '#/utils/paths';
 import { generateRemoteControlQr } from '#/utils/remote-control-qr';
+import { cliCommandDisplayName } from '#/utils/host-package';
 
 import { initializeServerTelemetry } from '../../telemetry';
 import {
@@ -271,7 +272,7 @@ function formatReadyLine(
   const notice = dangerousBypassAuth
     ? `${formatDangerNoticeLines().join('\n')}\n`
     : '';
-  return `${notice}Kimi server: ${buildOpenableUrl(origin, token)}\n`;
+  return `${notice}${cliCommandDisplayName()} server: ${buildOpenableUrl(origin, token)}\n`;
 }
 
 /**
@@ -473,7 +474,7 @@ export function formatReadyBanner(
   const logo = ['▐█▛█▛█▌', '▐█████▌'] as const;
   const lines: string[] = [
     '',
-    `  ${primary(logo[0])}  ${title('Kimi server ready')}  ${dim(getVersion())}`,
+    `  ${primary(logo[0])}  ${title(`${cliCommandDisplayName()} server ready`)}  ${dim(getVersion())}`,
     `  ${primary(logo[1])}  ${dim('Local web UI is available from this machine.')}`,
     '',
   ];

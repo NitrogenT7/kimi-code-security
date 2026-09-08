@@ -41,7 +41,7 @@ describe('FeedbackInputDialogComponent', () => {
     expect(text).toContain('╮');
     expect(text).toContain('╰');
     expect(text).toContain('╯');
-    expect(text).toContain('Send feedback to Kimi Code');
+    expect(text).toContain('Send feedback to Kimi Code Security');
     expect(text).toContain("Tell us what's working or what's not.");
     expect(text).toContain('Enter to submit');
     expect(text).toContain('Esc to cancel');

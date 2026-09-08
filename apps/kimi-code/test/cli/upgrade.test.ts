@@ -139,7 +139,7 @@ describe('handleUpgrade', () => {
     expect(deps.track).toHaveBeenCalledWith('upgrade_command_no_update', expect.objectContaining({
       current_version: '0.4.0',
     }));
-    expect(stdout.join('')).toContain('Kimi Code is already up to date (v0.4.0).');
+    expect(stdout.join('')).toContain('Kimi Code Security is already up to date (v0.4.0).');
   });
 
   it('prints the manual update command when the install source cannot be auto-installed', async () => {

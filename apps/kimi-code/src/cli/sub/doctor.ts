@@ -7,6 +7,7 @@ import type { Command } from 'commander';
 import { z } from 'zod';
 
 import { getTuiConfigPath, parseTuiConfig } from '#/tui/config';
+import { cliCommandDisplayName, productDisplayName } from '#/utils/host-package';
 
 interface WritableLike {
   write(chunk: string): boolean;
@@ -77,7 +78,7 @@ export async function handleDoctor(deps: DoctorDeps, options: DoctorOptions): Pr
 export function registerDoctorCommand(parent: Command, deps?: Partial<DoctorDeps>): void {
   const doctor = parent
     .command('doctor')
-    .description('Validate Kimi Code configuration files.')
+    .description(`Validate ${productDisplayName()} configuration files.`)
     .action(async () => {
       await runDoctorCommand(deps, {});
     });
@@ -242,7 +243,7 @@ function formatSuccess(results: readonly CheckResult[]): string {
 
 function formatFailure(results: readonly CheckResult[], issueCount: number): string {
   return [
-    `Kimi doctor found ${String(issueCount)} ${issueCount === 1 ? 'issue' : 'issues'}.`,
+    `${cliCommandDisplayName()} doctor found ${String(issueCount)} ${issueCount === 1 ? 'issue' : 'issues'}.`,
     '',
     ...formatResults(results),
     '',

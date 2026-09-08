@@ -13,7 +13,7 @@ import {
   type ThinkingEffort,
 } from '@moonshot-ai/kimi-code-sdk';
 
-import { PRODUCT_NAME } from '#/constant/app';
+import { productDisplayName } from '#/utils/host-package';
 import { currentTheme } from '#/tui/theme';
 import { PERMISSION_MODE_DISPLAY_NAMES } from '#/tui/utils/permission-mode';
 import {
@@ -129,7 +129,7 @@ export function buildStatusReportLines(options: StatusReportOptions): string[] {
   }
 
   const lines: string[] = [
-    `${accent(`>_ ${PRODUCT_NAME}`)} ${muted(`(v${options.version})`)}`,
+    `${accent(`>_ ${productDisplayName()}`)} ${muted(`(v${options.version})`)}`,
     '',
   ];
   addFieldRows(lines, rows, muted, value, errorStyle);

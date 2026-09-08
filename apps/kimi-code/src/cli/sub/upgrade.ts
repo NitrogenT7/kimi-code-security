@@ -6,6 +6,7 @@ import { INTERACTIVE_UPDATE_CHECK_TIMEOUT_MS } from '#/constant/app';
 import { refreshUpdateCache } from '#/cli/update/refresh';
 import { selectUpdateTarget } from '#/cli/update/select';
 import { detectInstallSource } from '#/cli/update/source';
+import { productDisplayName } from '#/utils/host-package';
 import {
   canAutoInstall,
   installCommandFor,
@@ -82,7 +83,9 @@ export async function handleUpgrade(
     logUpgradeInfo(deps.logger, 'manual upgrade no update', {
       currentVersion,
     });
-    deps.stdout.write(`Kimi Code is already up to date (${formatDisplayVersion(currentVersion)}).\n`);
+    deps.stdout.write(
+      `${productDisplayName()} is already up to date (${formatDisplayVersion(currentVersion)}).\n`,
+    );
     return 0;
   }
 
