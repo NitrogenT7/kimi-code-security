@@ -301,6 +301,7 @@ function makeHarness(session = makeSession(), overrides: Record<string, unknown>
     resumeSession: vi.fn(async () => session),
     forkSession: vi.fn(async () => session),
     reloadSession: vi.fn(async () => session),
+    renameSession: vi.fn(async () => {}),
     listSessions: vi.fn(async () => []),
     exportSession: vi.fn(async () => ({
       zipPath: '/tmp/fake-session.zip',
@@ -1489,6 +1490,54 @@ describe('KimiTUI message flow', () => {
     });
     expect(harness.createSession).toHaveBeenCalledTimes(1);
     expect(driver.getCurrentSessionId()).toBe('ses-lazy');
+  });
+
+  it('names a session created via /new <name> and shows the name in the status bar', async () => {
+    const initialSession = makeSession({ id: 'ses-initial' });
+    const namedSession = makeSession({ id: 'ses-named' });
+    const createSession = vi.fn(async () => namedSession);
+    const { driver, harness } = await makeDriver(initialSession, { createSession });
+
+    driver.handleUserInput('/new fix-login');
+
+    await vi.waitFor(() => {
+      expect(harness.createSession).toHaveBeenCalledTimes(1);
+      expect(harness.renameSession).toHaveBeenCalledWith({
+        id: 'ses-named',
+        title: 'fix-login',
+      });
+      expect(stripSgr(renderTranscript(driver))).toContain(
+        'Started a new session "fix-login" (ses-named).',
+      );
+    });
+    expect(driver.getCurrentSessionId()).toBe('ses-named');
+  });
+
+  it('keeps a /new session usable when renaming it fails', async () => {
+    const initialSession = makeSession({ id: 'ses-initial' });
+    const freshSession = makeSession({ id: 'ses-fresh' });
+    const createSession = vi.fn(async () => freshSession);
+    const { driver, harness } = await makeDriver(initialSession, {
+      createSession,
+      renameSession: vi.fn(async () => {
+        throw new Error('rename failed');
+      }),
+    });
+
+    driver.handleUserInput('/new fix-login');
+
+    await vi.waitFor(() => {
+      expect(harness.createSession).toHaveBeenCalledTimes(1);
+      expect(harness.renameSession).toHaveBeenCalledWith({
+        id: 'ses-fresh',
+        title: 'fix-login',
+      });
+      expect(driver.getCurrentSessionId()).toBe('ses-fresh');
+    });
+    const transcript = stripSgr(renderTranscript(driver));
+    expect(transcript).not.toContain('rename failed');
+    expect(transcript).not.toContain('Post-create setup failed');
+    expect(transcript).toContain('Started a new session');
   });
 
   const thinkingModelsConfig = () => ({

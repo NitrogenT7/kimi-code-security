@@ -7,6 +7,7 @@ import {
 } from '#/tool/args-validator';
 import { USER_PROMPT_ORIGIN } from '#/agent/contextMemory/types';
 import { IAgentGoalService } from '#/features/goal/goalService';
+import { IAgentTodoService } from '#/features/todo/todoService';
 import { CreateGoalTool } from '#/features/goal/tools/create-goal/createGoalTool';
 import { GetGoalTool } from '#/features/goal/tools/get-goal/getGoalTool';
 import { SetGoalBudgetTool } from '#/features/goal/tools/set-goal-budget/setGoalBudgetTool';
@@ -57,7 +58,7 @@ describe('goal tools', () => {
     toolExecutor = ctx.get(IAgentToolExecutorService);
     const scope = ctx.get(IAgentScopeContext);
     setGoalBudgetTool = new SetGoalBudgetTool(goals, scope);
-    updateGoalTool = new UpdateGoalTool(goals, scope);
+    updateGoalTool = new UpdateGoalTool(goals, ctx.get(IAgentTodoService), scope);
   });
 
   afterEach(async () => {
@@ -279,6 +280,79 @@ describe('goal tools', () => {
     expect(result.output).toContain('Goal completed successfully');
     expect(result.output).toContain('Worked');
     expect(result.output).toContain('Write a concise final message for the user');
+  });
+
+  it('UpdateGoal complete is rejected with the open list while unfinished todo items remain', async () => {
+    await goals.createGoal({ objective: 'ship it' });
+    await ctx.get(IAgentTodoService).replace([
+      { title: 'Check the auth flow', status: 'pending' },
+      { title: 'Probe rate limits', status: 'in_progress' },
+      { title: 'Ship notes', status: 'done' },
+    ]);
+    const execution = updateGoalTool.resolveExecution({ status: 'complete' });
+    if (execution.isError === true) throw new Error('execution should not be an error');
+    const result = await execution.execute({ turnId: 0, toolCallId: 'call_open', signal });
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('2 open item(s) remain');
+    expect(result.output).toContain('1. [pending] Check the auth flow');
+    expect(result.output).toContain('2. [in_progress] Probe rate limits');
+    expect(result.stopTurn).toBeFalsy();
+    expect(goals.getGoal().goal?.status).toBe('active');
+  });
+
+  it('UpdateGoal complete passes when every todo item is done', async () => {
+    await goals.createGoal({ objective: 'ship it' });
+    await ctx.get(IAgentTodoService).replace([{ title: 'Check the auth flow', status: 'done' }]);
+    const execution = updateGoalTool.resolveExecution({ status: 'complete' });
+    if (execution.isError === true) throw new Error('execution should not be an error');
+    const result = await execution.execute({ turnId: 0, toolCallId: 'call_done', signal });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.stopTurn).toBe(true);
+    expect(result.output).toContain('Goal completed successfully');
+  });
+
+  it('UpdateGoal complete passes through after five rejected attempts', async () => {
+    await goals.createGoal({ objective: 'ship it' });
+    await ctx.get(IAgentTodoService).replace([{ title: 'Unanswerable question', status: 'pending' }]);
+    const execution = updateGoalTool.resolveExecution({ status: 'complete' });
+    if (execution.isError === true) throw new Error('execution should not be an error');
+
+    for (let i = 0; i < 5; i += 1) {
+      goals.incrementCompletionRetries();
+    }
+
+    const result = await execution.execute({ turnId: 0, toolCallId: 'call_retry', signal });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.stopTurn).toBe(true);
+    expect(result.output).toContain('Goal completed successfully');
+  });
+
+  it('UpdateGoal complete truncates the open list to ten items', async () => {
+    await goals.createGoal({ objective: 'ship it' });
+    await ctx.get(IAgentTodoService).replace(
+      Array.from({ length: 12 }, (_, i) => ({
+        title: `open item ${String(i + 1)}`,
+        status: 'pending' as const,
+      })),
+    );
+    const execution = updateGoalTool.resolveExecution({ status: 'complete' });
+    if (execution.isError === true) throw new Error('execution should not be an error');
+    const result = await execution.execute({ turnId: 0, toolCallId: 'call_truncate', signal });
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('12 open item(s) remain');
+    expect(result.output).toContain('10. [pending] open item 10');
+    expect(result.output).not.toContain('open item 11');
+  });
+
+  it('creating a goal resets the completion retry counter', async () => {
+    goals.incrementCompletionRetries();
+    goals.incrementCompletionRetries();
+    await goals.createGoal({ objective: 'fresh goal' });
+    expect(goals.getCompletionRetries()).toBe(0);
   });
 
   it('UpdateGoal blocked returns the blocked-reason prompt and stops the turn', async () => {

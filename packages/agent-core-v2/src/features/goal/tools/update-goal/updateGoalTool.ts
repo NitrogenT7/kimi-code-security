@@ -4,6 +4,8 @@ import { GOAL_MAIN_AGENT_ONLY, mainAgentOnlyExecution } from '#/agent/tools/main
 import { type ToolExecution } from '#/tool/toolContract';
 
 import { IAgentGoalService } from '#/features/goal/goalService';
+import { IAgentTodoService } from '#/features/todo/todoService';
+import type { TodoItem } from '#/features/todo/todoItem';
 import {
   buildGoalBlockedReasonPrompt,
   buildGoalCompletionSummaryPrompt,
@@ -24,6 +26,7 @@ export class UpdateGoalTool implements IUpdateGoalTool {
 
   constructor(
     @IAgentGoalService private readonly goal: IAgentGoalService,
+    @IAgentTodoService private readonly todo: IAgentTodoService,
     @IAgentScopeContext private readonly scopeContext: IAgentScopeContext,
   ) {}
 
@@ -61,6 +64,20 @@ export class UpdateGoalTool implements IUpdateGoalTool {
           return { output: 'Goal resumed.' };
         }
         if (status === 'complete') {
+          const MAX_COMPLETION_RETRIES = 5;
+          const todos = this.todo.get();
+          const open = todos.filter((todo: TodoItem) => todo.status !== 'done');
+          if (open.length > 0 && this.goal.getCompletionRetries() < MAX_COMPLETION_RETRIES) {
+            this.goal.incrementCompletionRetries();
+            const list = open
+              .slice(0, 10)
+              .map((todo, i) => `${String(i + 1)}. [${todo.status}] ${todo.title}`)
+              .join('\n');
+            return {
+              isError: true,
+              output: `Goal not completed: ${String(open.length)} open item(s) remain:\n${list}\n\nFinish or clear these todo items before marking the goal complete. Do not repeat completed work.`,
+            };
+          }
           const completed = await this.goal.markComplete({}, 'model');
           if (completed === null) {
             return { output: 'Goal not completed: no active goal.' };

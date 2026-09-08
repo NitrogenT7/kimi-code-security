@@ -193,7 +193,7 @@ export interface SlashCommandHost {
    */
   setExitForegroundTask(task: (exitCode: number) => Promise<void>): void;
   showHelpPanel(): void;
-  createNewSession(): Promise<void>;
+  createNewSession(title?: string): Promise<void>;
   showSessionPicker(): Promise<void>;
   sendNormalUserInput(text: string): void;
   /**
@@ -479,7 +479,7 @@ async function handleBuiltInSlashCommand(
         host.showError(slashBusyMessage(name, busyReason));
         return;
       }
-      await host.createNewSession();
+      await host.createNewSession(args.trim() || undefined);
       host.state.ui.requestRender();
       return;
     }

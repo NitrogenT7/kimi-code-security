@@ -189,6 +189,7 @@ interface ResumeContinuation {
 interface GoalEffectState {
   pendingContinuation?: PendingContinuation;
   liveTurnId?: number;
+  completionRetries: number;
   readonly goalDrivenTurns: Map<number, string>;
   readonly countedGoalTurns: Set<number>;
   readonly goalStarterTurns: Set<number>;
@@ -272,6 +273,7 @@ async function createGoal(context: GoalOperationContext, input: CreateGoalInput,
   assertSupportedAgent(context);
   const objective = validateObjective(context, input.objective);
   prepareForGoalCreation(context, input.replace === true);
+  context.effects.completionRetries = 0;
   const wallClockResumedAt = Date.now();
   void context.runtime.dispatch(
     new GoalCreate({
@@ -813,6 +815,7 @@ function clearInternal(context: GoalOperationContext,
   cancelPendingContinuation(context, opts.preserveLiveContinuation === true);
   context.runtime.send({ type: 'goal.deadline.clear' });
   context.effects.liveWallClockStartedAt = undefined;
+  context.effects.completionRetries = 0;
   void context.runtime.dispatch(new GoalClear({ agentId: context.runtime.agent.agentId }));
   if (opts.emit !== false) emitGoalUpdated(context, null);
   if (opts.track !== false) context.runtime.get(ITelemetryService).track2('goal_cleared', { actor });
@@ -1241,6 +1244,7 @@ const goalActorLogic = setup({
       pendingContinuationGoals: new Map(),
       goalTurnTargets: new Map(),
       exhaustedTurnBudgetGoals: new Map(),
+      completionRetries: 0,
     },
     runtime: input,
   }),
@@ -1288,6 +1292,8 @@ export interface IAgentGoalService {
   pauseOnInterrupt(input?: GoalReasonInput): Promise<GoalSnapshot | null>;
   recordTokenUsage(tokenDelta: number): Promise<GoalSnapshot | null>;
   incrementTurn(): Promise<GoalSnapshot | null>;
+  getCompletionRetries(): number;
+  incrementCompletionRetries(): void;
 }
 
 export const IAgentGoalService = createDecorator<IAgentGoalService>('agentGoalService');
@@ -1433,6 +1439,14 @@ export class AgentGoalService extends AgentActorService<GoalRuntimeState> implem
 
   async incrementTurn(): Promise<GoalSnapshot | null> {
     return incrementTurn(goalOperationContext(this.actor));
+  }
+
+  getCompletionRetries(): number {
+    return goalOperationContext(this.actor).effects.completionRetries;
+  }
+
+  incrementCompletionRetries(): void {
+    goalOperationContext(this.actor).effects.completionRetries += 1;
   }
 }
 

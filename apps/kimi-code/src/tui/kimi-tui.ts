@@ -2717,7 +2717,7 @@ export class KimiTUI {
     void this.showSessionWarnings(session);
   }
 
-  async createNewSession(): Promise<void> {
+  async createNewSession(title?: string): Promise<void> {
     if (this.state.appState.isReplaying) {
       this.showError('Cannot start a new session while history is replaying.');
       return;
@@ -2744,6 +2744,15 @@ export class KimiTUI {
       this.showError(`Post-create setup failed: ${msg}`);
       return;
     }
+    if (title !== undefined && title.length > 0) {
+      const sessionTitle = title.slice(0, 200);
+      try {
+        await this.harness.renameSession({ id: session.id, title: sessionTitle });
+      } catch {
+        /* non-fatal: the session works without a title */
+      }
+      await this.syncRuntimeState(session);
+    }
     try {
       await this.refreshSkillCommands(this.session);
       await this.refreshPluginCommands(this.session);
@@ -2752,7 +2761,11 @@ export class KimiTUI {
     }
     this.sessionEventHandler.startSubscription();
     this.clearTranscriptAndRedraw();
-    this.showStatus(`Started a new session (${session.id}).`);
+    this.showStatus(
+      title !== undefined && title.length > 0
+        ? `Started a new session "${title.slice(0, 200)}" (${session.id}).`
+        : `Started a new session (${session.id}).`,
+    );
     void this.showSessionWarnings(session);
     void this.showConfigWarningsIfAny();
   }

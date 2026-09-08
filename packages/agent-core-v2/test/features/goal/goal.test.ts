@@ -410,6 +410,27 @@ describe('AgentGoalService', () => {
       expect(removed.status).toBe('active');
       expect(goals.getGoal().goal).toBeNull();
     });
+
+    it('tracks completion retries and resets them when a goal is created', async () => {
+      expect(goals.getCompletionRetries()).toBe(0);
+      goals.incrementCompletionRetries();
+      goals.incrementCompletionRetries();
+      expect(goals.getCompletionRetries()).toBe(2);
+      await goals.createGoal({ objective: 'work', replace: true });
+      expect(goals.getCompletionRetries()).toBe(0);
+    });
+
+    it('resets completion retries when a goal is cancelled or completed', async () => {
+      await goals.createGoal({ objective: 'work' });
+      goals.incrementCompletionRetries();
+      await goals.cancelGoal({});
+      expect(goals.getCompletionRetries()).toBe(0);
+
+      await goals.createGoal({ objective: 'work' });
+      goals.incrementCompletionRetries();
+      await goals.markComplete({}, 'model');
+      expect(goals.getCompletionRetries()).toBe(0);
+    });
   });
 
   describe('AgentGoalService lifecycle', () => {
@@ -1710,11 +1731,13 @@ describe('goal error catalog metadata', () => {
 
 describe('AgentGoalService API boundary', () => {
   it('exposes only goal commands, queries, and observations', () => {
-    expect(Object.getOwnPropertyNames(AgentGoalService.prototype).sort()).toEqual([
+    expect(Object.getOwnPropertyNames(AgentGoalService.prototype).toSorted()).toEqual([
       'cancelGoal',
       'constructor',
       'createGoal',
+      'getCompletionRetries',
       'getGoal',
+      'incrementCompletionRetries',
       'incrementTurn',
       'isGoalToolTarget',
       'markBlocked',

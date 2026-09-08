@@ -152,7 +152,8 @@ describe('NotepadAgentModel', () => {
       const tool = lifecycle.handleOf(sub.agentId)!.accessor.get(INotepadTool);
       expect(tool).toBeInstanceOf(NotepadTool);
 
-      const execution = tool.resolveExecution({ content: 'from the sub agent tool' });
+      const execution = await tool.resolveExecution({ content: 'from the sub agent tool' });
+      if (execution.isError === true) throw new Error('execution should not be an error');
       const result = await execution.execute({
         signal: new AbortController().signal,
         turnId: 1,
