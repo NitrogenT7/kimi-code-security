@@ -80,6 +80,7 @@
         ./apps/kimi-code
         ./apps/vscode
         ./apps/kimi-inspect
+        ./apps/kimi-web
         ./apps/vis
         ./apps/vis/server
         ./apps/vis/web
@@ -105,6 +106,7 @@
         "@moonshot-ai/kimi-code"
         "kimi-code"
         "@moonshot-ai/kimi-inspect"
+        "@moonshot-ai/kimi-web"
         "@moonshot-ai/vis"
         "@moonshot-ai/vis-server"
         "@moonshot-ai/vis-web"
