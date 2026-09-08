@@ -309,6 +309,14 @@ export const BUILTIN_SLASH_COMMANDS = [
     argumentHint: '<absolute path>',
   },
   {
+    name: 'clean',
+    aliases: [],
+    description: 'Delete old auto-named sessions (dry-run by default)',
+    priority: 60,
+    availability: 'idle-only',
+    argumentHint: '[dry|go] [days] [all]',
+  },
+  {
     name: 'experiments',
     aliases: ['experimental'],
     description: 'Manage experimental features',

@@ -50,6 +50,7 @@ import {
 } from './info';
 import { handleAddDirCommand } from './add-dir';
 import { handleCdCommand } from './cd';
+import { handleCleanCommand } from './clean';
 import { parseSlashInput } from './parse';
 import { handlePluginsCommand } from './plugins';
 import { handleProviderCommand } from './provider';
@@ -346,6 +347,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'cd':
       await handleCdCommand(host, args);
+      return;
+    case 'clean':
+      await handleCleanCommand(host, args);
       return;
     case 'experiments':
       await showExperimentsPanel(host);

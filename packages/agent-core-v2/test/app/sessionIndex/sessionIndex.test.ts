@@ -121,6 +121,17 @@ describe('FileSessionIndex (legacy)', () => {
     expect(await store.get('missing')).toBeUndefined();
   });
 
+  it('summary surfaces isCustomTitle from the metadata document', async () => {
+    await seedSession('named', { title: 'mine', isCustomTitle: true });
+    await seedSession('auto', { title: 'hi' });
+    await seedSession('legacy', {});
+
+    const store = build();
+    expect((await store.get('named'))?.isCustomTitle).toBe(true);
+    expect((await store.get('auto'))?.isCustomTitle).toBe(false);
+    expect((await store.get('legacy'))?.isCustomTitle).toBe(false);
+  });
+
   it('recovers cwd from the metadata document (v2 cwd, v1 workDir, custom.cwd)', async () => {
     await seedSession('v2', { cwd: '/repo/v2' });
     await seedSession('v1', { workDir: '/repo/v1' });

@@ -110,6 +110,28 @@ describe('SessionStore', () => {
       const summary = await store.get(sessionId);
       expect(summary.workDir).toBe(stateWorkDir);
     });
+
+    it('surfaces isCustomTitle from state.json (false when absent)', async () => {
+      const workDir = await trackWorkDir('titleflag');
+      const sessionId = 'session_titleflag';
+      const customId = 'session_titled';
+      await store.create({ id: sessionId, workDir });
+      await store.create({ id: customId, workDir });
+      const baseDir = join(homeDir, 'sessions', encodeWorkDirKey(workDir));
+      await writeFile(
+        join(baseDir, sessionId, 'state.json'),
+        JSON.stringify({ title: 'auto title', isCustomTitle: false }),
+        'utf-8',
+      );
+      await writeFile(
+        join(baseDir, customId, 'state.json'),
+        JSON.stringify({ title: 'mine', isCustomTitle: true }),
+        'utf-8',
+      );
+
+      expect((await store.get(sessionId)).isCustomTitle).toBe(false);
+      expect((await store.get(customId)).isCustomTitle).toBe(true);
+    });
   });
 
   describe('list by Windows workDir', () => {

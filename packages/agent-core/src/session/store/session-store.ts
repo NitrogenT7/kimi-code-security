@@ -539,6 +539,7 @@ export class SessionStore {
       ),
       archived: state?.archived === true,
       title: titleFromState(state),
+      isCustomTitle: state?.isCustomTitle === true,
       lastPrompt: state?.lastPrompt,
       metadata: metadataFromState(state),
     };

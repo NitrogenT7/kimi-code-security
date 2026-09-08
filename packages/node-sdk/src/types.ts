@@ -271,6 +271,7 @@ export interface SessionStatus {
 export interface SessionSummary {
   readonly id: string;
   readonly title?: string | undefined;
+  readonly isCustomTitle?: boolean;
   readonly lastPrompt?: string;
   readonly workDir: string;
   readonly sessionDir: string;

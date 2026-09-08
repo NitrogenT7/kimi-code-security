@@ -502,6 +502,7 @@ export class V2CoreBridge {
     return {
       id: session.id,
       title: meta.title,
+      isCustomTitle: meta.isCustomTitle === true,
       lastPrompt: meta.lastPrompt,
       workDir: ctx.cwd,
       sessionDir: ctx.sessionDir,
@@ -743,6 +744,7 @@ export class V2CoreBridge {
       summaries.push({
         id: item.id,
         title: item.title,
+        isCustomTitle: item.isCustomTitle,
         lastPrompt: item.lastPrompt,
         workDir,
         sessionDir: bootstrap.sessionDir(item.workspaceId, item.id),

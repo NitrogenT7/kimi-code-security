@@ -313,6 +313,7 @@ export class FileSessionIndex implements ISessionIndex {
       workspaceId,
       cwd: recoverCwd(meta),
       title: typeof meta['title'] === 'string' ? meta['title'] : undefined,
+      isCustomTitle: meta['isCustomTitle'] === true,
       lastPrompt: typeof meta['lastPrompt'] === 'string' ? meta['lastPrompt'] : undefined,
       createdAt: parseTime(meta['createdAt']),
       updatedAt: parseTime(meta['updatedAt']),
