@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-web/
 dist-single/
 dist-native/
 .tmp-api-extractor/
@@ -26,6 +27,8 @@ apps/vscode/artifacts/
 Dockerfile
 docker-compose.yml
 .dockerignore
+# Local docker scratch workspace (may contain credentials) - do not commit
+docker/
 
 docs/superpowers/
 reports/

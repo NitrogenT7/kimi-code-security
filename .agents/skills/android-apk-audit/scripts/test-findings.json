@@ -1,0 +1,62 @@
+[
+  {
+    "id": "VULN-001",
+    "title": "Hardcoded API Key in Source Code",
+    "severity": "Critical",
+    "confidence": "Confirmed",
+    "owasp_category": "M07 - Code Quality and Build Settings",
+    "cwe_id": "CWE-798",
+    "cvss_4_0_score": "9.1 (AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N)",
+    "description": "A production API key was found hardcoded in the MainActivity.java file. This allows anyone with access to the compiled APK to extract the API key and use it for unauthorized API calls.",
+    "proof_of_concept": "adb shell run-as com.example.app cat shared_prefs/Credentials.xml",
+    "remediation": "Remove the hardcoded API key and use Android Keystore to securely store credentials. Use Android NDK or a secure secret management solution for runtime key injection."
+  },
+  {
+    "id": "VULN-002",
+    "title": "Exported Activity with Intent Redirection",
+    "severity": "High",
+    "confidence": "Likely",
+    "owasp_category": "M01 - Improper Platform Usage",
+    "cwe_id": "CWE-926",
+    "cvss_4_0_score": "8.2 (AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:L/SC:N/SI:N/SA:N)",
+    "description": "The DeepLinkActivity is exported and accepts untrusted intent data without proper validation. This could lead to intent redirection attacks, allowing malicious apps to perform actions on behalf of the target app.",
+    "proof_of_concept": "adb shell am start -n com.example.app/.DeepLinkActivity -a android.intent.action.VIEW -d 'malicious://exploit'",
+    "remediation": "Set android:exported=\"false\" for activities that don't need to be accessible from other apps. If export is required, validate all incoming intent data using a whitelist approach."
+  },
+  {
+    "id": "VULN-003",
+    "title": "Weak SSL Certificate Validation",
+    "severity": "Medium",
+    "confidence": "Confirmed",
+    "owasp_category": "M03 - Insecure Communication",
+    "cwe_id": "CWE-295",
+    "cvss_4_0_score": "5.9 (AV:N/AC:H/AT:N/PR:N/UI:R/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N)",
+    "description": "The application implements a custom TrustManager that accepts all SSL certificates without validation, making it vulnerable to man-in-the-middle attacks.",
+    "proof_of_concept": "frida -U -f com.example.app -l ssl-pinning-bypass.js",
+    "remediation": "Remove the custom TrustManager implementation and use the default Android SSL validation. Implement certificate pinning using the network_security_config.xml file."
+  },
+  {
+    "id": "VULN-004",
+    "title": "Debug Mode Enabled in Release Build",
+    "severity": "Low",
+    "confidence": "Confirmed",
+    "owasp_category": "M09 - Reverse Engineering",
+    "cwe_id": "CWE-489",
+    "cvss_4_0_score": "3.5 (AV:N/AC:L/AT:N/PR:N/UI:R/VC:N/VI:N/VA:N/SC:L/SI:N/SA:N)",
+    "description": "The android:debuggable flag is set to true in the AndroidManifest.xml, which allows debugging tools to attach to the application in production builds.",
+    "proof_of_concept": "adb shell am start -D -n com.example.app/.MainActivity",
+    "remediation": "Set android:debuggable=\"false\" in the release build configuration. Ensure the build.gradle file properly sets debuggable to false for release builds."
+  },
+  {
+    "id": "VULN-005",
+    "title": "Outdated Third-Party Library",
+    "severity": "Informational",
+    "confidence": "Likely",
+    "owasp_category": "M10 - Extraneous Functionality",
+    "cwe_id": "CWE-1104",
+    "cvss_4_0_score": "0.0",
+    "description": "The application uses an outdated version of the okhttp library (3.12.0) which has known security vulnerabilities. Consider updating to the latest stable version.",
+    "proof_of_concept": "grep -r 'com.squareup.okhttp:okhttp' app/build.gradle",
+    "remediation": "Update the okhttp library to the latest stable version (4.12.0 or higher) to mitigate known security vulnerabilities."
+  }
+]
