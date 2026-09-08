@@ -5,6 +5,12 @@ import type { SlashCommandHost } from './dispatch';
 /** Default staleness threshold: 7 days without activity. */
 const DEFAULT_DAYS = 7;
 
+/** How many target entries to preview inside the confirmation dialog. */
+const PREVIEW_LIMIT = 6;
+
+/** How many failed ids to spell out in the result message. */
+const FAILED_SAMPLE_LIMIT = 5;
+
 interface CleanOptions {
   readonly go: boolean;
   readonly all: boolean;
@@ -54,28 +60,54 @@ function formatList(sessions: readonly SessionSummary[]): string {
   return lines.join('\n');
 }
 
+/** Short preview (first entries + a "and K more" tail) for the confirm dialog. */
+function formatPreview(sessions: readonly SessionSummary[]): string {
+  const lines = sessions
+    .slice(0, PREVIEW_LIMIT)
+    .map(
+      (s) =>
+        `${s.id.slice(0, 8)}  ${formatAge(s.updatedAt)}  ${(s.title ?? '(untitled)').slice(0, 44)}`,
+    );
+  if (sessions.length > PREVIEW_LIMIT) {
+    lines.push(`… and ${String(sessions.length - PREVIEW_LIMIT)} more`);
+  }
+  return lines.join('\n');
+}
+
 /**
  * `/clean [dry|go] [days] [all]` — delete auto-named sessions that have been
  * idle past the threshold (default 7 days). Dry-run by default: `/clean go`
  * is required to actually delete, and even that asks for confirmation first.
  * Custom-named sessions and the active session are never touched.
+ *
+ * UX: a spinner covers the scan and the delete loop (which can take a while
+ * over hundreds of sessions), the confirm dialog previews what will go, and
+ * the outcome lands as a persistent ✓/✗ line in the transcript.
  */
 export async function handleCleanCommand(host: SlashCommandHost, args: string): Promise<void> {
   const opts = parseArgs(args);
   const cutoffMs = opts.days * 86_400_000;
+  const scopeLabel = opts.all ? 'all workspaces' : host.state.appState.workDir;
 
+  const scan = host.showProgressSpinner(`Scanning sessions (${scopeLabel})…`);
   let sessions: readonly SessionSummary[];
   try {
     sessions = opts.all
       ? await host.harness.listSessions({})
       : await host.harness.listSessions({ workDir: host.state.appState.workDir });
   } catch (error) {
+    scan.stop({ ok: false, label: 'Failed to list sessions' });
     host.showError(`Failed to list sessions: ${error instanceof Error ? error.message : String(error)}`);
     return;
   }
 
   const activeId = host.session?.id;
   const targets = sessions.filter((s) => s.id !== activeId && isCleanable(s, cutoffMs));
+  scan.stop({
+    ok: true,
+    label: `Found ${String(targets.length)} cleanable of ${String(sessions.length)} session(s) ` +
+      `(auto-named, idle ≥ ${String(opts.days)}d, ${scopeLabel})`,
+  });
 
   if (targets.length === 0) {
     host.showStatus(
@@ -83,8 +115,6 @@ export async function handleCleanCommand(host: SlashCommandHost, args: string): 
     );
     return;
   }
-
-  const scopeLabel = opts.all ? 'all workspaces' : host.state.appState.workDir;
 
   if (!opts.go) {
     host.showStatus(
@@ -97,10 +127,16 @@ export async function handleCleanCommand(host: SlashCommandHost, args: string): 
 
   host.mountEditorReplacement(
     new ChoicePickerComponent({
-      title: `Delete ${String(targets.length)} auto-named session(s) (idle ≥ ${String(opts.days)}d)?`,
-      hint: '↑↓ navigate · Enter confirm · Esc cancel',
+      title: `Delete ${String(targets.length)} auto-named session(s)?`,
+      hint: `scope: ${scopeLabel} · idle ≥ ${String(opts.days)}d · ↑↓ navigate · Enter confirm · Esc cancel`,
+      notice: formatPreview(targets),
+      noticeTone: 'warning',
       options: [
-        { value: 'delete', label: 'Yes, delete them' },
+        {
+          value: 'delete',
+          label: `Yes, delete ${String(targets.length)} session(s)`,
+          tone: 'danger',
+        },
         { value: 'cancel', label: 'No' },
       ],
       onSelect: (value) => {
@@ -125,19 +161,33 @@ async function executeClean(
     return;
   }
 
+  const total = targets.length;
+  const progress = host.showProgressSpinner(`Deleting 0/${String(total)}…`);
   let deleted = 0;
-  let failed = 0;
+  const failedIds: string[] = [];
   for (const summary of targets) {
     try {
       await host.harness.deleteSession(summary.id);
       deleted += 1;
     } catch {
-      failed += 1;
+      failedIds.push(summary.id);
     }
+    progress.setLabel(`Deleting ${String(deleted + failedIds.length)}/${String(total)}…`);
   }
 
-  const lines = [`Deleted ${String(deleted)} session(s).`];
-  if (failed > 0) lines.push(`Failed to delete ${String(failed)} session(s).`);
-  lines.push('Run /sessions to refresh the list.');
-  host.showStatus(lines.join('\n'), failed > 0 ? 'warning' : 'success');
+  progress.stop({
+    ok: failedIds.length === 0,
+    label:
+      `Deleted ${String(deleted)} session(s).` +
+      (failedIds.length > 0 ? ` Failed: ${String(failedIds.length)}.` : ''),
+  });
+
+  if (failedIds.length > 0) {
+    const sample = failedIds.slice(0, FAILED_SAMPLE_LIMIT).map((id) => `  ${id.slice(0, 8)}`);
+    const more = failedIds.length > FAILED_SAMPLE_LIMIT
+      ? `\n  … and ${String(failedIds.length - FAILED_SAMPLE_LIMIT)} more`
+      : '';
+    host.showStatus(`Failed to delete:\n${sample.join('\n')}${more}`, 'warning');
+  }
+  host.showStatus('Run /sessions to refresh the list.', failedIds.length > 0 ? 'warning' : 'success');
 }

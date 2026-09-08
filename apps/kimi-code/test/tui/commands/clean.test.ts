@@ -8,6 +8,11 @@ import type { SlashCommandHost } from '#/tui/commands/dispatch';
 const NOW = Date.now();
 const DAY = 86_400_000;
 
+interface RecordedSpinner {
+  labels: string[];
+  stops: { ok: boolean; label: string }[];
+}
+
 function summary(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
     id: 'session-aaaa-1',
@@ -29,7 +34,9 @@ function makeHost(sessions: readonly SessionSummary[], activeId?: string) {
       isCompacting: false,
     },
   };
-  let picker: { handleInput: (data: string) => void } | null = null;
+  let picker: { handleInput: (data: string) => void; render: (width: number) => string[] } | null =
+    null;
+  const spinners: RecordedSpinner[] = [];
   const deleteSession = vi.fn(async () => {});
   const host = {
     state,
@@ -40,25 +47,40 @@ function makeHost(sessions: readonly SessionSummary[], activeId?: string) {
     refreshSlashCommandAutocomplete: vi.fn(),
     showError: vi.fn(),
     showStatus: vi.fn(),
+    showProgressSpinner: vi.fn(() => {
+      const record: RecordedSpinner = { labels: [], stops: [] };
+      spinners.push(record);
+      return {
+        setLabel: (label: string) => {
+          record.labels.push(label);
+        },
+        stop: (opts: { ok: boolean; label: string }) => {
+          record.stops.push(opts);
+        },
+      };
+    }),
     track: vi.fn(),
     mountEditorReplacement: vi.fn((panel: unknown) => {
-      picker = panel as { handleInput: (data: string) => void };
+      picker = panel as { handleInput: (data: string) => void; render: (width: number) => string[] };
     }),
     restoreEditor: vi.fn(),
   } as unknown as SlashCommandHost & {
     harness: { deleteSession: ReturnType<typeof vi.fn> };
     showStatus: ReturnType<typeof vi.fn>;
     showError: ReturnType<typeof vi.fn>;
+    showProgressSpinner: ReturnType<typeof vi.fn>;
     mountEditorReplacement: ReturnType<typeof vi.fn>;
     restoreEditor: ReturnType<typeof vi.fn>;
   };
   return {
     host,
     deleteSession,
+    spinners,
     // Enter selects the highlighted option ("Yes, delete them" is first).
     confirm: () => picker?.handleInput('\r'),
     // Esc cancels the picker.
     cancel: () => picker?.handleInput('\u001B'),
+    renderPicker: () => picker?.render(120).join('\n') ?? '',
   };
 }
 
@@ -76,21 +98,69 @@ describe('handleCleanCommand', () => {
     expect(host.showStatus).toHaveBeenCalledWith(expect.stringContaining('/clean go'));
   });
 
+  it('reports scan results on the spinner before the dry-run list', async () => {
+    const stale = summary();
+    const fresh = summary({ id: 'session-bbbb-2', updatedAt: NOW - 1 * DAY });
+    const { host, spinners } = makeHost([stale, fresh]);
+
+    await handleCleanCommand(host, '');
+
+    expect(host.showProgressSpinner).toHaveBeenCalledWith(expect.stringContaining('Scanning'));
+    expect(spinners[0]?.stops[0]?.ok).toBe(true);
+    expect(spinners[0]?.stops[0]?.label).toContain('Found 1 cleanable of 2 session(s)');
+  });
+
   it('skips the active session and custom-named sessions even on go', async () => {
     const active = summary({ id: 'session-active' });
     const stale = summary({ id: 'session-stale' });
     const named = summary({ id: 'session-named', isCustomTitle: true });
-    const { host, deleteSession, confirm } = makeHost([active, stale, named], 'session-active');
+    const { host, deleteSession, confirm, spinners } = makeHost(
+      [active, stale, named],
+      'session-active',
+    );
 
     await handleCleanCommand(host, 'go');
     confirm();
     await vi.waitFor(() => expect(deleteSession).toHaveBeenCalledTimes(1));
 
     expect(deleteSession).toHaveBeenCalledWith('session-stale');
-    expect(host.showStatus).toHaveBeenCalledWith(
-      expect.stringContaining('Deleted 1 session(s).'),
-      'success',
+    const result = spinners.at(-1);
+    expect(result?.stops.at(-1)?.label).toContain('Deleted 1 session(s).');
+    expect(result?.stops.at(-1)?.ok).toBe(true);
+    expect(host.showStatus).toHaveBeenCalledWith('Run /sessions to refresh the list.', 'success');
+  });
+
+  it('shows a live progress counter while deleting', async () => {
+    const staleA = summary({ id: 'session-fail-a' });
+    const staleB = summary({ id: 'session-ok-b' });
+    const { host, deleteSession, confirm, spinners } = makeHost([staleA, staleB]);
+    deleteSession.mockImplementation(async (...callArgs: unknown[]) => {
+      if (callArgs[0] === 'session-fail-a') throw new Error('boom');
+    });
+
+    await handleCleanCommand(host, 'go');
+    confirm();
+    await vi.waitFor(() => expect(deleteSession).toHaveBeenCalledTimes(2));
+
+    const progress = spinners.at(-1);
+    expect(progress?.labels).toContain('Deleting 1/2…');
+    expect(progress?.labels).toContain('Deleting 2/2…');
+  });
+
+  it('previews the targets inside the confirm dialog', async () => {
+    const many = Array.from({ length: 8 }, (_, i) =>
+      summary({ id: `aaaaaaaa-0${String(i)}`, title: `auto title ${String(i)}` }),
     );
+    const { host, deleteSession, renderPicker } = makeHost(many);
+
+    await handleCleanCommand(host, 'go');
+
+    const rendered = renderPicker();
+    expect(rendered).toContain('Delete 8 auto-named session(s)?');
+    expect(rendered).toContain('Yes, delete 8 session(s)');
+    expect(rendered).toContain('… and 2 more');
+    expect(rendered).toContain('auto title 0');
+    expect(deleteSession).not.toHaveBeenCalled();
   });
 
   it('honours a custom day threshold', async () => {
@@ -118,18 +188,19 @@ describe('handleCleanCommand', () => {
 
   it('reports a count of zero when nothing qualifies', async () => {
     const fresh = summary({ updatedAt: NOW - 1 * DAY });
-    const { host, deleteSession } = makeHost([fresh]);
+    const { host, deleteSession, spinners } = makeHost([fresh]);
 
     await handleCleanCommand(host, '');
 
     expect(deleteSession).not.toHaveBeenCalled();
     expect(host.showStatus).toHaveBeenCalledWith(expect.stringContaining('No cleanable sessions'));
+    expect(spinners[0]?.stops[0]?.label).toContain('Found 0 cleanable of 1 session(s)');
   });
 
   it('keeps counting deletions that fail and reports them as warnings', async () => {
     const staleA = summary({ id: 'session-fail-a' });
     const staleB = summary({ id: 'session-ok-b' });
-    const { host, deleteSession, confirm } = makeHost([staleA, staleB]);
+    const { host, deleteSession, confirm, spinners } = makeHost([staleA, staleB]);
     deleteSession.mockImplementation(async (...callArgs: unknown[]) => {
       if (callArgs[0] === 'session-fail-a') throw new Error('boom');
     });
@@ -138,13 +209,13 @@ describe('handleCleanCommand', () => {
     confirm();
     await vi.waitFor(() => expect(deleteSession).toHaveBeenCalledTimes(2));
 
+    const result = spinners.at(-1);
+    expect(result?.stops.at(-1)?.ok).toBe(false);
+    expect(result?.stops.at(-1)?.label).toContain('Deleted 1 session(s). Failed: 1.');
     expect(host.showStatus).toHaveBeenCalledWith(
-      expect.stringContaining('Deleted 1 session(s).'),
+      expect.stringContaining('Failed to delete:'),
       'warning',
     );
-    expect(host.showStatus).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to delete 1 session(s).'),
-      'warning',
-    );
+    expect(host.showStatus).toHaveBeenCalledWith('Run /sessions to refresh the list.', 'warning');
   });
 });
