@@ -786,6 +786,88 @@ key = "${titleOAuthRef.key}"
     }
   });
 
+  it('pins a closed session through the harness metadata write', async () => {
+    const { harness } = await makeHarness();
+    const workDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-work-'));
+    tempDirs.push(workDir);
+
+    try {
+      const session = await harness.createSession({ id: 'ses_pin_closed', workDir });
+      await session.close();
+
+      // v1 parity would 404 here; the v2 client resumes the cold session for
+      // the read-merge-write and closes it again, so host-owned flags (the
+      // picker's pin) work on closed sessions.
+      await harness.updateSessionMetadata({
+        sessionId: session.id,
+        metadata: { pinned: true, pinnedAt: 1234 },
+      });
+
+      const listed = (await harness.listSessions({ workDir })).find(
+        (item) => item.id === 'ses_pin_closed',
+      );
+      expect(listed?.metadata).toMatchObject({ pinned: true, pinnedAt: 1234 });
+
+      // Unpin writes `false` — the custom merge has no key deletion — and
+      // unrelated custom keys survive.
+      await harness.updateSessionMetadata({
+        sessionId: session.id,
+        metadata: { pinned: false, keep: 'me' },
+      });
+      const after = (await harness.listSessions({ workDir })).find(
+        (item) => item.id === 'ses_pin_closed',
+      );
+      expect(after?.metadata).toMatchObject({ pinned: false, pinnedAt: 1234, keep: 'me' });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('writes harness metadata onto a live session without closing it', async () => {
+    const { harness } = await makeHarness();
+    const workDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-work-'));
+    tempDirs.push(workDir);
+
+    try {
+      await harness.createSession({ id: 'ses_pin_live', workDir });
+      await harness.updateSessionMetadata({
+        sessionId: 'ses_pin_live',
+        metadata: { pinned: true, pinnedAt: 42 },
+      });
+
+      // The live facade stays open (used in place, not resumed/closed)...
+      const stillLive = harness.getSession('ses_pin_live');
+      expect(stillLive?.isClosed).toBe(false);
+      // ...and the merge is visible in the listing projection (the facade's
+      // cached summary is not auto-refreshed; callers re-fetch, as the picker
+      // does after every pin).
+      const listed = (await harness.listSessions({ workDir })).find(
+        (item) => item.id === 'ses_pin_live',
+      );
+      expect(listed?.metadata).toMatchObject({ pinned: true, pinnedAt: 42 });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('keeps the goal metadata key reserved on the harness metadata write', async () => {
+    const { harness } = await makeHarness();
+    const workDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-work-'));
+    tempDirs.push(workDir);
+
+    try {
+      await harness.createSession({ id: 'ses_meta_goal_key', workDir });
+      await expect(
+        harness.updateSessionMetadata({
+          sessionId: 'ses_meta_goal_key',
+          metadata: { goal: { status: 'complete' } },
+        }),
+      ).rejects.toMatchObject({ code: 'goal.metadata_reserved' });
+    } finally {
+      await harness.close();
+    }
+  });
+
   it('serves listWorkspaceSkills through the engineAccessor escape hatch', async () => {
     const { harness, homeDir } = await makeHarness();
     const workDir = await mkdtemp(join(tmpdir(), 'kimi-sdk-v2-work-'));

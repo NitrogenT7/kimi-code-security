@@ -81,6 +81,24 @@ describe("Input component", () => {
 			assert.ok(line);
 			assert.ok(visibleWidth(line) <= width);
 		});
+
+		it("parks the cursor at the end so a prefilled value renders fully", () => {
+			const input = new Input();
+			const width = 20;
+			const text = "0123456789abcdefghij prefilled tail";
+			input.setValue(text);
+			input.focused = true;
+
+			// The window scrolls to the cursor, so showing the tail proves the
+			// cursor was parked at the end (cursor-at-0 would show the head).
+			const [line] = input.render(width);
+			assert.ok(line);
+			assert.ok(line.includes("prefilled tail"));
+
+			// Follow-up typing appends instead of overwriting from position 0.
+			input.handleInput("X");
+			assert.strictEqual(input.getValue(), `${text}X`);
+		});
 	});
 
 	describe("Kill ring", () => {

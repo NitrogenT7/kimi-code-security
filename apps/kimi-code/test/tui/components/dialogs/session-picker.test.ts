@@ -2,6 +2,11 @@ import { visibleWidth } from '@moonshot-ai/pi-tui';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionPickerComponent } from '#/tui/components/dialogs/session-picker';
+import {
+  SessionRenameDialogComponent,
+  type SessionRenameDialogResult,
+} from '#/tui/components/dialogs/session-rename-dialog';
+import { PIN_MARK } from '#/tui/constant/symbols';
 
 function stripAnsi(text: string): string {
   return text.replaceAll(/\[[0-?]*[ -/]*[@-~]/g, '');
@@ -549,8 +554,43 @@ describe('SessionPickerComponent', () => {
 
     expect(output).toContain('Search: needle');
     expect(output).toContain('N1e2e3d4l5e session');
-    expect(output).not.toContain('Alpha session');
+    expect(output).toContain('Alpha session');
     expect(output).not.toContain('Beta session');
+  });
+
+  it('fuzzy-matches the last prompt in addition to the title', () => {
+    const component = new SessionPickerComponent({
+      sessions: [
+        {
+          id: 'ses_prompt_hit',
+          title: 'Unrelated title',
+          last_prompt: 'redesign the picker for quantum routers',
+          work_dir: '/tmp/project',
+          updated_at: 1,
+        },
+        {
+          id: 'ses_prompt_miss',
+          title: 'Another session',
+          last_prompt: 'fix the login flow',
+          work_dir: '/tmp/project',
+          updated_at: 2,
+        },
+      ],
+      loading: false,
+      currentSessionId: '',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    for (const ch of 'quantum') {
+      component.handleInput(ch);
+    }
+
+    const output = renderPlain(component);
+
+    expect(output).toContain('Search: quantum');
+    expect(output).toContain('Unrelated title');
+    expect(output).not.toContain('Another session');
   });
 
   it('clears the query on Backspace and cancels on Esc only after the query is empty', () => {
@@ -868,5 +908,191 @@ describe('SessionPickerComponent', () => {
     component.handleInput('a');
 
     expect(renderPlain(component)).toContain('· searching all…');
+  });
+
+  it('calls onRename with the selected session when Ctrl+R is pressed', () => {
+    const onRename = vi.fn();
+    const target = { id: 'ses_b', title: 'Beta', work_dir: '/tmp/p', updated_at: 2 };
+    const component = new SessionPickerComponent({
+      sessions: [
+        { id: 'ses_a', title: 'Alpha', work_dir: '/tmp/p', updated_at: 1 },
+        target,
+      ],
+      loading: false,
+      currentSessionId: '',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+      onRename,
+    });
+
+    component.handleInput('\u001B[B');
+    component.handleInput('\u0012');
+
+    expect(onRename).toHaveBeenCalledOnce();
+    expect(onRename).toHaveBeenCalledWith(target);
+  });
+
+  it('calls onTogglePin with the selected session when Ctrl+P is pressed', () => {
+    const onTogglePin = vi.fn();
+    const target = { id: 'ses_b', title: 'Beta', work_dir: '/tmp/p', updated_at: 2 };
+    const component = new SessionPickerComponent({
+      sessions: [
+        { id: 'ses_a', title: 'Alpha', work_dir: '/tmp/p', updated_at: 1 },
+        target,
+      ],
+      loading: false,
+      currentSessionId: '',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+      onTogglePin,
+    });
+
+    component.handleInput('\u001B[B');
+    component.handleInput('\u0010');
+
+    expect(onTogglePin).toHaveBeenCalledOnce();
+    expect(onTogglePin).toHaveBeenCalledWith(target);
+  });
+
+  it('ignores Ctrl+R and Ctrl+P when the callbacks are absent', () => {
+    const onSelect = vi.fn();
+    const onCancel = vi.fn();
+    const component = new SessionPickerComponent({
+      sessions: [{ id: 'ses_a', title: 'Alpha', work_dir: '/tmp/p', updated_at: 1 }],
+      loading: false,
+      currentSessionId: '',
+      onSelect,
+      onCancel,
+    });
+
+    component.handleInput('\u0012');
+    component.handleInput('\u0010');
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('prefixes the pinned row with the pin mark and budgets the extra width', () => {
+    const now = new Date('2026-05-11T12:00:00.000Z').getTime();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+
+    const component = new SessionPickerComponent({
+      sessions: [
+        {
+          id: 'ses_pinned',
+          title: 'Pinned session',
+          work_dir: '/tmp/project',
+          updated_at: now - 60 * 1000,
+          metadata: { pinned: true, pinnedAt: 100 },
+        },
+        {
+          id: 'ses_plain',
+          title: 'Plain session',
+          work_dir: '/tmp/project',
+          updated_at: now - 60 * 1000,
+        },
+      ],
+      loading: false,
+      currentSessionId: 'ses_other',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    const lines = component.render(120).map((line) => stripAnsi(line));
+    const pinnedLine = lines.find((line) => line.includes('Pinned session'));
+    const plainLine = lines.find((line) => line.includes('Plain session'));
+    expect(pinnedLine).toContain(`${PIN_MARK}Pinned session`);
+    expect(plainLine).not.toContain(PIN_MARK);
+
+    // The pin marker consumes header budget: the pinned title truncates
+    // before an unpinned title of identical length would.
+    const narrow = component.render(40).map((line) => stripAnsi(line));
+    for (const line of narrow) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(40);
+    }
+  });
+
+  it('shows the rename and pin hints when the callbacks are wired', () => {
+    const component = new SessionPickerComponent({
+      sessions: [{ id: 'ses_a', title: 'Alpha', work_dir: '/tmp/p', updated_at: 1 }],
+      loading: false,
+      currentSessionId: '',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+      onRename: vi.fn(),
+      onTogglePin: vi.fn(),
+    });
+
+    const output = renderPlain(component);
+
+    expect(output).toContain('Ctrl+R rename');
+    expect(output).toContain('Ctrl+P pin');
+  });
+
+  it('omits the rename and pin hints when the callbacks are absent', () => {
+    const component = new SessionPickerComponent({
+      sessions: [{ id: 'ses_a', title: 'Alpha', work_dir: '/tmp/p', updated_at: 1 }],
+      loading: false,
+      currentSessionId: '',
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    const output = renderPlain(component);
+
+    expect(output).not.toContain('Ctrl+R rename');
+    expect(output).not.toContain('Ctrl+P pin');
+  });
+});
+
+describe('SessionRenameDialogComponent', () => {
+  function renderPlainDialog(component: SessionRenameDialogComponent, width = 60): string {
+    return stripAnsi(component.render(width).join('\n'));
+  }
+
+  it('submits the trimmed title on Enter and truncates to 200 chars', () => {
+    const onDone = vi.fn<(result: SessionRenameDialogResult) => void>();
+    const component = new SessionRenameDialogComponent('  Padded title  ', onDone);
+
+    component.handleInput('\r');
+
+    expect(onDone).toHaveBeenCalledOnce();
+    expect(onDone).toHaveBeenCalledWith({ kind: 'ok', value: 'Padded title' });
+
+    const long = new SessionRenameDialogComponent('x'.repeat(300), onDone);
+    long.handleInput('\r');
+    expect(onDone).toHaveBeenLastCalledWith({ kind: 'ok', value: 'x'.repeat(200) });
+  });
+
+  it('rejects an empty submission in place and stays open', () => {
+    const onDone = vi.fn<(result: SessionRenameDialogResult) => void>();
+    const component = new SessionRenameDialogComponent('   ', onDone);
+
+    component.handleInput('\r');
+
+    expect(onDone).not.toHaveBeenCalled();
+    expect(renderPlainDialog(component)).toContain('Title cannot be empty.');
+
+    // A subsequent valid submit closes with the typed value.
+    for (const ch of 'renamed') {
+      component.handleInput(ch);
+    }
+    component.handleInput('\r');
+    expect(onDone).toHaveBeenCalledOnce();
+    expect(onDone).toHaveBeenCalledWith({ kind: 'ok', value: 'renamed' });
+  });
+
+  it('cancels on Esc, Ctrl-C, and Ctrl-D with the prefilled title intact', () => {
+    for (const key of [String.fromCodePoint(27), '\u0003', '\u0004']) {
+      const onDone = vi.fn<(result: SessionRenameDialogResult) => void>();
+      const component = new SessionRenameDialogComponent('Current title', onDone);
+
+      expect(renderPlainDialog(component)).toContain('Current title');
+
+      component.handleInput(key);
+
+      expect(onDone).toHaveBeenCalledOnce();
+      expect(onDone).toHaveBeenCalledWith({ kind: 'cancel' });
+    }
   });
 });

@@ -11,8 +11,9 @@ import {
   type Focusable,
 } from '@moonshot-ai/pi-tui';
 import { formatSessionLabel } from '#/migration/index';
-import { CURRENT_MARK, SELECT_POINTER } from '#/tui/constant/symbols';
+import { CURRENT_MARK, PIN_MARK, SELECT_POINTER } from '#/tui/constant/symbols';
 import { currentTheme } from '#/tui/theme';
+import { isSessionPinned } from '#/tui/utils/session-picker-rows';
 import { SearchableList } from '#/tui/utils/searchable-list';
 
 export interface SessionRow {
@@ -75,7 +76,11 @@ function singleLine(text: string): string {
 }
 
 function sessionSearchText(session: SessionRow): string {
-  return singleLine((session.title ?? session.id).trim() || session.id);
+  // Title plus last prompt (each single-lined) so a session can be found by
+  // name or by what it was about; the id remains the final fallback.
+  const title = singleLine((session.title ?? session.id).trim() || session.id);
+  const prompt = singleLine(session.last_prompt?.trim() ?? '');
+  return prompt.length > 0 ? `${title} ${prompt}` : title;
 }
 
 export class SessionPickerComponent extends Container implements Focusable {
@@ -84,6 +89,8 @@ export class SessionPickerComponent extends Container implements Focusable {
   private onSelect: (session: SessionRow) => void;
   private onCancel: () => void;
   private onToggleScope?: (selectedSessionId: string) => void;
+  private onRename?: (session: SessionRow) => void;
+  private onTogglePin?: (session: SessionRow) => void;
   private maxVisibleSessions: number;
   private pageSize: number;
   private visibleCount: number;
@@ -107,6 +114,8 @@ export class SessionPickerComponent extends Container implements Focusable {
     onCtrlC?: () => void;
     onCtrlD?: () => void;
     onToggleScope?: (selectedSessionId: string) => void;
+    onRename?: (session: SessionRow) => void;
+    onTogglePin?: (session: SessionRow) => void;
     maxVisibleSessions?: number;
     /** More pages exist on the backend (keyset paging). */
     hasMore?: boolean;
@@ -125,6 +134,8 @@ export class SessionPickerComponent extends Container implements Focusable {
     this.onSelect = opts.onSelect;
     this.onCancel = opts.onCancel;
     this.onToggleScope = opts.onToggleScope;
+    this.onRename = opts.onRename;
+    this.onTogglePin = opts.onTogglePin;
     this.maxVisibleSessions = opts.maxVisibleSessions ?? 4;
     this.pageSize = Math.max(1, opts.pageSize ?? 50);
     this.hasMore = opts.hasMore ?? false;
@@ -222,6 +233,18 @@ export class SessionPickerComponent extends Container implements Focusable {
       this.onToggleScope?.(this.list.selected()?.id ?? this.currentSessionId);
       return;
     }
+    if (matchesKey(data, Key.ctrl('r'))) {
+      if (this.onRename === undefined) return;
+      const session = this.list.selected();
+      if (session) this.onRename(session);
+      return;
+    }
+    if (matchesKey(data, Key.ctrl('p'))) {
+      if (this.onTogglePin === undefined) return;
+      const session = this.list.selected();
+      if (session) this.onTogglePin(session);
+      return;
+    }
     if (matchesKey(data, Key.escape)) {
       if (this.list.clearQuery()) {
         this.visibleCount = Math.min(this.filteredSessions().length, this.pageSize);
@@ -294,6 +317,8 @@ export class SessionPickerComponent extends Container implements Focusable {
       ...(view.query.length > 0 ? ['Backspace clear'] : []),
       '↑↓ navigate',
       scopeHint,
+      ...(this.onRename !== undefined ? ['Ctrl+R rename'] : []),
+      ...(this.onTogglePin !== undefined ? ['Ctrl+P pin'] : []),
       'Enter select',
       'Esc cancel',
     ].filter((item): item is string => item !== undefined);
@@ -384,14 +409,19 @@ export class SessionPickerComponent extends Container implements Focusable {
     const titleSource = formatSessionLabel({ title: rawTitle, metadata: session.metadata });
 
     // Inline trailing parts after the title: "<title>  <time>  ← current".
+    // The pinned marker sits between the pointer and the title.
+    const pinned = isSessionPinned(session);
+    const pinPrefix = pinned ? PIN_MARK : '';
+    const pinPrefixWidth = visibleWidth(pinPrefix);
     const trailingParts = [time, badge].filter((p) => p.length > 0);
     const trailingText = trailingParts.length > 0 ? '  ' + trailingParts.join('  ') : '';
     const trailingWidth = visibleWidth(trailingText);
-    const headerPrefixWidth = visibleWidth(pointer) + 1; // pointer + space
+    const headerPrefixWidth = visibleWidth(pointer) + 1 + pinPrefixWidth; // pointer + space (+ pin)
     const titleBudget = Math.max(8, width - headerPrefixWidth - trailingWidth);
     const shownTitle = truncateToWidth(singleLine(titleSource), titleBudget, ELLIPSIS);
 
     let header = currentTheme.fg(isSelected ? 'primary' : 'textDim', pointer + ' ');
+    if (pinned) header += currentTheme.fg('warning', pinPrefix);
     header += titleStyle(shownTitle);
     if (time.length > 0) header += '  ' + currentTheme.fg('textDim', time);
     if (badge.length > 0) header += '  ' + currentTheme.fg('success', badge);

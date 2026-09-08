@@ -69,7 +69,7 @@ export interface TUIState {
   /** A follow-up session page fetch is in flight. */
   sessionsLoadingMore: boolean;
   sessionsScope: 'cwd' | 'all';
-  activeDialog: 'session-picker' | 'help' | 'trust-prompt' | 'cache-hint' | null;
+  activeDialog: 'session-picker' | 'session-rename' | 'help' | 'trust-prompt' | 'cache-hint' | null;
   /**
    * True while an editor-replacement panel (help, trust prompt, goal queue
    * manager, …) is mounted in place of the editor. Delayed input restores
@@ -113,7 +113,7 @@ export function createTUIState(options: KimiTUIOptions): TUIState {
               .getText()
               .then((text) => {
                 if (!text || ui.getFocusedComponent() !== target) return;
-                target.handleInput?.(`\x1b[200~${text}\x1b[201~`);
+                target.handleInput?.(`\x1B[200~${text}\x1B[201~`);
                 ui.requestRender();
               })
               .catch(() => {});

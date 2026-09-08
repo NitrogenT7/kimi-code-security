@@ -1579,14 +1579,22 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
 
   /**
    * The base-class contract merges the patch into the session's `custom` map
-   * (v1 routes through the live session and 404s on a closed one; mirrored
-   * here by {@link requireLiveSession}).
+   * (v1 routes through the live session and 404s on a closed one). This
+   * client deliberately deviates from that parity: the metadata write goes
+   * through `withTemporarySession` — a cold session is resumed for the
+   * read-merge-write and closed again — so host-owned flags (e.g. the
+   * session picker's pin) work on closed sessions too. The merge keeps
+   * existing custom keys; unsetting a key means writing `false`/`undefined`
+   * rather than deleting it.
    */
   override async updateSessionMetadata(input: UpdateSessionMetadataRpcInput): Promise<void> {
-    this.requireLiveSession(input.sessionId);
-    const current = await this.klient.session(input.sessionId).get();
-    const custom = { ...current.custom, ...input.metadata };
-    await this.klient.session(input.sessionId).update({ custom });
+    await this.runSessionAccess(input.sessionId, () =>
+      this.withTemporarySession(input.sessionId, async () => {
+        const current = await this.klient.session(input.sessionId).get();
+        const custom = { ...current.custom, ...input.metadata };
+        await this.klient.session(input.sessionId).update({ custom });
+      }),
+    );
   }
 
   /**

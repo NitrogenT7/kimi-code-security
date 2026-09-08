@@ -7,7 +7,7 @@ import { withTelemetryContext } from '#/telemetry';
 
 import { capabilityRpc, Session } from '#/session';
 import type { KimiAuthFacade } from '#/auth';
-import type { SDKRpcClientBase } from '#/rpc';
+import type { SDKRpcClientBase, UpdateSessionMetadataRpcInput } from '#/rpc';
 import type {
   AuthenticateMcpServerOptions,
   AppMcpServerInspection,
@@ -293,6 +293,23 @@ export class KimiHarness {
     this.activeSessions
       .get(input.id)
       ?.emitMetaUpdated({ title: input.title, isCustomTitle: true });
+  }
+
+  /**
+   * Shallow-merge host-owned fields into a session's persisted custom
+   * metadata without materializing a `Session` (works on closed sessions on
+   * the v2 engine — the read side reads `state.json` when the session is not
+   * live). Mirrors `Session.updateMetadata`'s merge semantics and its
+   * `goal`-reserved-key guard.
+   */
+  async updateSessionMetadata(input: UpdateSessionMetadataRpcInput): Promise<void> {
+    if (Object.hasOwn(input.metadata, 'goal')) {
+      throw new KimiError(
+        ErrorCodes.GOAL_METADATA_RESERVED,
+        'Session metadata key "goal" is reserved for the goal lifecycle',
+      );
+    }
+    await this.rpc.updateSessionMetadata(input);
   }
 
   /**

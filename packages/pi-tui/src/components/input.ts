@@ -42,7 +42,10 @@ export class Input implements Component, Focusable {
 
 	setValue(value: string): void {
 		this.value = value;
-		this.cursor = Math.min(this.cursor, value.length);
+		// Park the cursor at the end: a prefilled value should render fully
+		// (cursor-at-0 scrolls the head out of view) and follow-up typing
+		// appends, matching every "edit this field" interaction.
+		this.cursor = value.length;
 	}
 
 	handleInput(data: string): void {
