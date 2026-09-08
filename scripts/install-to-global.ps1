@@ -191,6 +191,28 @@ $pkgJson | ConvertTo-Json -Depth 32 | ForEach-Object {
   [System.IO.File]::WriteAllText($pkgJsonPath, "$_`n", [System.Text.UTF8Encoding]::new($false))
 }
 
+# Sync runtime dependencies the donor cannot provide: the donor is the
+# officially installed kimi and only carries the deps of ITS version. New
+# dependencies added upstream land in the repo's pnpm store first, so every
+# declared dependency missing from the clone is copied (dereferenced) from
+# the repo's apps/kimi-code/node_modules.
+$repoNm = Join-Path $repoRoot 'apps\kimi-code\node_modules'
+$secNm = Join-Path $ksecPkg 'node_modules'
+foreach ($dep in $repoPkgJson.dependencies.PSObject.Properties.Name) {
+  $dest = Join-Path $secNm $dep
+  if (Test-Path $dest) { continue }
+  $src = Join-Path $repoNm $dep
+  if (-not (Test-Path $src)) {
+    Write-Warning "Dependency '$dep' not found in $repoNm; the deployed CLI may fail at runtime."
+    continue
+  }
+  $realSrc = (Get-Item $src).Target
+  if ($realSrc -and (Test-Path $realSrc)) { $src = $realSrc }
+  Write-Host "Copying missing dependency $dep..." -ForegroundColor DarkGray
+  New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+  Copy-Item -Recurse -Force -Path $src -Destination $dest
+}
+
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $ksecDist = Join-Path $ksecPkg 'dist'
 $backupPath = Join-Path $ksecPkg "dist-backup-$timestamp"
