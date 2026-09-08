@@ -10,7 +10,7 @@ import {
 } from '#/constant/app';
 import { loadTuiConfig } from '#/tui/config';
 import { resolveCommandPath } from '#/utils/process/resolve-command';
-import { productDisplayName } from '#/utils/host-package';
+import { getHostPackageName, isForkBuild, productDisplayName } from '#/utils/host-package';
 
 import { readUpdateCache } from './cache';
 import { tryAcquireUpdateInstallLock } from './install-lock';
@@ -50,6 +50,8 @@ export interface RunUpdatePreflightOptions {
   readonly isTTY?: boolean;
   readonly track?: (event: string, properties?: TelemetryProperties) => void;
   readonly logger?: UpdateLogger;
+  /** Test seam: overrides the host package name read from package.json. */
+  readonly hostPackageName?: string;
 }
 
 const AUTO_INSTALL_FAILURE_PROMPT_THRESHOLD = 2;
@@ -790,6 +792,13 @@ export async function runUpdatePreflight(
   const platform = process.platform;
 
   if (isAutoUpdateDisabledByEnv()) {
+    return 'continue';
+  }
+  // Forked distributions (e.g. the security fork installed as `ksec`) never
+  // join the official update channel: no check, no nag, and no background
+  // install of the official package — an `npm install -g` would only clobber
+  // the official `kimi` install while never touching the fork itself.
+  if (isForkBuild(options.hostPackageName ?? getHostPackageName())) {
     return 'continue';
   }
 
