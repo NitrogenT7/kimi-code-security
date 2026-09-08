@@ -27,6 +27,7 @@ import type {
   AddAdditionalDirInput,
   AddAdditionalDirResult,
   BackgroundTaskInfo,
+  ChangeWorkDirResult,
   ConfigDiagnostics,
   CreateSessionOptions,
   ExportSessionInput,
@@ -385,6 +386,11 @@ export abstract class SDKRpcClientBase {
   async addAdditionalDir(input: AddAdditionalDirInput): Promise<AddAdditionalDirResult> {
     const rpc = await this.getRpc();
     return rpc.addAdditionalDir({ sessionId: input.id, path: input.path, persist: input.persist });
+  }
+
+  async changeWorkDir(input: SessionIdRpcInput & { path: string }): Promise<ChangeWorkDirResult> {
+    const rpc = await this.getRpc();
+    return rpc.changeWorkDir({ sessionId: input.sessionId, path: input.path });
   }
 
   async startBtw(input: SessionIdRpcInput): Promise<string> {

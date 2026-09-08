@@ -29,6 +29,8 @@ import {
   writeConfigFile,
   type AddAdditionalDirPayload,
   type AddAdditionalDirResult,
+  type ChangeWorkDirPayload,
+  type ChangeWorkDirResult,
   type AgentContextData,
   type ApprovalRequest,
   type ApprovalResponse,
@@ -888,6 +890,14 @@ export class V2CoreBridge {
     return this.session(payload.sessionId)
       .accessor.get(ISessionWorkspaceCommandService)
       .addAdditionalDir(payload) as Promise<AddAdditionalDirResult>;
+  }
+
+  async changeWorkDir(
+    payload: SessionScopedPayload<ChangeWorkDirPayload>,
+  ): Promise<ChangeWorkDirResult> {
+    return this.session(payload.sessionId)
+      .accessor.get(ISessionWorkspaceCommandService)
+      .changeWorkDir(payload) as Promise<ChangeWorkDirResult>;
   }
 
   // -------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import { homedir } from 'node:os';
+import { isAbsolute } from 'node:path';
 
 import type { Kaos } from '@moonshot-ai/kaos';
 import type { SessionWarning } from '@moonshot-ai/protocol';
@@ -359,6 +360,25 @@ export class Session {
       ? `Added workspace directory:\n  ${path}\n  Saved to:\n  ${configPath}`
       : `Added workspace directory:\n  ${path}\n  For this session only`;
     this.requireMainAgent().context.appendLocalCommandStdout(message);
+  }
+
+  /**
+   * Change the session's working directory in place. The tool Kaos is
+   * instance-scoped (`chdir` never touches `process.cwd()`), so agents spawn
+   * subsequent tool processes under the new directory. Session-level only:
+   * the change lives in memory and does not survive restart.
+   */
+  async changeWorkDir(path: string): Promise<{ workDir: string; previousWorkDir: string }> {
+    if (!isAbsolute(path)) {
+      throw new Error(`/cd requires an absolute path, got: ${path}`);
+    }
+    const previousWorkDir = this.toolKaos.getcwd();
+    await this.toolKaos.chdir(path);
+    const workDir = this.toolKaos.getcwd();
+    this.requireMainAgent().context.appendLocalCommandStdout(
+      `Changed working directory:\n  ${previousWorkDir}\n  →\n  ${workDir}`,
+    );
+    return { workDir, previousWorkDir };
   }
 
   /**

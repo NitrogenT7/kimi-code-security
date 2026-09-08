@@ -7,6 +7,8 @@ import type {
   ActivatePluginCommandPayload,
   AddAdditionalDirPayload,
   AddAdditionalDirResult,
+  ChangeWorkDirPayload,
+  ChangeWorkDirResult,
   AgentAPI,
   BeginCompactionPayload,
   CancelPayload,
@@ -177,6 +179,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   addAdditionalDir(payload: AddAdditionalDirPayload): Promise<AddAdditionalDirResult> {
     return this.session.addAdditionalDir(payload.path, payload.persist);
+  }
+
+  changeWorkDir(payload: ChangeWorkDirPayload): Promise<ChangeWorkDirResult> {
+    return this.session.changeWorkDir(payload.path);
   }
 
   async prompt({ agentId, ...payload }: AgentScopedPayload<PromptPayload>) {

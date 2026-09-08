@@ -412,6 +412,15 @@ export interface AddAdditionalDirResult {
   readonly persisted: boolean;
 }
 
+export interface ChangeWorkDirPayload {
+  readonly path: string;
+}
+
+export interface ChangeWorkDirResult {
+  readonly workDir: string;
+  readonly previousWorkDir: string;
+}
+
 export interface RenameSessionPayload {
   readonly title: string;
 }
@@ -527,6 +536,7 @@ export interface SessionAPI extends AgentAPIWithId {
   waitForBackgroundTasksOnPrint: (payload: EmptyPayload) => void;
   handlePrintMainTurnCompleted: (payload: EmptyPayload) => 'finish' | 'continue';
   addAdditionalDir: (payload: AddAdditionalDirPayload) => AddAdditionalDirResult;
+  changeWorkDir: (payload: ChangeWorkDirPayload) => ChangeWorkDirResult;
 }
 
 type SessionAPIWithId = WithSessionId<SessionAPI>;

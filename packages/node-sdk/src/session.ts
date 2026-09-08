@@ -1,3 +1,5 @@
+import { isAbsolute } from 'node:path';
+
 import {
   ErrorCodes,
   KimiError,
@@ -13,6 +15,7 @@ import type {
   AddAdditionalDirOptions,
   AddAdditionalDirResult,
   BackgroundTaskInfo,
+  ChangeWorkDirResult,
   CompactOptions,
   CreateGoalInput,
   GetCronTasksResult,
@@ -55,7 +58,7 @@ export interface SessionOptions {
 
 export class Session {
   readonly id: string;
-  readonly workDir: string;
+  workDir: string;
   summary?: SessionSummary | undefined;
   private resumeState: ResumedSessionState | undefined;
 
@@ -178,6 +181,25 @@ export class Session {
       persist: options?.persist ?? true,
     });
     this.summary = { ...this.requireSummary(), additionalDirs: result.additionalDirs };
+    return result;
+  }
+
+  /**
+   * Change this session's working directory to an absolute path. Affects all
+   * subsequent tool operations (bash cwd, relative-path resolution). The
+   * change is session-scoped and does not persist across restarts.
+   */
+  async changeWorkDir(path: string): Promise<ChangeWorkDirResult> {
+    this.ensureOpen();
+    const normalized = normalizeRequiredString(path, 'Working directory cannot be empty', ErrorCodes.REQUEST_INVALID);
+    if (!isAbsolute(normalized)) {
+      throw new KimiError(
+        ErrorCodes.REQUEST_INVALID,
+        `/cd requires an absolute path, got: ${normalized}`,
+      );
+    }
+    const result = await this.rpc.changeWorkDir({ sessionId: this.id, path: normalized });
+    this.workDir = result.workDir;
     return result;
   }
 

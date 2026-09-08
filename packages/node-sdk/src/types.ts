@@ -165,6 +165,11 @@ export interface AddAdditionalDirInput {
   readonly persist: boolean;
 }
 
+export interface ChangeWorkDirResult {
+  readonly workDir: string;
+  readonly previousWorkDir: string;
+}
+
 export interface AddAdditionalDirOptions {
   /** When true, share the directory through workspace local config. When false,
    * keep it scoped to this session while still restoring it on session resume. */

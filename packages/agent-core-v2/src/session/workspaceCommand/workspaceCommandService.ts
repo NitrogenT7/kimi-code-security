@@ -7,6 +7,8 @@
  * `agentLifecycle` and `contextMemory`. Bound at Session scope.
  */
 
+import { isAbsolute } from 'node:path';
+
 import { InstantiationType } from '#/_base/di/extensions';
 import { IInstantiationService } from '#/_base/di/instantiation';
 import { Disposable } from '#/_base/di/lifecycle';
@@ -14,12 +16,15 @@ import { LifecycleScope, registerScopedService } from '#/_base/di/scope';
 import { IAgentContextMemoryService } from '#/agent/contextMemory/contextMemory';
 import type { ContextMessage } from '#/agent/contextMemory/types';
 import { IWorkspaceLocalConfigService } from '#/app/workspaceLocalConfig/workspaceLocalConfig';
+import { IHostFileSystem } from '#/os/interface/hostFileSystem';
 import { IAgentLifecycleService, MAIN_AGENT_ID } from '#/session/agentLifecycle/agentLifecycle';
 import { ISessionMetadata } from '#/session/sessionMetadata/sessionMetadata';
 import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
 
 import {
   type AddAdditionalDirInput,
+  type ChangeWorkDirInput,
+  type ChangeWorkDirResult,
   ISessionWorkspaceCommandService,
   type WorkspaceAdditionalDirsResult,
 } from './workspaceCommand';
@@ -37,6 +42,7 @@ export class SessionWorkspaceCommandService
     private readonly localConfig: IWorkspaceLocalConfigService,
     @ISessionWorkspaceContext private readonly workspace: ISessionWorkspaceContext,
     @IAgentLifecycleService private readonly agents: IAgentLifecycleService,
+    @IHostFileSystem private readonly hostFs: IHostFileSystem,
     @IInstantiationService private readonly instantiation: IInstantiationService,
   ) {
     super();
@@ -52,6 +58,29 @@ export class SessionWorkspaceCommandService
 
   async addAdditionalDir(input: AddAdditionalDirInput): Promise<WorkspaceAdditionalDirsResult> {
     return this.enqueueMutation(() => this.applyAddAdditionalDir(input));
+  }
+
+  async changeWorkDir(input: ChangeWorkDirInput): Promise<ChangeWorkDirResult> {
+    return this.enqueueMutation(() => this.applyChangeWorkDir(input));
+  }
+
+  private async applyChangeWorkDir(input: ChangeWorkDirInput): Promise<ChangeWorkDirResult> {
+    if (!isAbsolute(input.path)) {
+      throw new Error(`/cd requires an absolute path, got: ${input.path}`);
+    }
+    let stat: Awaited<ReturnType<IHostFileSystem['stat']>>;
+    try {
+      stat = await this.hostFs.stat(input.path);
+    } catch {
+      throw new Error(`Directory does not exist: ${input.path}`);
+    }
+    if (!stat.isDirectory) {
+      throw new Error(`Not a directory: ${input.path}`);
+    }
+    const previousWorkDir = this.workspace.workDir;
+    this.workspace.setWorkDir(input.path);
+    this.injectWorkDirChanged(previousWorkDir, this.workspace.workDir);
+    return { workDir: this.workspace.workDir, previousWorkDir };
   }
 
   private async applyAddAdditionalDir(
@@ -110,6 +139,24 @@ export class SessionWorkspaceCommandService
       ? `Added workspace directory:\n  ${path}\n  Saved to:\n  ${configPath}`
       : `Added workspace directory:\n  ${path}\n  For this session only`;
     const text = `<local-command-stdout>\n${stdout.trim()}\n</local-command-stdout>`;
+    const message: ContextMessage = {
+      role: 'user',
+      content: [{ type: 'text', text }],
+      toolCalls: [],
+      origin: { kind: 'injection', variant: 'local-command-stdout' },
+    };
+
+    const main = this.agents.get(MAIN_AGENT_ID);
+    if (main !== undefined) {
+      main.accessor.get(IAgentContextMemoryService).append(message);
+      return;
+    }
+    this.pendingMainInjections.push(message);
+  }
+
+  private injectWorkDirChanged(previousWorkDir: string, workDir: string): void {
+    const stdout = `Changed working directory:\n  ${previousWorkDir}\n  →\n  ${workDir}`;
+    const text = `<local-command-stdout>\n${stdout}\n</local-command-stdout>`;
     const message: ContextMessage = {
       role: 'user',
       content: [{ type: 'text', text }],

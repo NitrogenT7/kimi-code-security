@@ -77,6 +77,8 @@ import type {
   ActivatePluginCommandPayload,
   AddAdditionalDirPayload,
   AddAdditionalDirResult,
+  ChangeWorkDirPayload,
+  ChangeWorkDirResult,
   ArchiveSessionPayload,
   BeginGlobalMcpServerAuthResult,
   BeginCompactionPayload,
@@ -1065,6 +1067,13 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     ...payload
   }: SessionScopedPayload<AddAdditionalDirPayload>): Promise<AddAdditionalDirResult> {
     return this.requireSession(sessionId).addAdditionalDir(payload.path, payload.persist);
+  }
+
+  async changeWorkDir({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<ChangeWorkDirPayload>): Promise<ChangeWorkDirResult> {
+    return this.requireSession(sessionId).changeWorkDir(payload.path);
   }
 
   startBtw({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>): Promise<string> {

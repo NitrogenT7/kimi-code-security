@@ -22,10 +22,21 @@ export interface WorkspaceAdditionalDirsResult {
   readonly persisted: boolean;
 }
 
+export interface ChangeWorkDirInput {
+  readonly path: string;
+}
+
+export interface ChangeWorkDirResult {
+  readonly workDir: string;
+  readonly previousWorkDir: string;
+}
+
 export interface ISessionWorkspaceCommandService {
   readonly _serviceBrand: undefined;
 
   addAdditionalDir(input: AddAdditionalDirInput): Promise<WorkspaceAdditionalDirsResult>;
+
+  changeWorkDir(input: ChangeWorkDirInput): Promise<ChangeWorkDirResult>;
 }
 
 export const ISessionWorkspaceCommandService: ServiceIdentifier<ISessionWorkspaceCommandService> =

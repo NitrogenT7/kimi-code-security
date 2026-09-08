@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { resolve } from 'node:path';
+
 import { DisposableStore } from '#/_base/di/lifecycle';
 import type { IAgentScopeHandle } from '#/_base/di/scope';
 import { LifecycleScope } from '#/_base/di/scope';
@@ -427,6 +429,68 @@ describe('SessionWorkspaceCommandService', () => {
 
     await expect(svc.addAdditionalDir({ path: 'extra', persist: true })).rejects.toMatchObject({
       code: 'storage.decode_failed',
+    });
+  });
+
+  describe('changeWorkDir', () => {
+    // `workspaceContextService` resolves paths on assignment; on win32 that
+    // prefixes a drive letter ('/repo/other' → 'C:\repo\other'). Compare
+    // against `resolve()` so assertions hold on both platforms.
+    const NEW_DIR = resolve('/repo/other');
+
+    function buildForCd(seedDirs: readonly string[] = [NEW_DIR]): ReturnType<typeof build> {
+      return build(seedDirs, true);
+    }
+
+    it('switches the workspace workDir to an absolute existing directory', async () => {
+      const { svc, workspace, agents } = buildForCd();
+
+      const result = await svc.changeWorkDir({ path: NEW_DIR });
+
+      expect(result.previousWorkDir).toBe(resolve(WORK_DIR));
+      expect(result.workDir).toBe(NEW_DIR);
+      expect(workspace.workDir).toBe(NEW_DIR);
+      expect(workspace.isWithin(`${NEW_DIR}/file.txt`)).toBe(true);
+      expect(workspace.isWithin(`${WORK_DIR}/file.txt`)).toBe(false);
+
+      expect(agents.mainContext.messages).toHaveLength(1);
+      expect(agents.mainContext.messages[0]?.content).toEqual([
+        {
+          type: 'text',
+          text: `<local-command-stdout>\nChanged working directory:\n  ${resolve(WORK_DIR)}\n  →\n  ${NEW_DIR}\n</local-command-stdout>`,
+        },
+      ]);
+    });
+
+    it('rejects a relative path without touching the workspace', async () => {
+      const { svc, workspace, agents } = buildForCd();
+
+      await expect(svc.changeWorkDir({ path: 'other' })).rejects.toThrow(
+        '/cd requires an absolute path',
+      );
+      expect(workspace.workDir).toBe(resolve(WORK_DIR));
+      expect(agents.mainContext.messages).toHaveLength(0);
+    });
+
+    it('rejects a path that does not exist', async () => {
+      const { svc, workspace } = buildForCd();
+      const missing = resolve('/repo/missing');
+
+      await expect(svc.changeWorkDir({ path: missing })).rejects.toThrow(
+        `Directory does not exist: ${missing}`,
+      );
+      expect(workspace.workDir).toBe(resolve(WORK_DIR));
+    });
+
+    it('rejects a path that is a file, not a directory', async () => {
+      const { svc, fs, workspace } = buildForCd();
+      const afile = resolve('/repo/afile');
+      fs.files.set(afile, 'x');
+
+      await expect(svc.changeWorkDir({ path: afile })).rejects.toThrow(
+        `Not a directory: ${afile}`,
+      );
+      expect(workspace.workDir).toBe(resolve(WORK_DIR));
     });
   });
 });
