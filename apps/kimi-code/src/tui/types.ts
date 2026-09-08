@@ -57,6 +57,13 @@ export interface AppState {
   availableModels: Record<string, ModelAlias>;
   availableProviders: Record<string, ProviderConfig>;
   sessionTitle: string | null;
+  /**
+   * Session closed at logout, pending restore after the next login.
+   * `activateModelAfterLogin` resumes it (and clears both fields); when the
+   * restore fails they are cleared too and a fresh session is created.
+   */
+  resumedAfterLoginId?: string | undefined;
+  resumedAfterLoginTitle?: string | null | undefined;
   /** Current goal snapshot for the footer badge; null/undefined when no active goal. */
   goal?: GoalSnapshot | null;
   mcpServersSummary: string | null;

@@ -1291,9 +1291,16 @@ export class V2CoreBridge {
     return this.app.get(IFlagService).explainAll() as unknown as readonly ExperimentalFeatureState[];
   }
 
-  getKimiConfig(_payload: GetKimiConfigPayload): KimiConfig {
+  async getKimiConfig(payload: GetKimiConfigPayload): Promise<KimiConfig> {
     // The config.toml file is the shared source of truth for both engines;
-    // serve the v1 shape through v1's own lenient loader.
+    // serve the v1 shape through v1's own lenient loader. A caller-requested
+    // reload must also refresh the engine-side config cache (configService),
+    // otherwise auth provisioning that writes config.toml directly leaves the
+    // engine's in-memory model/provider tables stale and model switches fail
+    // with "not configured" until an unrelated reload lands.
+    if (payload.reload === true) {
+      await this.app.get(IConfigService).reload();
+    }
     return loadRuntimeConfigSafe(this.options.configPath).config;
   }
 

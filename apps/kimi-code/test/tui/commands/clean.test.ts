@@ -130,8 +130,8 @@ describe('handleCleanCommand', () => {
     const staleA = summary({ id: 'session-fail-a' });
     const staleB = summary({ id: 'session-ok-b' });
     const { host, deleteSession, confirm } = makeHost([staleA, staleB]);
-    deleteSession.mockImplementation(async (id: string) => {
-      if (id === 'session-fail-a') throw new Error('boom');
+    deleteSession.mockImplementation(async (...callArgs: unknown[]) => {
+      if (callArgs[0] === 'session-fail-a') throw new Error('boom');
     });
 
     await handleCleanCommand(host, 'go');

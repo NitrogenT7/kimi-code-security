@@ -11,6 +11,7 @@ import {
   type RefreshResult,
 } from '../utils/refresh-providers';
 import { thinkingEffortFromConfig } from '../utils/thinking-config';
+import { formatErrorMessage } from '../utils/event-payload';
 import type { SessionEventHandler } from './session-event-handler';
 import type { AppState, KimiTUIOptions } from '../types';
 import type { TUIState } from '../tui-state';
@@ -67,6 +68,35 @@ export class AuthFlowController {
 
   async activateModelAfterLogin(model: string, effort?: string): Promise<void> {
     const { host } = this;
+    // Resume the session that was closed at logout instead of creating a fresh
+    // one, so the user keeps their context across an account switch.
+    const resumeId = host.state.appState.resumedAfterLoginId;
+    if (resumeId !== undefined && resumeId.length > 0) {
+      try {
+        const session = await host.harness.resumeSession({
+          id: resumeId,
+          additionalDirs:
+            host.state.appState.additionalDirs.length > 0
+              ? [...host.state.appState.additionalDirs]
+              : undefined,
+        });
+        await host.setSession(session);
+        await session.setModel(model);
+        if (effort !== undefined) {
+          await session.setThinking(effort);
+        }
+        host.setAppState({ resumedAfterLoginId: undefined, resumedAfterLoginTitle: undefined });
+        host.appendStartupNotice(`Previous session restored (resumed after login).`);
+        return;
+      } catch (error) {
+        // Session is gone (deleted / engine restarted without it) — fall back
+        // to creating a fresh session below.
+        host.appendStartupNotice(
+          `Could not restore the previous session: ${formatErrorMessage(error)}`,
+        );
+        host.setAppState({ resumedAfterLoginId: undefined, resumedAfterLoginTitle: undefined });
+      }
+    }
     if (host.session !== undefined) {
       await host.session.setModel(model);
       if (effort !== undefined) {
@@ -104,12 +134,18 @@ export class AuthFlowController {
   }
 
   async clearActiveSessionAfterLogout(): Promise<void> {
+    // Remember the session so a subsequent login can resume it in place —
+    // the session itself is untouched on disk; only its auth context closed.
+    const closedId = this.host.session?.id;
+    const closedTitle = this.host.state.appState.sessionTitle;
     await this.host.closeSession('logged out');
     this.host.resetSessionRuntime();
     this.host.setAppState({
       sessionId: '',
       model: '',
       sessionTitle: null,
+      resumedAfterLoginId: closedId,
+      resumedAfterLoginTitle: closedTitle,
     });
     await this.host.refreshSkillCommands();
     await this.host.refreshPluginCommands();
