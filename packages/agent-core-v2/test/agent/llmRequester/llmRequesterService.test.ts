@@ -16,6 +16,8 @@ import { AgentContextProjectorService } from '#/agent/contextProjector/contextPr
 import { AgentLLMRequesterService, KIMI_CODE_INFINITE_RETRY_ENV } from '#/agent/llmRequester/llmRequesterService';
 import { IAgentLLMRequesterService } from '#/agent/llmRequester/llmRequester';
 import { IBootstrapService } from '#/app/bootstrap/bootstrap';
+import { IFlagService } from '#/app/flag/flag';
+import { MID_TURN_MODEL_SWITCH_FLAG_ID } from '#/agent/profile/flag';
 import { ISessionTokenCountingService } from '#/session/tokenCounting/sessionTokenCounting';
 import { IAgentProfileService } from '#/agent/profile/profile';
 import { IAgentStateService } from '#/agent/state/agentState';
@@ -170,6 +172,14 @@ function createService(
 ) {
   const ix = disposables.add(new TestInstantiationService());
   ix.stub(IBootstrapService, stubBootstrap('/tmp/kimi-code-llm-requester-test', options.env ?? {}));
+  ix.stub(
+    IFlagService,
+    {
+      enabled: (id: string) =>
+        id === MID_TURN_MODEL_SWITCH_FLAG_ID &&
+        options.env?.['KIMI_CODE_EXPERIMENTAL_MID_TURN_MODEL_SWITCH'] === '1',
+    } as IFlagService,
+  );
   const thinkingLevel = options.thinkingLevel ?? 'off';
   const getAlias = options.getAlias ?? (() => 'm');
   const requesterForAlias = options.requesterForAlias ?? (() => requester);
@@ -1175,6 +1185,7 @@ describe('AgentLLMRequesterService mid-turn model switch', () => {
     const { service, eventBus } = createService(requesterA, undefined, {
       getAlias: () => aliasRef.value,
       requesterForAlias: (a) => (a === 'model-b' ? requesterB : requesterA),
+      env: { KIMI_CODE_EXPERIMENTAL_MID_TURN_MODEL_SWITCH: '1' },
     });
 
     const first = await service.request({ source: { type: 'turn', turnId: 1, step: 1 } });

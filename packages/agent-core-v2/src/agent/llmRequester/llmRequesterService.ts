@@ -50,6 +50,8 @@ import type {
 } from '#/app/telemetry/events';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
 import { IEventBus } from '#/app/event/eventBus';
+import { IFlagService } from '#/app/flag/flag';
+import { MID_TURN_MODEL_SWITCH_FLAG_ID } from '#/agent/profile/flag';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IEventDispatcher } from '#/state/eventDispatcher';
 import { AgentStatusUpdated } from '#/agent/usage/usageEvents';
@@ -176,6 +178,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     @IAgentStateService private readonly states: IAgentStateService,
     @IBootstrapService private readonly bootstrap: IBootstrapService,
     @IEventBus private readonly eventBus: IEventBus,
+    @IFlagService private readonly flags: IFlagService,
   ) {
     this.states.contributeState(llmRequestTraceKey);
     this.states.contributeState(llmRequesterLastConfigLogSignatureKey);
@@ -184,11 +187,12 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     this.states.contributeState(llmRequesterMediaStrippedTurnsKey);
     this.states.contributeState(llmRequesterEmittedThinkingEffortWarningsKey);
     this.eventBus.subscribe(AgentStatusUpdated, (event) => {
-      if (event.model !== undefined && event.model !== this.lastSeenModelAlias) {
-        this.lastSeenModelAlias = event.model;
-        if (this.turnConfigs.size > 0) {
-          this.turnConfigs.clear();
-        }
+      if (event.model === undefined || event.model === this.lastSeenModelAlias) {
+        return;
+      }
+      this.lastSeenModelAlias = event.model;
+      if (this.flags.enabled(MID_TURN_MODEL_SWITCH_FLAG_ID) && this.turnConfigs.size > 0) {
+        this.turnConfigs.clear();
       }
     });
     this.lastSeenModelAlias = this.profile.data().modelAlias;
