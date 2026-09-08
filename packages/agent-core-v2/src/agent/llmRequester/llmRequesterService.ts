@@ -49,8 +49,10 @@ import type {
   LlmRequestProjectionFallbackEvent,
 } from '#/app/telemetry/events';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
+import { IEventBus } from '#/app/event/eventBus';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IEventDispatcher } from '#/state/eventDispatcher';
+import { AgentStatusUpdated } from '#/agent/usage/usageEvents';
 import { WarningIssued } from '#/agent/profile/profileOps';
 
 import {
@@ -153,6 +155,8 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
 
   private readonly toolCallIdNormalizer = new ToolCallIdNormalizer();
 
+  private lastSeenModelAlias: string | undefined;
+
   constructor(
     @IAgentContextMemoryService private readonly context: IAgentContextMemoryService,
     @IAgentContextProjectorService private readonly projector: IAgentContextProjectorService,
@@ -171,6 +175,7 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     @IAgentScopeContext private readonly scopeContext: IAgentScopeContext,
     @IAgentStateService private readonly states: IAgentStateService,
     @IBootstrapService private readonly bootstrap: IBootstrapService,
+    @IEventBus private readonly eventBus: IEventBus,
   ) {
     this.states.contributeState(llmRequestTraceKey);
     this.states.contributeState(llmRequesterLastConfigLogSignatureKey);
@@ -178,6 +183,15 @@ export class AgentLLMRequesterService implements IAgentLLMRequesterService {
     this.states.contributeState(llmRequesterMediaDegradedTurnsKey);
     this.states.contributeState(llmRequesterMediaStrippedTurnsKey);
     this.states.contributeState(llmRequesterEmittedThinkingEffortWarningsKey);
+    this.eventBus.subscribe(AgentStatusUpdated, (event) => {
+      if (event.model !== undefined && event.model !== this.lastSeenModelAlias) {
+        this.lastSeenModelAlias = event.model;
+        if (this.turnConfigs.size > 0) {
+          this.turnConfigs.clear();
+        }
+      }
+    });
+    this.lastSeenModelAlias = this.profile.data().modelAlias;
   }
 
   private get lastConfigLogSignature(): string | undefined {

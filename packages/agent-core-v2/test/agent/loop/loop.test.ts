@@ -40,6 +40,11 @@ import { recordingTelemetry, type TelemetryRecord } from '../../app/telemetry/st
 
 type GenerateFn = NonNullable<TestAgentOptions['generate']>;
 
+type WireEvent = Extract<
+  TestAgentContext['allEvents'][number],
+  { readonly type: '[wire]' }
+>;
+
 describe('Agent loop', () => {
   let ctx: TestAgentContext;
   let loop: IAgentLoopService;
@@ -1868,6 +1873,100 @@ describe('step timing split propagation', () => {
         llmClientConsumeMs: 50,
         llmClientBlockedMs: 20,
       });
+    } finally {
+      await ctx.dispose();
+    }
+  });
+});
+
+describe('mid-turn model switch', () => {
+  it('applies a model switch between steps of the same turn', async () => {
+    let callCount = 0;
+    const ctx = createTestAgent(
+      {
+        generate: requesterFromGenerateFn(async () => {
+          callCount += 1;
+          if (callCount === 1) {
+            return {
+              id: 'response-1',
+              message: {
+                role: 'assistant' as const,
+                content: [],
+                toolCalls: [
+                  { type: 'function' as const, id: 'call-switch', name: 'Switch', arguments: '{}' },
+                ],
+              },
+              usage: { inputOther: 10, output: 5, inputCacheRead: 0, inputCacheCreation: 0 },
+              finishReason: 'tool_calls' as const,
+              rawFinishReason: 'tool_calls',
+            };
+          }
+          return {
+            id: `response-${String(callCount)}`,
+            message: {
+              role: 'assistant' as const,
+              content: [{ type: 'text' as const, text: 'done' }],
+              toolCalls: [],
+            },
+            usage: { inputOther: 10, output: 5, inputCacheRead: 0, inputCacheCreation: 0 },
+            finishReason: 'completed' as const,
+            rawFinishReason: 'stop',
+          };
+        }),
+      },
+      permissionModeServices('yolo'),
+      {
+        initialConfig: {
+          models: {
+            'alt-model': {
+              provider: 'test-provider',
+              model: 'alt-model',
+              maxContextSize: 1_000_000,
+            },
+          },
+        },
+      },
+    );
+    try {
+      let switched = false;
+      const switchTool: ExecutableTool = {
+        name: 'Switch',
+        description: 'Switch the model mid-turn.',
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+        resolveExecution: () => ({
+          approvalRule: 'Switch',
+          execute: async () => {
+            if (!switched) {
+              switched = true;
+              await ctx.get(IAgentProfileService).setModel('alt-model');
+              return { output: 'switched to alt-model' };
+            }
+            return { output: 'done' };
+          },
+        }),
+      };
+      const profile = ctx.get(IAgentProfileService);
+      profile.update({ activeToolNames: ['Switch'] });
+      ctx.get(IAgentToolRegistryService).register(switchTool);
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'run the switch tool' }] });
+      await ctx.untilTurnEnd();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const requests = ctx.allEvents
+        .filter(
+          (event): event is WireEvent =>
+            event.type === '[wire]' && event.event === 'llm.request',
+        )
+        .map(
+          (event) =>
+            (event.args as { model: string; modelAlias: string; turnStep: string }),
+        );
+      const loopRequests = requests.filter((r) => r.turnStep === '0.1' || r.turnStep === '0.2');
+      expect(loopRequests.length).toBe(2);
+      expect(loopRequests[0]?.model).toBe('mock-model');
+      expect(loopRequests[1]?.model).toBe('alt-model');
+      expect(loopRequests[1]?.modelAlias).toBe('alt-model');
     } finally {
       await ctx.dispose();
     }

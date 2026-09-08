@@ -1,5 +1,6 @@
 import {
   effectiveModelAlias,
+  MID_TURN_MODEL_SWITCH_FLAG_ID,
   PRIMARY_SUBAGENT_MODEL_CHOICE,
   SECONDARY_DERIVED_MODEL_ALIAS,
   type ExperimentalFeatureState,
@@ -30,7 +31,7 @@ import { formatErrorMessage } from '../utils/event-payload';
 import { PERMISSION_MODE_DESCRIPTIONS, PERMISSION_MODE_DISPLAY_NAMES } from '../utils/permission-mode';
 import { thinkingEffortToConfig } from '../utils/thinking-config';
 import { showUsage } from './info';
-import { setExperimentalFeatures } from './experimental-flags';
+import { setExperimentalFeatures, isExperimentalFlagEnabled } from './experimental-flags';
 import type { SlashCommandHost } from './dispatch';
 
 // ---------------------------------------------------------------------------
@@ -409,7 +410,10 @@ async function performModelSwitch(
     await host.waitForLazyCreation();
     session = host.session;
   }
-  if (host.state.appState.streamingPhase !== 'idle') {
+  if (
+    host.state.appState.streamingPhase !== 'idle' &&
+    !isExperimentalFlagEnabled(MID_TURN_MODEL_SWITCH_FLAG_ID)
+  ) {
     host.showError('Cannot switch models while streaming — press Esc or Ctrl-C first.');
     return;
   }

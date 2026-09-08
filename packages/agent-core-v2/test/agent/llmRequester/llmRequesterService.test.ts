@@ -27,6 +27,7 @@ import { ISessionUsageService } from '#/session/usage/sessionUsage';
 import { IConfigService } from '#/app/config/config';
 import type { Event2 } from '#/app/event/event2';
 import { IEventBus } from '#/app/event/eventBus';
+import { AgentStatusUpdated } from '#/agent/usage/usageEvents';
 import {
   APIConnectionError,
   APIContextOverflowError,
@@ -162,14 +163,19 @@ function createService(
     readonly mediaResolver?: Partial<IAgentMediaResolverService>;
     readonly contextMessages?: Message[];
     readonly env?: Record<string, string>;
+    readonly modelForAlias?: (alias: string) => Model;
+    readonly requesterForAlias?: (alias: string) => ModelRequester;
+    readonly getAlias?: () => string;
   } = {},
 ) {
   const ix = disposables.add(new TestInstantiationService());
   ix.stub(IBootstrapService, stubBootstrap('/tmp/kimi-code-llm-requester-test', options.env ?? {}));
   const thinkingLevel = options.thinkingLevel ?? 'off';
+  const getAlias = options.getAlias ?? (() => 'm');
+  const requesterForAlias = options.requesterForAlias ?? (() => requester);
   const profile: Partial<IAgentProfileService> = {
     resolveModelContext: () => ({
-      modelAlias: 'm',
+      modelAlias: getAlias(),
       modelCapabilities: capabilities,
       maxOutputSize: undefined,
       alwaysThinking: undefined,
@@ -181,7 +187,7 @@ function createService(
     getSystemPrompt: () => 'system',
     data: () => ({
       cwd: '',
-      modelAlias: 'm',
+      modelAlias: getAlias(),
       modelCapabilities: capabilities,
       thinkingLevel,
       systemPrompt: 'system',
@@ -217,10 +223,30 @@ function createService(
   };
   const testSnapshot = Object.freeze({}) as MediaStripSnapshot;
   const events: Event2[] = [];
+  const subscribers = new Map<string, (event: Event2) => void>();
   const eventBus: IEventBus = {
     _serviceBrand: undefined,
-    publish: (event) => events.push(event),
-    subscribe: () => toDisposable(() => {}),
+    publish: (event) => {
+      events.push(event);
+      subscribers.get(event.type)?.(event);
+    },
+    subscribe: ((typeOrHandler: unknown, maybeHandler?: unknown) => {
+      const candidate = typeOrHandler as unknown as { type?: unknown };
+      const type =
+        typeof typeOrHandler === 'string'
+          ? typeOrHandler
+          : typeof typeOrHandler === 'function' && typeof candidate.type === 'string'
+            ? candidate.type
+            : undefined;
+      if (type !== undefined && typeof maybeHandler === 'function') {
+        const handler = maybeHandler as (event: Event2) => void;
+        subscribers.set(type, handler);
+        return toDisposable(() => {
+          subscribers.delete(type);
+        });
+      }
+      return toDisposable(() => {});
+    }) as IEventBus['subscribe'],
   };
 
   ix.stub(IAgentContextMemoryService, context);
@@ -246,8 +272,8 @@ function createService(
   ix.stub(ITelemetryService, telemetry);
   ix.stub(IModelCatalog, {
     _serviceBrand: undefined,
-    get: () => requester.model,
-    getRequester: () => requester,
+    get: (id) => requesterForAlias(id).model,
+    getRequester: (id) => requesterForAlias(id),
     findByName: () => [],
   });
   ix.stub(IModelService, {
@@ -267,6 +293,7 @@ function createService(
     dispatcher: ix.get(IEventDispatcher),
     records,
     events,
+    eventBus,
     telemetry,
     telemetryRecords,
     measuredCalls,
@@ -1104,5 +1131,77 @@ describe('AgentLLMRequesterService tool call id normalization', () => {
 
     const result = await service.request();
     expect(result.message.toolCalls[0]!.id).toBe('Bash_0__2');
+  });
+});
+
+describe('AgentLLMRequesterService mid-turn model switch', () => {
+  function createSwitchableModel(id: string): Model {
+    return {
+      id,
+      name: id,
+      aliases: [],
+      protocol: 'anthropic',
+      baseUrl: 'https://example.test',
+      headers: {},
+      capabilities,
+      maxContextSize: 1000,
+      alwaysThinking: false,
+      providerName: 'p',
+      authProvider: { getAuth: async () => undefined },
+    };
+  }
+
+  function createSwitchableRequester(model: Model): ModelRequester {
+    return {
+      model,
+      request: async function* () {
+        yield {
+          type: 'finish',
+          message: { role: 'assistant', content: [{ type: 'text', text: `from-${model.id}` }], toolCalls: [] },
+          providerFinishReason: 'completed',
+          rawFinishReason: 'stop',
+          id: 'resp-1',
+        };
+      },
+    };
+  }
+
+  it('uses the new model on the next request after a mid-turn model switch', async () => {
+    const modelA = createSwitchableModel('model-a');
+    const modelB = createSwitchableModel('model-b');
+    const requesterA = createSwitchableRequester(modelA);
+    const requesterB = createSwitchableRequester(modelB);
+    const aliasRef = { value: 'model-a' };
+    const { service, eventBus } = createService(requesterA, undefined, {
+      getAlias: () => aliasRef.value,
+      requesterForAlias: (a) => (a === 'model-b' ? requesterB : requesterA),
+    });
+
+    const first = await service.request({ source: { type: 'turn', turnId: 1, step: 1 } });
+    expect(first.message.content).toEqual([{ type: 'text', text: 'from-model-a' }]);
+
+    aliasRef.value = 'model-b';
+    eventBus.publish(new AgentStatusUpdated({ agentId: 'test-agent', model: 'model-b' }));
+
+    const second = await service.request({ source: { type: 'turn', turnId: 1, step: 2 } });
+    expect(second.message.content).toEqual([{ type: 'text', text: 'from-model-b' }]);
+  });
+
+  it('keeps the per-turn snapshot when the model does not change', async () => {
+    const modelA = createSwitchableModel('model-a');
+    const modelB = createSwitchableModel('model-b');
+    const requesterA = createSwitchableRequester(modelA);
+    const requesterB = createSwitchableRequester(modelB);
+    const aliasRef = { value: 'model-a' };
+    const { service, eventBus } = createService(requesterA, undefined, {
+      getAlias: () => aliasRef.value,
+      requesterForAlias: (a) => (a === 'model-b' ? requesterB : requesterA),
+    });
+
+    await service.request({ source: { type: 'turn', turnId: 1, step: 1 } });
+    eventBus.publish(new AgentStatusUpdated({ agentId: 'test-agent', model: 'model-a' }));
+
+    const second = await service.request({ source: { type: 'turn', turnId: 1, step: 2 } });
+    expect(second.message.content).toEqual([{ type: 'text', text: 'from-model-a' }]);
   });
 });

@@ -105,6 +105,7 @@ export type {
   FlagId,
   FlagSurface,
 } from '#/flag';
+export { MID_TURN_MODEL_SWITCH_FLAG_ENV, MID_TURN_MODEL_SWITCH_FLAG_ID } from '#/flag';
 
 export {
   buildDaemonFileUrl,
