@@ -190,6 +190,7 @@ import {
   ISessionManager,
   ISessionMcpHandle,
   ISessionMetadata,
+  ISessionNotepadService,
   ISessionSkillCatalog,
   IAgentTodoService,
   ISessionWorkspaceCommandService,
@@ -2221,6 +2222,16 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   override async getGoal(input: SessionIdRpcInput): Promise<GoalToolResult> {
     const agent = await this.agentScope(input.sessionId);
     return agent.accessor.get(IAgentGoalService).getGoal();
+  }
+
+  override async getNotepad(input: SessionIdRpcInput): Promise<string> {
+    const session = this.requireLiveSession(input.sessionId);
+    return session.accessor.get(ISessionNotepadService).getContent();
+  }
+
+  override async setNotepad(input: SessionIdRpcInput & { content: string }): Promise<void> {
+    const session = this.requireLiveSession(input.sessionId);
+    session.accessor.get(ISessionNotepadService).setContent(input.content);
   }
 
   override async pauseGoal(input: SessionIdRpcInput): Promise<GoalSnapshot> {

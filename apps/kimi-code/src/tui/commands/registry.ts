@@ -38,6 +38,16 @@ const ADD_DIR_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'list', description: 'Show configured additional workspace directories' },
 ];
 
+const NOTEPAD_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'status', description: 'Show the notepad content' },
+  { value: 'edit', description: 'Edit the notepad in an external editor' },
+];
+
+/** Argument autocompletion for the `/notepad` command (subcommands). */
+export function notepadArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  return completeLeadingArg(NOTEPAD_ARG_COMPLETIONS, argumentPrefix);
+}
+
 /** Argument autocompletion for the `/goal` command (subcommands). */
 export function goalArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
   const nextMatch = argumentPrefix.match(/^next\s+(\S*)$/i);
@@ -347,6 +357,15 @@ export const BUILTIN_SLASH_COMMANDS = [
         ? 'always'
         : 'idle-only';
     },
+  },
+  {
+    name: 'notepad',
+    aliases: [],
+    description: 'View or edit the agent notepad (persists across compaction)',
+    priority: 80,
+    argumentHint: '[status|edit]',
+    completeArgs: notepadArgumentCompletions,
+    availability: 'always',
   },
   {
     name: 'init',

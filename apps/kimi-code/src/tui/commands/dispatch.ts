@@ -42,6 +42,7 @@ import {
   showSettingsSelector,
 } from './config';
 import { handleGoalCommand } from './goal';
+import { handleNotepadCommand } from './notepad';
 import { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } from './info';
 import { handleAddDirCommand } from './add-dir';
 import { handleCdCommand } from './cd';
@@ -578,6 +579,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'goal':
       await handleGoalCommand(host, args);
+      return;
+    case 'notepad':
+      await handleNotepadCommand(host, args);
       return;
     case 'init':
       await handleInitCommand(host);

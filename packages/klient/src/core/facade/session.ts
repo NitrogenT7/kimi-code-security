@@ -74,6 +74,13 @@ export interface SessionSkillsFacade {
   list(): Promise<readonly SkillSummary[]>;
 }
 
+export interface SessionNotepadFacade {
+  getContent(): Promise<string>;
+  setContent(content: string): Promise<void>;
+  append(text: string): Promise<void>;
+  clear(): Promise<void>;
+}
+
 /**
  * Derived session lifecycle phase. The engine retired its `sessionActivity`
  * service (#1751) — busy is now derived from agent activity views — so the
@@ -113,6 +120,7 @@ export interface SessionFacade {
   readonly questions: SessionQuestionsFacade;
   readonly interactions: SessionInteractionsFacade;
   readonly skills: SessionSkillsFacade;
+  readonly notepad: SessionNotepadFacade;
   /** Agent id → metadata for every agent registered in this session. */
   agents(): Promise<Readonly<Record<string, AgentMeta>>>;
 }
@@ -206,6 +214,14 @@ export function createSessionFacade(call: ScopedCaller, sessionId: string): Sess
     skills: {
       list: () =>
         call(scope, 'sessionSkillCatalog', 'list', []) as Promise<readonly SkillSummary[]>,
+    },
+
+    notepad: {
+      getContent: () => call(scope, 'sessionNotepadService', 'getContent', []) as Promise<string>,
+      setContent: (content) =>
+        call(scope, 'sessionNotepadService', 'setContent', [content]) as Promise<void>,
+      append: (text) => call(scope, 'sessionNotepadService', 'append', [text]) as Promise<void>,
+      clear: () => call(scope, 'sessionNotepadService', 'clear', []) as Promise<void>,
     },
 
     agents: async () => {

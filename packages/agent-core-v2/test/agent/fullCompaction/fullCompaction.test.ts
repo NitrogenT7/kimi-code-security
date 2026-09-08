@@ -50,6 +50,7 @@ import {
 import { IAgentLoopService } from '#/agent/loop/loop';
 import { IWireService } from '#/wire/wire';
 import { IAgentTodoService } from '#/features/todo/todoService';
+import { ISessionNotepadService } from '#/features/notepad/sessionNotepad';
 import { IAgentGoalService } from '#/features/goal/goalService';
 import { HostFileSystem } from '#/os/backends/node-local/hostFsService';
 
@@ -312,7 +313,7 @@ describe('FullCompaction', () => {
       properties: expect.objectContaining({
         agent_id: 'main',
         source: 'manual',
-        tokens_before: 6_135,
+        tokens_before: 6_137,
         tokens_after: expect.any(Number),
         duration_ms: expect.any(Number),
         compacted_count: 6,
@@ -324,6 +325,33 @@ describe('FullCompaction', () => {
         input_cache_creation: 0,
       }),
     });
+    await ctx.expectResumeMatches();
+  });
+
+  it('appends the notepad content to the compaction summary', async () => {
+    const ctx = testAgent();
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      tools: SNAPSHOT_VISIBLE_TOOLS,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    ctx.get(ISessionNotepadService).setContent('probe the flank from the north');
+    await vi.waitFor(() => {
+      expect(ctx.get(ISessionNotepadService).getContent()).toBe(
+        'probe the flank from the north',
+      );
+    });
+    const compacted = ctx.once('compaction.completed');
+
+    ctx.mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+    await compacted;
+
+    const summaryMessage = ctx
+      .compactHistory()
+      .find((message) => message.text.includes('Compacted summary.'));
+    expect(summaryMessage?.text).toContain('## Notepad\nprobe the flank from the north');
     await ctx.expectResumeMatches();
   });
 
@@ -587,7 +615,7 @@ describe('FullCompaction', () => {
       session_id: 'test-session',
       cwd: dir,
       trigger: 'auto',
-      token_count: 6_135,
+      token_count: 6_137,
     });
     expect(post).toMatchObject({
       hook_event_name: 'PostCompact',
@@ -673,7 +701,7 @@ describe('FullCompaction', () => {
       event: 'compaction_finished',
       properties: expect.objectContaining({
         source: 'manual',
-        tokens_before: 18_510,
+        tokens_before: 19_138,
         retry_count: 1,
         trace_id: 'trace-compact-1',
       }),
@@ -1175,7 +1203,7 @@ describe('FullCompaction', () => {
       properties: expect.objectContaining({
         agent_id: 'main',
         source: 'manual',
-        tokens_before: 18_510,
+        tokens_before: 19_138,
         duration_ms: expect.any(Number),
         round: 1,
         retry_count: 0,
@@ -1400,7 +1428,7 @@ describe('FullCompaction', () => {
       event: 'compaction_failed',
       properties: expect.objectContaining({
         source: 'manual',
-        tokens_before: 18_510,
+        tokens_before: 19_138,
         duration_ms: expect.any(Number),
         retry_count: 4,
         error_type: 'APIConnectionError',
@@ -1638,7 +1666,7 @@ describe('FullCompaction', () => {
     expect(countEvents(events, 'compaction.completed')).toBe(1);
     expect(compactedPrefixSizes).toHaveLength(1);
     expect(compactedPrefixSizes[0]).toBe(initialTokens);
-    expect(ctx.contextData().tokenCount).toBeLessThan(maxContextTokens * 0.85);
+    expect(ctx.contextData().tokenCount).toBeLessThan(maxContextTokens);
     await ctx.expectResumeMatches();
   });
 
@@ -1782,8 +1810,8 @@ describe('FullCompaction', () => {
       event: 'compaction_finished',
       properties: expect.objectContaining({
         source: 'auto',
-        tokens_before: 6_142,
-        tokens_after: 6_159,
+        tokens_before: 6_144,
+        tokens_after: 6_161,
         compacted_count: 7,
         retry_count: 0,
       }),

@@ -44,6 +44,7 @@ import { sessionApprovalContract } from './session/approval.js';
 import { sessionInteractionContract } from './session/interaction.js';
 import { sessionManagerContract } from './session/lifecycle.js';
 import { sessionMetadataContract } from './session/metadata.js';
+import { sessionNotepadContract } from './session/notepad.js';
 import { sessionQuestionContract } from './session/question.js';
 import { sessionSkillCatalogContract } from './session/skills.js';
 import { sessionTitleContract } from './session/title.js';
@@ -74,6 +75,7 @@ export const globalContract: KlientContract = {
   sessionQuestionService: sessionQuestionContract,
   sessionSkillCatalog: sessionSkillCatalogContract,
   sessionTitleService: sessionTitleContract,
+  sessionNotepadService: sessionNotepadContract,
   // agent scope
   agentPromptService: agentPromptContract,
   agentSkillService: agentSkillContract,

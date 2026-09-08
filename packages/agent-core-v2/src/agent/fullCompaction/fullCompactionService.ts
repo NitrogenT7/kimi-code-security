@@ -26,6 +26,8 @@ import { stripDynamicToolContext } from '#/agent/toolSelect/dynamicTools';
 import { IAgentToolSelectService } from '#/agent/toolSelect/toolSelect';
 import { IAgentTodoService } from '#/features/todo/todoService';
 import { renderTodoList } from '#/features/todo/todoItem';
+import { ISessionNotepadService } from '#/features/notepad/sessionNotepad';
+import { renderNotepad } from '#/features/notepad/notepadContent';
 import { onUnexpectedError } from '#/_base/errors/unexpectedError';
 import type { WireLineRange } from '#/wire/record';
 import { IWireService } from '#/wire/wire';
@@ -149,6 +151,7 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
     @IAgentToolSelectService private readonly toolSelect: IAgentToolSelectService,
     @IAgentScopeContext private readonly agent: IAgentScopeContext,
     @IAgentTodoService private readonly todo: IAgentTodoService,
+    @ISessionNotepadService private readonly notepad: ISessionNotepadService,
     @ITelemetryService private readonly telemetry: ITelemetryService,
     @IEventDispatcher private readonly dispatcher: IEventDispatcher,
     @IEventBus private readonly eventBus: IEventBus,
@@ -799,10 +802,18 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
 
   private async postProcessSummary(summary: string): Promise<string> {
     const todos = this.todo.get();
-    if (todos.length === 0) {
+    const notepadDigest = renderNotepad(this.notepad.getContent());
+    if (todos.length === 0 && notepadDigest === undefined) {
       return summary;
     }
-    return `${summary.trim()}\n\n${renderTodoList(todos, '## TODO List')}`;
+    const sections = [summary.trim()];
+    if (todos.length > 0) {
+      sections.push(renderTodoList(todos, '## TODO List'));
+    }
+    if (notepadDigest !== undefined) {
+      sections.push(notepadDigest);
+    }
+    return sections.join('\n\n');
   }
 
   private async captureWireLines(): Promise<WireLineRange | undefined> {

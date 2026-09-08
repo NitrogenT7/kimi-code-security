@@ -423,6 +423,10 @@ export abstract class SDKRpcClientBase {
 
   abstract getGoal(input: SessionIdRpcInput): Promise<GoalToolResult>;
 
+  abstract getNotepad(input: SessionIdRpcInput): Promise<string>;
+
+  abstract setNotepad(input: SessionIdRpcInput & { content: string }): Promise<void>;
+
   abstract pauseGoal(input: SessionIdRpcInput): Promise<GoalSnapshot>;
 
   abstract resumeGoal(input: SessionIdRpcInput): Promise<GoalSnapshot>;

@@ -266,6 +266,45 @@ describe('session skills routing', () => {
     });
   });
 
+  it('notepad routes to sessionNotepadService with the session scope', async () => {
+    const channel = new FakeChannel();
+    const klient = createKlientFromChannel(channel);
+
+    channel.results.set('sessionNotepadService.getContent', 'agent notes');
+    await expect(klient.session('s1').notepad.getContent()).resolves.toBe('agent notes');
+    expect(channel.calls[0]).toEqual({
+      scope: { sessionId: 's1' },
+      service: 'sessionNotepadService',
+      method: 'getContent',
+      args: [],
+    });
+
+    channel.result = undefined; // void output
+    await klient.session('s1').notepad.setContent('next');
+    await klient.session('s1').notepad.append('more');
+    await klient.session('s1').notepad.clear();
+    expect(channel.calls.slice(1)).toEqual([
+      {
+        scope: { sessionId: 's1' },
+        service: 'sessionNotepadService',
+        method: 'setContent',
+        args: ['next'],
+      },
+      {
+        scope: { sessionId: 's1' },
+        service: 'sessionNotepadService',
+        method: 'append',
+        args: ['more'],
+      },
+      {
+        scope: { sessionId: 's1' },
+        service: 'sessionNotepadService',
+        method: 'clear',
+        args: [],
+      },
+    ]);
+  });
+
   it('skills.changed maps to the sessionSkillCatalog emitter', async () => {
     const channel = new FakeChannel();
     const klient = createKlientFromChannel(channel);
