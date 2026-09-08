@@ -546,7 +546,7 @@ describe('SessionMetadata', () => {
       }),
     ]);
 
-    expect(Object.keys((await meta.read()).agents ?? {}).sort()).toEqual([
+    expect(Object.keys((await meta.read()).agents ?? {}).toSorted()).toEqual([
       'agent-0',
       'agent-1',
     ]);
@@ -646,6 +646,18 @@ describe('SessionMetadata', () => {
       archived: false,
     });
     expect(mirror.recorded[1]?.updatedAt).toBe((await meta.read()).updatedAt);
+  });
+
+  it('mirrors the persisted cwd, not the creation-time context cwd', async () => {
+    const meta = ix.get(ISessionMetadata);
+    await meta.ready;
+
+    await meta.update({ cwd: '/repo/other' });
+
+    expect(mirror.recorded.at(-1)).toMatchObject({ id: 's1', cwd: '/repo/other' });
+
+    await meta.update({ title: 'still new cwd' });
+    expect(mirror.recorded.at(-1)).toMatchObject({ id: 's1', cwd: '/repo/other' });
   });
 
   it('does not re-record when loading an existing document', async () => {

@@ -803,6 +803,7 @@ function workspaceStub(initialWorkDir: string): {
       return additionalDirs;
     },
     resolve: (path) => path,
+    setWorkDir: () => {},
     isWithin: () => true,
     assertAllowed: (path) => path,
   };

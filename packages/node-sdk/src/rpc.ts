@@ -27,6 +27,7 @@ import type {
   AgentRuntimeBinding,
   AppMcpServerInspection,
   BackgroundTaskInfo,
+  ChangeWorkDirResult,
   ConfigDiagnostics,
   CreateSessionOptions,
   ExportSessionInput,
@@ -340,6 +341,10 @@ export abstract class SDKRpcClientBase {
   abstract getSessionWarnings(input: SessionIdRpcInput): Promise<readonly SessionWarningInfo[]>;
 
   abstract addAdditionalDir(input: AddAdditionalDirInput): Promise<AddAdditionalDirResult>;
+
+  abstract changeWorkDir(
+    input: SessionIdRpcInput & { path: string; persist?: boolean },
+  ): Promise<ChangeWorkDirResult>;
 
   abstract startBtw(input: SessionIdRpcInput): Promise<string>;
 

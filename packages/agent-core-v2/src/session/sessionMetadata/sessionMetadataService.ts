@@ -155,7 +155,7 @@ export class SessionMetadata extends Service implements ISessionMetadata {
         buildSessionSummary({
           id: this.data.id,
           workspaceId: this.ctx.workspaceId,
-          cwd: this.ctx.cwd,
+          cwd: this.data.cwd ?? this.ctx.cwd,
           title: this.data.title,
           lastPrompt: this.data.lastPrompt,
           createdAt: this.data.createdAt,

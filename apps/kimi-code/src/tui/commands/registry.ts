@@ -288,6 +288,14 @@ export const BUILTIN_SLASH_COMMANDS = [
     completeArgs: addDirArgumentCompletions,
   },
   {
+    name: 'cd',
+    aliases: [],
+    description: 'Change the session working directory (absolute path only)',
+    priority: 60,
+    availability: 'idle-only',
+    argumentHint: '<absolute path> [--session-only]',
+  },
+  {
     name: 'experiments',
     aliases: ['experimental'],
     description: 'Manage experimental features',

@@ -192,6 +192,7 @@ import {
   ISessionMetadata,
   ISessionSkillCatalog,
   IAgentTodoService,
+  ISessionWorkspaceCommandService,
   ISessionWorkspaceContext,
   ITelemetryService,
   IWorkspaceAliases,
@@ -271,6 +272,7 @@ import type {
   AppMcpServerInspection,
   BackgroundTaskInfo,
   CapabilityStatus,
+  ChangeWorkDirResult,
   CompactOptions,
   ConfigDiagnostics,
   CreateGoalInput,
@@ -956,9 +958,9 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
    * cannot deadlock.
    */
   private runSessionAccessAll<T>(sessionIds: readonly string[], work: () => Promise<T>): Promise<T> {
-    const keys = [...new Set(sessionIds)].sort();
+    const keys = [...new Set(sessionIds)].toSorted();
     let chained: () => Promise<T> = work;
-    for (const key of [...keys].reverse()) {
+    for (const key of [...keys].toReversed()) {
       const inner = chained;
       chained = () => this.runSessionAccess(key, inner);
     }
@@ -1602,6 +1604,20 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       .get(IWorkspaceInstanceManager)
       .getOrCreate({ workspaceId });
     return workspace.program.dirs.addDir({ path: input.path, persist: input.persist });
+  }
+
+  override async changeWorkDir(
+    input: SessionIdRpcInput & { path: string; persist?: boolean },
+  ): Promise<ChangeWorkDirResult> {
+    const handle = this.requireLiveSession(input.sessionId);
+    try {
+      return await handle.accessor.get(ISessionWorkspaceCommandService).changeWorkDir({
+        path: input.path,
+        persist: input.persist === true,
+      });
+    } catch (error) {
+      throw restateEngineError(error);
+    }
   }
 
   /**

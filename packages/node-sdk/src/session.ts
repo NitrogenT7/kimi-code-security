@@ -1,4 +1,5 @@
 import type { SwarmModeTrigger } from '@moonshot-ai/agent-core-v2/features/swarm/agent/swarm';
+import { isAbsolute } from 'node:path';
 
 import type { AgentContextData } from '#/context';
 import { ErrorCodes, KimiError, type KimiErrorCode } from '#/errors';
@@ -12,6 +13,8 @@ import type {
   AgentRuntimeBinding,
   BackgroundTaskInfo,
   CapabilityStatus,
+  ChangeWorkDirOptions,
+  ChangeWorkDirResult,
   CompactOptions,
   CreateGoalInput,
   GetCronTasksResult,
@@ -78,7 +81,7 @@ export function capabilityRpc(rpc: SDKRpcClientBase): CapabilityRpcSurface {
 
 export class Session {
   readonly id: string;
-  readonly workDir: string;
+  workDir: string;
   summary?: SessionSummary | undefined;
   private resumeState: ResumedSessionState | undefined;
 
@@ -229,6 +232,31 @@ export class Session {
       persist: options?.persist ?? true,
     });
     this.summary = { ...this.requireSummary(), additionalDirs: result.additionalDirs };
+    return result;
+  }
+
+  async changeWorkDir(
+    path: string,
+    options?: ChangeWorkDirOptions,
+  ): Promise<ChangeWorkDirResult> {
+    this.ensureOpen();
+    const normalized = normalizeRequiredString(
+      path,
+      'Working directory cannot be empty',
+      ErrorCodes.REQUEST_INVALID,
+    );
+    if (!isAbsolute(normalized)) {
+      throw new KimiError(
+        ErrorCodes.REQUEST_INVALID,
+        `/cd requires an absolute path, got: ${normalized}`,
+      );
+    }
+    const result = await this.rpc.changeWorkDir({
+      sessionId: this.id,
+      path: normalized,
+      persist: options?.persist === true,
+    });
+    this.workDir = result.workDir;
     return result;
   }
 

@@ -170,6 +170,8 @@ export * from '#/app/sessionIndex/sessionIndexMirrorService';
 export * from '#/session/sessionMetadata/sessionMetadata';
 export * from '#/session/sessionMetadata/sessionMetadataService';
 export * from '#/session/sessionMetadata/promptMetadata';
+export * from '#/session/workspaceCommand/workspaceCommand';
+export * from '#/session/workspaceCommand/workspaceCommandService';
 export * from '#/session/sessionActivity/sessionActivity';
 export * from '#/session/sessionActivity/sessionActivityService';
 export * from '#/session/sessionActivity/sessionOutcomeMirror';
