@@ -85,6 +85,15 @@ export class AuthFlowController {
         if (effort !== undefined) {
           await session.setThinking(effort);
         }
+        // Mirror the fresh-session tail below: without it appState keeps the
+        // post-logout blanks (sessionId/model/context usage/title) and
+        // session-scoped skill/plugin commands stay unrefreshed.
+        await host.syncRuntimeState(session);
+        host.sessionEventHandler.startSubscription();
+        host.updateTerminalTitle();
+        void host.refreshSkillCommands(host.session);
+        void host.refreshPluginCommands(host.session);
+        void host.fetchSessions();
         host.setAppState({ resumedAfterLoginId: undefined, resumedAfterLoginTitle: undefined });
         host.appendStartupNotice(`Previous session restored (resumed after login).`);
         return;
