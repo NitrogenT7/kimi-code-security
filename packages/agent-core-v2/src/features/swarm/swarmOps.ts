@@ -6,11 +6,12 @@ import { AgentStatusUpdated } from '#/agent/usage/usageEvents';
 import { AgentEvent2 } from '#/app/event/event2';
 import { defineState } from '#/state/state';
 
-import type { SwarmModeTrigger } from './agent/swarm';
+import type { SwarmModeTrigger, SwarmModeVariant } from './agent/swarm';
 
 const swarmModeEnterSchema = z.object({
   agentId: z.string(),
   trigger: z.custom<SwarmModeTrigger>(),
+  variant: z.enum(['audit']).optional(),
 });
 
 export class SwarmModeEnter extends AgentEvent2<z.infer<typeof swarmModeEnterSchema>> {
@@ -21,6 +22,7 @@ export class SwarmModeEnter extends AgentEvent2<z.infer<typeof swarmModeEnterSch
 export interface SwarmModeEnter {
   readonly agentId: string;
   readonly trigger: SwarmModeTrigger;
+  readonly variant?: SwarmModeVariant;
 }
 
 const swarmModeExitSchema = z.object({ agentId: z.string() });
@@ -45,5 +47,14 @@ export const swarmKey = defineState('swarm', (): SwarmModeTrigger | null => null
     ctx.emit(new AgentStatusUpdated({ agentId: e.agentId, swarmMode: false }));
     return null;
   });
+
+export const swarmVariantKey = defineState(
+  'swarmVariant',
+  (): SwarmModeVariant | null => null,
+).replayable({
+  schema: z.custom<SwarmModeVariant | null>(),
+})
+  .on(SwarmModeEnter, (_s, e) => e.variant ?? null)
+  .on(SwarmModeExit, () => null);
 
 contextMemoryKey.on(SwarmModeExit, (s) => popSwarmModeReminder(s));

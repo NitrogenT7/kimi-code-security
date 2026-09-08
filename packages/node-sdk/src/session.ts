@@ -1,4 +1,7 @@
-import type { SwarmModeTrigger } from '@moonshot-ai/agent-core-v2/features/swarm/agent/swarm';
+import type {
+  SwarmModeTrigger,
+  SwarmModeVariant,
+} from '@moonshot-ai/agent-core-v2/features/swarm/agent/swarm';
 import { isAbsolute } from 'node:path';
 
 import type { AgentContextData } from '#/context';
@@ -351,7 +354,11 @@ export class Session {
     await this.rpc.setPlanMode({ sessionId: this.id, enabled });
   }
 
-  async setSwarmMode(enabled: boolean, trigger: SwarmModeTrigger): Promise<void> {
+  async setSwarmMode(
+    enabled: boolean,
+    trigger: SwarmModeTrigger,
+    variant?: SwarmModeVariant,
+  ): Promise<void> {
     this.ensureOpen();
     if (typeof enabled !== 'boolean') {
       throw new KimiError(
@@ -360,7 +367,7 @@ export class Session {
       );
     }
     if (enabled) {
-      await this.rpc.setSwarmMode({ sessionId: this.id, enabled: true, trigger });
+      await this.rpc.setSwarmMode({ sessionId: this.id, enabled: true, trigger, variant });
     } else {
       await this.rpc.setSwarmMode({ sessionId: this.id, enabled: false });
     }

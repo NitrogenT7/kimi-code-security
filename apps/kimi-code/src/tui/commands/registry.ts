@@ -25,6 +25,7 @@ const GOAL_NEXT_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
 const SWARM_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'on', description: 'Turn swarm mode on' },
   { value: 'off', description: 'Turn swarm mode off' },
+  { value: 'audit', description: 'Security-audit swarm: /swarm audit [on|off] | <task>' },
 ];
 
 const TOWER_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
@@ -196,7 +197,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     aliases: [],
     description: 'Toggle swarm mode or run one task in swarm mode',
     priority: 100,
-    argumentHint: '[on|off] | <task>',
+    argumentHint: '[on|off] | [audit] <task>',
     completeArgs: swarmArgumentCompletions,
     availability: 'idle-only',
   },

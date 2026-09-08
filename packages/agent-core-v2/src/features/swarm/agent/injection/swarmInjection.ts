@@ -6,9 +6,10 @@ import type {
 } from '#/features/reminder/types';
 import { IAgentContextMemoryService } from '#/agent/contextMemory/contextMemory';
 
+import SWARM_AUDIT_MODE_ENTER_REMINDER from '../audit-reminder.md?raw';
 import SWARM_MODE_ENTER_REMINDER from '../enter-reminder.md?raw';
 import SWARM_MODE_EXIT_REMINDER from '../exit-reminder.md?raw';
-import type { SwarmModeTrigger } from '../swarm';
+import type { SwarmModeTrigger, SwarmModeVariant } from '../swarm';
 
 const SWARM_MODE_INJECTION_VARIANT = 'swarm_mode';
 const LEGACY_SWARM_MODE_EXIT_VARIANT = 'swarm_mode_exit';
@@ -20,6 +21,7 @@ interface SwarmModeInjectionDisclosure {
 
 export interface SwarmInjectionOptions {
   readonly getTrigger: () => SwarmModeTrigger | null;
+  readonly getVariant: () => SwarmModeVariant | undefined;
 }
 
 export class SwarmInjection extends Disposable {
@@ -44,12 +46,15 @@ export class SwarmInjection extends Disposable {
     const active = trigger !== null && trigger !== 'tool';
     const rendered = this.renderedState(ctx);
     if (active) {
-      return rendered === 'active'
-        ? undefined
-        : {
-            content: SWARM_MODE_ENTER_REMINDER,
-            disclosure: { kind: 'swarm_mode', state: 'active' },
-          };
+      if (rendered === 'active') return undefined;
+      const content =
+        this.options.getVariant() === 'audit'
+          ? SWARM_AUDIT_MODE_ENTER_REMINDER
+          : SWARM_MODE_ENTER_REMINDER;
+      return {
+        content,
+        disclosure: { kind: 'swarm_mode', state: 'active' },
+      };
     }
     return rendered === 'active'
       ? {

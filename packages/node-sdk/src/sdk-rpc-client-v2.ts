@@ -2169,7 +2169,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     const agent = await this.agentScope(input.sessionId);
     const swarm = agent.accessor.get(IAgentSwarmService);
     if (input.enabled) {
-      swarm.enter(input.trigger);
+      swarm.enter(input.trigger, input.variant);
     } else {
       swarm.exit();
     }

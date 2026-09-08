@@ -11,8 +11,8 @@ import { IAgentStateService } from '#/agent/state/agentState';
 import { IEventDispatcher } from '#/state/eventDispatcher';
 
 import { SwarmInjection } from './injection/swarmInjection';
-import { IAgentSwarmService, type SwarmModeTrigger } from './swarm';
-import { SwarmModeEnter, SwarmModeExit, swarmKey } from '../swarmOps';
+import { IAgentSwarmService, type SwarmModeTrigger, type SwarmModeVariant } from './swarm';
+import { SwarmModeEnter, SwarmModeExit, swarmKey, swarmVariantKey } from '../swarmOps';
 
 export class AgentSwarmService extends Service implements IAgentSwarmService {
   declare readonly _serviceBrand: undefined;
@@ -29,9 +29,13 @@ export class AgentSwarmService extends Service implements IAgentSwarmService {
   ) {
     super();
     this.agentState.contributeState(swarmKey);
+    this.agentState.contributeState(swarmVariantKey);
     this._register(
       new SwarmInjection(
-        { getTrigger: () => this.agentState.get(swarmKey) },
+        {
+          getTrigger: () => this.agentState.get(swarmKey),
+          getVariant: () => this.agentState.get(swarmVariantKey) ?? undefined,
+        },
         reminder,
         this.context,
       ),
@@ -64,9 +68,11 @@ export class AgentSwarmService extends Service implements IAgentSwarmService {
     );
   }
 
-  enter(trigger: SwarmModeTrigger): void {
+  enter(trigger: SwarmModeTrigger, variant?: SwarmModeVariant): void {
     if (this.agentState.get(swarmKey) !== null) return;
-    void this.dispatcher.dispatch(new SwarmModeEnter({ agentId: this.agentCtx.agentId, trigger }));
+    void this.dispatcher.dispatch(
+      new SwarmModeEnter({ agentId: this.agentCtx.agentId, trigger, variant }),
+    );
   }
 
   exit(): void {
@@ -78,6 +84,10 @@ export class AgentSwarmService extends Service implements IAgentSwarmService {
 
   get isActive(): boolean {
     return this.agentState.get(swarmKey) !== null;
+  }
+
+  get activeVariant(): SwarmModeVariant | undefined {
+    return this.agentState.get(swarmVariantKey) ?? undefined;
   }
 
   private get shouldAutoExit(): boolean {

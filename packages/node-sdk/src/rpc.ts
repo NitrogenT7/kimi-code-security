@@ -1,6 +1,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-import type { SwarmModeTrigger } from '@moonshot-ai/agent-core-v2/features/swarm/agent/swarm';
+import type {
+  SwarmModeTrigger,
+  SwarmModeVariant,
+} from '@moonshot-ai/agent-core-v2/features/swarm/agent/swarm';
 import type { Kaos } from '@moonshot-ai/kaos';
 
 import type { AgentContextData } from '#/context';
@@ -128,7 +131,11 @@ export interface SetSessionPlanModeRpcInput extends SessionIdRpcInput {
 }
 
 export type SetSessionSwarmModeRpcInput =
-  | (SessionIdRpcInput & { readonly enabled: true; readonly trigger: SwarmModeTrigger })
+  | (SessionIdRpcInput & {
+      readonly enabled: true;
+      readonly trigger: SwarmModeTrigger;
+      readonly variant?: SwarmModeVariant;
+    })
   | (SessionIdRpcInput & { readonly enabled: false });
 
 export interface SetSessionTowerModeRpcInput extends SessionIdRpcInput {
