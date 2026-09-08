@@ -13,9 +13,10 @@ function makeHost(workDir = '/repo/work') {
   };
   const session = {
     id: 'session-1',
-    changeWorkDir: vi.fn(async (path: string) => ({
+    changeWorkDir: vi.fn(async (path: string, options?: { persist?: boolean }) => ({
       workDir: path,
       previousWorkDir: workDir,
+      persisted: options?.persist === true,
     })),
   };
   const host = {
@@ -45,7 +46,7 @@ describe('handleCdCommand', () => {
     await handleCdCommand(host, '');
 
     expect(host.showStatus).toHaveBeenCalledWith(
-      'Current working directory: /repo/work\nUsage: /cd <absolute path>',
+      'Current working directory: /repo/work\nUsage: /cd <absolute path> [--persist]',
     );
     expect(host.session?.changeWorkDir).not.toHaveBeenCalled();
   });
@@ -66,12 +67,25 @@ describe('handleCdCommand', () => {
 
     await handleCdCommand(host, '/repo/other');
 
-    expect(host.session?.changeWorkDir).toHaveBeenCalledWith('/repo/other');
+    expect(host.session?.changeWorkDir).toHaveBeenCalledWith('/repo/other', { persist: false });
     expect(host.setAppState).toHaveBeenCalledWith({ workDir: '/repo/other' });
     expect(host.state.appState.workDir).toBe('/repo/other');
     expect(host.refreshSlashCommandAutocomplete).toHaveBeenCalled();
     expect(host.showStatus).toHaveBeenCalledWith(
       'Working directory changed:\n  /repo/work\n  →\n  /repo/other',
+      'success',
+    );
+  });
+
+  it('forwards --persist and surfaces the persisted confirmation', async () => {
+    const { host } = makeHost();
+
+    await handleCdCommand(host, '/repo/other --persist');
+
+    expect(host.session?.changeWorkDir).toHaveBeenCalledWith('/repo/other', { persist: true });
+    expect(host.state.appState.workDir).toBe('/repo/other');
+    expect(host.showStatus).toHaveBeenCalledWith(
+      'Working directory changed:\n  /repo/work\n  →\n  /repo/other\nBinding persisted across restart/resume.',
       'success',
     );
   });

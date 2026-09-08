@@ -24,11 +24,18 @@ export interface WorkspaceAdditionalDirsResult {
 
 export interface ChangeWorkDirInput {
   readonly path: string;
+  /**
+   * When true, the new directory is also written to the session's persisted
+   * metadata (`state.json` `cwd`/`workDir`), so close/resume reopens the
+   * session bound to the new directory instead of the original one.
+   */
+  readonly persist?: boolean;
 }
 
 export interface ChangeWorkDirResult {
   readonly workDir: string;
   readonly previousWorkDir: string;
+  readonly persisted: boolean;
 }
 
 export interface ISessionWorkspaceCommandService {

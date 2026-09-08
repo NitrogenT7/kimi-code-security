@@ -263,11 +263,13 @@ export interface AddAdditionalDirResult {
 
 export interface ChangeWorkDirPayload {
   readonly path: string;
+  readonly persist?: boolean;
 }
 
 export interface ChangeWorkDirResult {
   readonly workDir: string;
   readonly previousWorkDir: string;
+  readonly persisted: boolean;
 }
 
 export interface RenameSessionPayload {

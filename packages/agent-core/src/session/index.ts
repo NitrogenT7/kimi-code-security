@@ -365,20 +365,29 @@ export class Session {
   /**
    * Change the session's working directory in place. The tool Kaos is
    * instance-scoped (`chdir` never touches `process.cwd()`), so agents spawn
-   * subsequent tool processes under the new directory. Session-level only:
-   * the change lives in memory and does not survive restart.
+   * subsequent tool processes under the new directory. With `persist` the
+   * binding is also rewritten to `state.json` (`workDir`), which resume reads
+   * to rebind the session, so the change survives close/resume.
    */
-  async changeWorkDir(path: string): Promise<{ workDir: string; previousWorkDir: string }> {
+  async changeWorkDir(
+    path: string,
+    persist = false,
+  ): Promise<{ workDir: string; previousWorkDir: string; persisted: boolean }> {
     if (!isAbsolute(path)) {
       throw new Error(`/cd requires an absolute path, got: ${path}`);
     }
     const previousWorkDir = this.toolKaos.getcwd();
     await this.toolKaos.chdir(path);
     const workDir = this.toolKaos.getcwd();
+    if (persist) {
+      this.metadata = { ...this.metadata, workDir };
+      await this.writeMetadata();
+    }
     this.requireMainAgent().context.appendLocalCommandStdout(
-      `Changed working directory:\n  ${previousWorkDir}\n  →\n  ${workDir}`,
+      `Changed working directory:\n  ${previousWorkDir}\n  →\n  ${workDir}` +
+        (persist ? '\nBinding persisted: the session reopens in this directory.' : ''),
     );
-    return { workDir, previousWorkDir };
+    return { workDir, previousWorkDir, persisted: persist };
   }
 
   /**

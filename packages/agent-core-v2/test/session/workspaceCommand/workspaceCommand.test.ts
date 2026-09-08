@@ -25,6 +25,12 @@ import {
 } from '#/session/agentLifecycle/agentLifecycle';
 import { ISessionContext, makeSessionContext } from '#/session/sessionContext/sessionContext';
 import { ISessionWorkspaceCommandService } from '#/session/workspaceCommand/workspaceCommand';
+import type { Event } from '#/_base/event';
+import {
+  ISessionMetadata,
+  type SessionMeta,
+  type SessionMetadataChangedEvent,
+} from '#/session/sessionMetadata/sessionMetadata';
 import { SessionWorkspaceCommandService } from '#/session/workspaceCommand/workspaceCommandService';
 import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceContext';
 import { SessionWorkspaceContextService } from '#/session/workspaceContext/workspaceContextService';
@@ -187,8 +193,39 @@ function agentsStub(): AgentsStub {
   };
 }
 
-function bootstrapStub(): IBootstrapService {
+function metadataStub(workDir: string): ISessionMetadata {
+  let data: SessionMeta = {
+    id: 'session-under-test',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    archived: false,
+    cwd: workDir,
+  };
   return {
+    _serviceBrand: undefined,
+    get ready(): Promise<void> {
+      return Promise.resolve();
+    },
+    get onDidChangeMetadata(): Event<SessionMetadataChangedEvent> {
+      return (listener) => ({ dispose: () => {} });
+    },
+    async read() {
+      return data;
+    },
+    async update(patch) {
+      data = { ...data, ...patch, updatedAt: Date.now() };
+    },
+    async setTitle(title) {
+      data = { ...data, title, isCustomTitle: true };
+    },
+    async setArchived(archived) {
+      data = { ...data, archived };
+    },
+    async registerAgent() {},
+  };
+}
+
+function bootstrapStub(): IBootstrapService {  return {
     _serviceBrand: undefined,
     homeDir: '/home/test',
     osHomeDir: '/users/test',
@@ -214,6 +251,7 @@ interface Harness {
   readonly fs: MemoryHostFs;
   readonly agents: AgentsStub;
   readonly workspace: ISessionWorkspaceContext;
+  readonly meta: ISessionMetadata;
 }
 
 describe('SessionWorkspaceCommandService', () => {
@@ -237,6 +275,7 @@ describe('SessionWorkspaceCommandService', () => {
     const fs = new MemoryHostFs([gitDir, workDir, ...seedDirs]);
     const agents = agentsStub();
     const ctx = sessionContext(workDir);
+    const metaStore = metadataStub(workDir);
 
     ix = createServices(disposables, {
       additionalServices: (reg) => {
@@ -244,16 +283,18 @@ describe('SessionWorkspaceCommandService', () => {
         reg.define(ISessionWorkspaceContext, SessionWorkspaceContextService);
         reg.defineInstance(IBootstrapService, bootstrapStub());
         reg.defineInstance(IHostFileSystem, fs);
-        reg.define(IWorkspaceLocalConfigService, FileWorkspaceLocalConfigService);
         reg.defineInstance(IAgentLifecycleService, agents);
+        reg.defineInstance(ISessionMetadata, metaStore);
+        reg.define(IWorkspaceLocalConfigService, FileWorkspaceLocalConfigService);
         reg.define(ISessionWorkspaceCommandService, SessionWorkspaceCommandService);
       },
     });
 
     const workspace = ix.get(ISessionWorkspaceContext);
     const svc = ix.get(ISessionWorkspaceCommandService);
+    const meta = ix.get(ISessionMetadata);
     agents.setMain(mainPresent);
-    return { svc, fs, agents, workspace };
+    return { svc, fs, agents, workspace, meta };
   }
 
   it('persists the directory and injects a local-command-stdout message when main exists', async () => {
@@ -491,6 +532,23 @@ describe('SessionWorkspaceCommandService', () => {
         `Not a directory: ${afile}`,
       );
       expect(workspace.workDir).toBe(resolve(WORK_DIR));
+    });
+
+    it('persists the new binding into session metadata when persist is set', async () => {
+      const { svc, workspace, agents, meta } = buildForCd();
+
+      const result = await svc.changeWorkDir({ path: NEW_DIR, persist: true });
+
+      expect(result.persisted).toBe(true);
+      expect(workspace.workDir).toBe(NEW_DIR);
+      expect((await meta.read()).cwd).toBe(NEW_DIR);
+      // The injection tells the agent the binding survived.
+      expect(agents.mainContext.messages[0]?.content).toEqual([
+        {
+          type: 'text',
+          text: expect.stringContaining('Binding persisted'),
+        },
+      ]);
     });
   });
 });

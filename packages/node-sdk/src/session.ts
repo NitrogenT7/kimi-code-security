@@ -15,6 +15,7 @@ import type {
   AddAdditionalDirOptions,
   AddAdditionalDirResult,
   BackgroundTaskInfo,
+  ChangeWorkDirOptions,
   ChangeWorkDirResult,
   CompactOptions,
   CreateGoalInput,
@@ -189,7 +190,10 @@ export class Session {
    * subsequent tool operations (bash cwd, relative-path resolution). The
    * change is session-scoped and does not persist across restarts.
    */
-  async changeWorkDir(path: string): Promise<ChangeWorkDirResult> {
+  async changeWorkDir(
+    path: string,
+    options?: ChangeWorkDirOptions,
+  ): Promise<ChangeWorkDirResult> {
     this.ensureOpen();
     const normalized = normalizeRequiredString(path, 'Working directory cannot be empty', ErrorCodes.REQUEST_INVALID);
     if (!isAbsolute(normalized)) {
@@ -198,7 +202,11 @@ export class Session {
         `/cd requires an absolute path, got: ${normalized}`,
       );
     }
-    const result = await this.rpc.changeWorkDir({ sessionId: this.id, path: normalized });
+    const result = await this.rpc.changeWorkDir({
+      sessionId: this.id,
+      path: normalized,
+      persist: options?.persist === true,
+    });
     this.workDir = result.workDir;
     return result;
   }

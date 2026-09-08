@@ -43,6 +43,7 @@ export class SessionWorkspaceCommandService
     @ISessionWorkspaceContext private readonly workspace: ISessionWorkspaceContext,
     @IAgentLifecycleService private readonly agents: IAgentLifecycleService,
     @IHostFileSystem private readonly hostFs: IHostFileSystem,
+    @ISessionMetadata private readonly metadata: ISessionMetadata,
     @IInstantiationService private readonly instantiation: IInstantiationService,
   ) {
     super();
@@ -79,8 +80,15 @@ export class SessionWorkspaceCommandService
     }
     const previousWorkDir = this.workspace.workDir;
     this.workspace.setWorkDir(input.path);
-    this.injectWorkDirChanged(previousWorkDir, this.workspace.workDir);
-    return { workDir: this.workspace.workDir, previousWorkDir };
+    let persisted = false;
+    if (input.persist === true) {
+      // Rewrite the session's bound directory so close/resume reopens here
+      // (resume reads the persisted `cwd` ahead of the workspace root).
+      await this.metadata.update({ cwd: this.workspace.workDir });
+      persisted = true;
+    }
+    this.injectWorkDirChanged(previousWorkDir, this.workspace.workDir, persisted);
+    return { workDir: this.workspace.workDir, previousWorkDir, persisted };
   }
 
   private async applyAddAdditionalDir(
@@ -154,8 +162,9 @@ export class SessionWorkspaceCommandService
     this.pendingMainInjections.push(message);
   }
 
-  private injectWorkDirChanged(previousWorkDir: string, workDir: string): void {
-    const stdout = `Changed working directory:\n  ${previousWorkDir}\n  →\n  ${workDir}`;
+  private injectWorkDirChanged(previousWorkDir: string, workDir: string, persisted: boolean): void {
+    const suffix = persisted ? '\nBinding persisted: the session reopens in this directory.' : '';
+    const stdout = `Changed working directory:\n  ${previousWorkDir}\n  →\n  ${workDir}${suffix}`;
     const text = `<local-command-stdout>\n${stdout}\n</local-command-stdout>`;
     const message: ContextMessage = {
       role: 'user',

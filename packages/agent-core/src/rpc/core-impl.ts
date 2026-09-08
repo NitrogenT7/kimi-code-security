@@ -1073,7 +1073,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     sessionId,
     ...payload
   }: SessionScopedPayload<ChangeWorkDirPayload>): Promise<ChangeWorkDirResult> {
-    return this.requireSession(sessionId).changeWorkDir(payload.path);
+    return this.requireSession(sessionId).changeWorkDir(payload.path, payload.persist === true);
   }
 
   startBtw({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>): Promise<string> {

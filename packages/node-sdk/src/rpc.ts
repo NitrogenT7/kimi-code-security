@@ -388,9 +388,15 @@ export abstract class SDKRpcClientBase {
     return rpc.addAdditionalDir({ sessionId: input.id, path: input.path, persist: input.persist });
   }
 
-  async changeWorkDir(input: SessionIdRpcInput & { path: string }): Promise<ChangeWorkDirResult> {
+  async changeWorkDir(
+    input: SessionIdRpcInput & { path: string; persist?: boolean },
+  ): Promise<ChangeWorkDirResult> {
     const rpc = await this.getRpc();
-    return rpc.changeWorkDir({ sessionId: input.sessionId, path: input.path });
+    return rpc.changeWorkDir({
+      sessionId: input.sessionId,
+      path: input.path,
+      persist: input.persist === true,
+    });
   }
 
   async startBtw(input: SessionIdRpcInput): Promise<string> {

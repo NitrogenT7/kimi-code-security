@@ -168,6 +168,15 @@ export interface AddAdditionalDirInput {
 export interface ChangeWorkDirResult {
   readonly workDir: string;
   readonly previousWorkDir: string;
+  readonly persisted: boolean;
+}
+
+export interface ChangeWorkDirOptions {
+  /**
+   * Also rewrite the session's persisted bound directory so close/resume
+   * reopens the session in the new working directory.
+   */
+  readonly persist?: boolean;
 }
 
 export interface AddAdditionalDirOptions {

@@ -303,10 +303,9 @@ export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'cd',
     aliases: [],
-    description: 'Change the session working directory (absolute path only)',
-    priority: 60,
+    description: 'Change the session working directory (absolute path only)',    priority: 60,
     availability: 'idle-only',
-    argumentHint: '<absolute path>',
+    argumentHint: '<absolute path> [--persist]',
   },
   {
     name: 'clean',
