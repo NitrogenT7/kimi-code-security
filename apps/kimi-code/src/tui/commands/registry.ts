@@ -378,6 +378,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'fork',
     aliases: [],
     description: 'Fork the current session into a copy without switching to it',
+    argumentHint: '[session name]',
     priority: 80,
   },
   {

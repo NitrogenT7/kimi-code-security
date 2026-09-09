@@ -8163,7 +8163,7 @@ command = "vim"
 
     try {
       process.title = 'kimi-test-runner';
-      driver.handleUserInput('/fork ignored args');
+      driver.handleUserInput('/fork');
 
       await vi.waitFor(() => {
         expect(forkSession).toHaveBeenCalledWith({
@@ -8192,6 +8192,33 @@ command = "vim"
     } finally {
       process.title = originalTitle;
     }
+  });
+
+  it('names the fork when /fork is given a session name', async () => {
+    const source = makeSession({
+      id: 'ses-source',
+      summary: { title: 'Source title' },
+    });
+    const forked = makeSession({
+      id: 'ses-fork-named',
+      summary: { title: 'experiment branch' },
+    });
+    const forkSession = vi.fn(async () => forked);
+    const { driver } = await makeDriver(source, { forkSession });
+
+    driver.handleUserInput('/fork experiment branch');
+
+    await vi.waitFor(() => {
+      expect(forkSession).toHaveBeenCalledWith({
+        id: 'ses-source',
+        title: 'experiment branch',
+      });
+      expect(driver.state.transcriptContainer.render(120).join('\n')).toContain(
+        'Session forked (ses-fork-named). Still in the original session; switch to the fork via /sessions.',
+      );
+    });
+    expect(driver.getCurrentSessionId()).toBe('ses-source');
+    expect(source.close).not.toHaveBeenCalled();
   });
 
   it('still prints the fork resume command when the clipboard copy fails', async () => {

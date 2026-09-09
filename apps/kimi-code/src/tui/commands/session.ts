@@ -51,18 +51,21 @@ export async function handleTitleCommand(host: SlashCommandHost, args: string): 
 }
 
 export async function handleForkCommand(host: SlashCommandHost, args: string): Promise<void> {
-  void args;
   const session = host.session;
   if (session === undefined) {
     host.showError(NO_ACTIVE_SESSION_MESSAGE);
     return;
   }
 
-  const sourceTitle = forkSourceTitle(host, session);
+  // `/fork <name>` names the copy directly (aligned with `/new <name>`'s 200
+  // char cap); bare `/fork` keeps the derived "Fork: <source title>" default.
+  const requested = args.trim();
+  const forkTitle =
+    requested.length > 0 ? requested.slice(0, 200) : `Fork: ${forkSourceTitle(host, session)}`;
   try {
     const forked = await host.harness.forkSession({
       id: session.id,
-      title: `Fork: ${sourceTitle}`,
+      title: forkTitle,
     });
     const forkId = forked.id;
     try {
