@@ -19,6 +19,7 @@ import {
   type UnexpectedCloseReason,
 } from './client-shared';
 import type { McpServerStdioConfig } from './config-schema';
+import { resolveStdioCommand } from './resolve-command';
 import type { MCPClient, MCPToolDefinition, MCPToolResult } from './types';
 
 export interface StdioMcpClientOptions {
@@ -185,10 +186,23 @@ class RuntimeStdioTransport implements Transport {
     try {
       const base = lease.runtime.path.resolve(this.options.defaultCwd ?? lease.runtime.environment.homeDir);
       const cwd = this.config.cwd === undefined ? base : lease.runtime.path.resolve(base, this.config.cwd);
+      const env = mergeStdioEnv(this.config.env);
+      const resolved = resolveStdioCommand(this.config.command, {
+        win32: lease.runtime.environment.pathClass === 'win32',
+        cwd,
+        env,
+      });
+      const spawnCommand = resolved.shell
+        ? (env['ComSpec'] ?? 'cmd.exe')
+        : resolved.command;
+      const serverArgs = this.config.args ?? [];
+      const spawnArgs = resolved.shell
+        ? ['/d', '/s', '/c', resolved.command, ...serverArgs]
+        : serverArgs;
       const process = lease.track(await lease.runtime.process!.spawn(
-        this.config.command,
-        this.config.args,
-        { cwd, env: mergeStdioEnv(this.config.env) },
+        spawnCommand,
+        spawnArgs,
+        { cwd, env, windowsHide: !resolved.shell },
       ));
       this.process = process;
       lease.track(this);

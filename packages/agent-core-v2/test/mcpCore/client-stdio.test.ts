@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
@@ -19,12 +19,13 @@ import {
 
 function createClient(
   config: McpServerStdioConfig,
-  options: Partial<StdioMcpClientOptions> = {},
+  options: Partial<StdioMcpClientOptions> & { pathClass?: 'posix' | 'win32' } = {},
 ): StdioMcpClient {
+  const { pathClass, ...clientOptions } = options;
   const runtime = Object.assign(
     new FakeRuntime(
       { workspaceId: 'workspace', runtimeId: 'local', generation: 'test' },
-      { capabilities: ['process'] },
+      { capabilities: ['process'], pathClass },
     ),
     { process: new HostProcessService() },
   );
@@ -41,7 +42,7 @@ function createClient(
     workspaceId: 'workspace',
     runtimeId: 'local',
     defaultCwd: process.cwd(),
-    ...options,
+    ...clientOptions,
   });
 }
 
@@ -53,6 +54,37 @@ function isPostCloseTransportError(error: unknown): boolean {
     message.includes('transport is not running')
   );
 }
+
+const SELF_CONTAINED_MOCK_SERVER = `import { createInterface } from 'node:readline';
+
+const rl = createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  let msg;
+  try { msg = JSON.parse(line); } catch { return; }
+  const respond = (result) => {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }) + '\\n');
+  };
+  if (msg.method === 'initialize') {
+    respond({
+      protocolVersion: '2024-11-05',
+      capabilities: { tools: {} },
+      serverInfo: { name: 'mock-shim', version: '0.0.0' },
+    });
+  } else if (msg.method === 'tools/list') {
+    respond({
+      tools: [
+        {
+          name: 'echo',
+          description: 'Echoes input text',
+          inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
+        },
+      ],
+    });
+  } else if (msg.method === 'tools/call') {
+    respond({ content: [{ type: 'text', text: msg.params?.arguments?.text ?? '' }] });
+  }
+});
+`;
 
 describe('StdioMcpClient', () => {
   it('rejects unsupported executor at construction time', () => {
@@ -195,6 +227,43 @@ describe('StdioMcpClient', () => {
       expect(result.content).toEqual([{ type: 'text', text: 'hello mcp' }]);
     } finally {
       await client.close();
+    }
+  }, 15000);
+
+  it('spawns a bare command name that resolves to a .cmd shim via PATH (win32)', async () => {
+    if (process.platform !== 'win32') return;
+    const binDir = mkdtempSync(join(tmpdir(), 'kimi-mcp-shim-'));
+    const localFixture = join(binDir, 'mock-stdio-server.mjs');
+    writeFileSync(localFixture, SELF_CONTAINED_MOCK_SERVER);
+    writeFileSync(
+      join(binDir, 'mock-shim.cmd'),
+      `@echo off\r\n"${process.execPath}" "${localFixture}" %*\r\n`,
+    );
+    const client = createClient(
+      {
+        transport: 'stdio',
+        command: 'mock-shim',
+        env: { PATH: `${binDir};${process.env['PATH'] ?? ''}` },
+      },
+      { pathClass: 'win32' },
+    );
+    try {
+      try {
+        await client.connect();
+      } catch (error) {
+        throw new Error(
+          `connect failed: ${error instanceof Error ? error.message : String(error)}; stderr: ${client.stderrSnapshot()}`,
+          { cause: error },
+        );
+      }
+      const tools = await client.listTools();
+      expect(tools.map((t) => t.name)).toContain('echo');
+      const result = await client.callTool('echo', { text: 'via cmd shim' });
+      expect(result.isError).toBe(false);
+      expect(result.content).toEqual([{ type: 'text', text: 'via cmd shim' }]);
+    } finally {
+      await client.close();
+      await rm(binDir, { recursive: true, force: true });
     }
   }, 15000);
 
