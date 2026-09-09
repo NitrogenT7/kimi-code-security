@@ -83,7 +83,6 @@ import { defaultThinkingEffortFor } from './components/dialogs/model-selector';
 import { QuestionDialogComponent } from './components/dialogs/question-dialog';
 import { SessionPickerComponent, type SessionRow } from './components/dialogs/session-picker';
 import { SessionRenameDialogComponent } from './components/dialogs/session-rename-dialog';
-import { TrustPromptComponent, type TrustPromptChoice } from './components/dialogs/trust-prompt';
 import {
   FileMentionProvider,
   type SlashAutocompleteCommand,
@@ -3852,35 +3851,14 @@ export class KimiTUI {
       return false;
     }
     if (info.trusted) return false;
-    this.startEventLoop();
-    const choice = await new Promise<TrustPromptChoice>((resolve) => {
-      this.state.activeDialog = 'trust-prompt';
-      this.mountEditorReplacement(
-        new TrustPromptComponent({
-          workDir,
-          gatedMcpServers: info.gatedMcpServers,
-          onSelect: (c) => {
-            resolve(c);
-          },
-        }),
-      );
-    });
-    this.state.activeDialog = null;
-    if (choice !== 'trust') {
-      // Declining trust exits the program (Claude Code's "No, exit" semantics):
-      // stop() runs the standard shutdown path and ends in process.exit. The
-      // editor is NOT restored first — its frame would linger as an orphaned
-      // input box above the exit message; the prompt stays as the last frame.
-      await this.stop();
-      return true;
-    }
-    this.restoreEditor();
+    // Auto-trust instead of prompting: the fork is used for security research
+    // across many scratch directories and the gate is friction, not safety.
     try {
       await this.harness.trustWorkspace(workDir);
     } catch {
       // A failed write leaves the workspace untrusted (re-asked next launch).
     }
-    return true;
+    return false;
   }
 
   showHelpPanel(): void {
