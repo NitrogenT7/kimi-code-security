@@ -2459,7 +2459,7 @@ describe('config section collection fold (D12)', () => {
     parse(value: unknown): RuntimeFoldDemo {
       const demo = value as RuntimeFoldDemo;
       if (typeof demo?.enabled !== 'boolean') {
-        throw new Error('runtimeFoldDemo.enabled must be a boolean');
+        throw new TypeError('runtimeFoldDemo.enabled must be a boolean');
       }
       return demo;
     },
@@ -2745,8 +2745,8 @@ describe('ConfigService replaceSections', () => {
       defaultModel: undefined,
       thinking: {},
     });
-    expect([...domains].sort()).toEqual(
-      [PROVIDERS_SECTION, MODELS_SECTION, DEFAULT_MODEL_SECTION, THINKING_SECTION].sort(),
+    expect([...domains].toSorted()).toEqual(
+      [PROVIDERS_SECTION, MODELS_SECTION, DEFAULT_MODEL_SECTION, THINKING_SECTION].toSorted(),
     );
 
     disposables.dispose();
@@ -2824,7 +2824,7 @@ describe('ConfigService persistence guards', () => {
   async function expectPersistBlocked(promise: Promise<unknown>): Promise<void> {
     const error = await promise.then(
       () => undefined,
-      (e: unknown) => e,
+      (error: unknown) => error,
     );
     expect(isError2(error)).toBe(true);
     expect((error as Error2).code).toBe(ErrorCodes.CONFIG_PERSIST_BLOCKED);
@@ -2977,6 +2977,32 @@ describe('ConfigService persistence guards', () => {
 
     expect(config.inspect(THINKING_SECTION).userValue).toEqual({ enabled: true });
     expect(await stored(storage)).toBe('[thinking]\nenabled = false\n');
+
+    disposables.dispose();
+  });
+
+  it('keeps reported diagnostics across reloads, including broken ones, until cleared', async () => {
+    const { config, disposables, storage } = await createGuardedConfig(
+      '[providers.acme]\ntype = "openai"\napi_key = "sk-acme"\n',
+    );
+
+    config.reportDiagnostic('subagentModels', {
+      domain: 'secondaryModel',
+      severity: 'warning',
+      message: '[secondary_model].default_model "provider/typo" is not a pool key',
+    });
+    expect(config.diagnostics().some((d) => d.domain === 'secondaryModel')).toBe(true);
+
+    await overwrite(storage, '[providers.beta]\ntype = "openai"\napi_key = "sk-beta"\n');
+    await config.reload();
+    expect(config.diagnostics().some((d) => d.domain === 'secondaryModel')).toBe(true);
+
+    await overwrite(storage, '= broken =');
+    await config.reload();
+    expect(config.diagnostics().some((d) => d.domain === 'secondaryModel')).toBe(true);
+
+    config.clearReportedDiagnostic('subagentModels');
+    expect(config.diagnostics().some((d) => d.domain === 'secondaryModel')).toBe(false);
 
     disposables.dispose();
   });

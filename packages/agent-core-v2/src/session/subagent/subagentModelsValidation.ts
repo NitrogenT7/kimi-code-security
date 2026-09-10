@@ -8,3 +8,12 @@ export const ISessionSubagentModelsValidationService: ServiceIdentifier<ISession
   createDecorator<ISessionSubagentModelsValidationService>(
     'sessionSubagentModelsValidationService',
   );
+
+export interface ISubagentModelsDiagnosticsService {
+  readonly _serviceBrand: undefined;
+}
+
+export const ISubagentModelsDiagnosticsService: ServiceIdentifier<ISubagentModelsDiagnosticsService> =
+  createDecorator<ISubagentModelsDiagnosticsService>(
+    'subagentModelsDiagnosticsService',
+  );

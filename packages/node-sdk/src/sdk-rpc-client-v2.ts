@@ -1690,10 +1690,12 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
    * The session's materialized main agent with v1's eager default binding
    * applied: a freshly created agent whose profile is still unbound gets the
    * default profile + configured default model (the same bind kap-server's
-   * prompt route performs on first use). A home with no configured model
-   * leaves the agent unbound instead of failing — v1's model-less session
-   * reads (`model: undefined`, `'off'` thinking, zero capabilities) map onto
-   * the unbound state exactly.
+   * prompt route performs on first use). A home with no configured model — or
+   * one whose configured default model no longer resolves — leaves the agent
+   * unbound instead of failing: v1's model-less session reads
+   * (`model: undefined`, `'off'` thinking, zero capabilities) map onto the
+   * unbound state exactly, and a broken `config.toml` must not take down
+   * every session's agent reads with it.
    */
   private async materializeMainAgent(
     session: ISessionScopeHandle,
@@ -1716,8 +1718,9 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       } catch (error) {
         if (
           binding === undefined &&
-          error instanceof ProfileError &&
-          error.code === ProfileErrors.codes.MODEL_NOT_CONFIGURED
+          ((error instanceof ProfileError &&
+            error.code === ProfileErrors.codes.MODEL_NOT_CONFIGURED) ||
+            (isError2(error) && error.code === V2ErrorCodes.CONFIG_INVALID))
         ) {
           return agent;
         }

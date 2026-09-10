@@ -90,8 +90,20 @@ export class StubConfigService implements IConfigService {
     return Promise.resolve();
   }
 
+  private readonly reportedDiagnostics = new Map<string, ConfigDiagnostic>();
+
   diagnostics(): readonly ConfigDiagnostic[] {
-    return [];
+    return [...this.reportedDiagnostics.values()];
+  }
+
+  reportDiagnostic(key: string, diagnostic: ConfigDiagnostic): void {
+    this.reportedDiagnostics.set(key, diagnostic);
+    this._onDidChangeDiagnostics.fire(this.diagnostics());
+  }
+
+  clearReportedDiagnostic(key: string): void {
+    if (!this.reportedDiagnostics.delete(key)) return;
+    this._onDidChangeDiagnostics.fire(this.diagnostics());
   }
 }
 

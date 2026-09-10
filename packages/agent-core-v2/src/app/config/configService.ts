@@ -313,6 +313,7 @@ export class ConfigService extends Disposable implements IConfigService {
   private memory: ResolvedConfig = {};
   private delivered: ResolvedConfig = {};
   private readonly diagnosticsList: ConfigDiagnostic[] = [];
+  private readonly reportedDiagnostics = new Map<string, ConfigDiagnostic>();
   private lastDiagnosticsSnapshot = '[]';
   private readonly configKey: string;
   private tainted = false;
@@ -374,7 +375,17 @@ export class ConfigService extends Disposable implements IConfigService {
   }
 
   diagnostics(): readonly ConfigDiagnostic[] {
-    return [...this.diagnosticsList];
+    return [...this.reportedDiagnostics.values(), ...this.diagnosticsList];
+  }
+
+  reportDiagnostic(key: string, diagnostic: ConfigDiagnostic): void {
+    this.reportedDiagnostics.set(key, diagnostic);
+    this.emitDiagnosticsIfChanged();
+  }
+
+  clearReportedDiagnostic(key: string): void {
+    if (!this.reportedDiagnostics.delete(key)) return;
+    this.emitDiagnosticsIfChanged();
   }
 
   private pushDiagnostic(diagnostic: ConfigDiagnostic): void {

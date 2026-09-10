@@ -207,6 +207,8 @@ export interface IConfigService {
   ): Promise<void>;
   reload(): Promise<void>;
   diagnostics(): readonly ConfigDiagnostic[];
+  reportDiagnostic(key: string, diagnostic: ConfigDiagnostic): void;
+  clearReportedDiagnostic(key: string): void;
 }
 
 export const IConfigService: ServiceIdentifier<IConfigService> =
