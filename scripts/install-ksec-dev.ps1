@@ -190,6 +190,17 @@ if (-not (Test-Path (Join-Path $ksecDevPkg 'package.json'))) {
   $global:LASTEXITCODE = 0
 }
 
+# A pre-existing clone may predate the donor's full dependency tree (only the
+# native optional deps came along, so imports like 'ws' fail to resolve). Top
+# up any missing dependency dirs from the donor; existing content wins.
+$devDeps = Join-Path $ksecDevPkg 'node_modules'
+$donorDeps = Join-Path $donorPkg 'node_modules'
+if ((Test-Path $donorDeps) -and (Test-Path (Join-Path $ksecDevPkg 'package.json'))) {
+  robocopy $donorDeps $devDeps /E /XC /XN /XO /XF CON /NFL /NDL /NJH | Out-Host
+  if ($LASTEXITCODE -ge 8) { throw "robocopy dep sync failed (exit $LASTEXITCODE)" }
+  $global:LASTEXITCODE = 0
+}
+
 # Repoint the clone's identity: its own name, the `ksec-dev` bin entry, and the
 # fork's real version plus a -dev timestamp suffix so dev builds are obvious.
 $pkgJsonPath = Join-Path $ksecDevPkg 'package.json'
@@ -230,6 +241,10 @@ function Install-KsecDevShim {
   $content = Get-Content $Source -Raw
   $content = $content.Replace('@moonshot-ai/kimi-code', 'kimi-code-security-dev')
   $content = $content.Replace('@moonshot-ai\kimi-code', 'kimi-code-security-dev')
+  # When the donor shim already points at the stable fork package (kimi -> kimi-code-security),
+  # retarget those references too; otherwise the dev shim silently runs the stable build.
+  $content = $content.Replace('kimi-code-security/dist', 'kimi-code-security-dev/dist')
+  $content = $content.Replace('kimi-code-security\dist', 'kimi-code-security-dev\dist')
   # Export KSEC_DEV *before* node runs, per shim dialect:
   #  - .ps1: assignment right after the shebang/param prologue lines.
   #  - .cmd: SET inside the SETLOCAL block (after :find_dp0).
