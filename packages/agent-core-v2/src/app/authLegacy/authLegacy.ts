@@ -20,6 +20,8 @@ export const authSummarySchema = z.object({
   models_ready: z.boolean(),
   providers_count: z.number().int().nonnegative(),
   managed_provider: managedProviderSummarySchema.nullable(),
+  ready: z.boolean(),
+  default_model: z.string().nullable(),
 });
 export type AuthSummary = z.infer<typeof authSummarySchema>;
 

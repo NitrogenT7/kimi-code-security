@@ -48,7 +48,13 @@ export class AuthLegacyService implements IAuthLegacyService {
       };
     }
 
-    return { models_ready, providers_count, managed_provider };
+    return {
+      models_ready,
+      providers_count,
+      managed_provider,
+      ready: models_ready,
+      default_model: defaultModel ?? null,
+    };
   }
 
   private async managedLoggedIn(): Promise<boolean> {

@@ -1793,6 +1793,8 @@ describe('AuthLegacyService', () => {
       models_ready: false,
       providers_count: 0,
       managed_provider: null,
+      ready: false,
+      default_model: null,
     });
     expect(oauthStatus).not.toHaveBeenCalled();
   });
@@ -1813,6 +1815,8 @@ describe('AuthLegacyService', () => {
     defaultModel = 'k2';
     const summary = await createService().get();
     expect(summary.models_ready).toBe(true);
+    expect(summary.ready).toBe(true);
+    expect(summary.default_model).toBe('k2');
     expect(summary.managed_provider).toBeNull();
   });
 
