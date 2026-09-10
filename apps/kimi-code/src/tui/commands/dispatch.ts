@@ -43,7 +43,15 @@ import {
 } from './config';
 import { handleGoalCommand } from './goal';
 import { handleNotepadCommand } from './notepad';
-import { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } from './info';
+import {
+  handleFeedbackCommand,
+  handleLoadMcpGroupCommand,
+  handleMcpCommand,
+  handleUnloadMcpGroupsCommand,
+  showMcpServers,
+  showStatusReport,
+  showUsage,
+} from './info';
 import { handleAddDirCommand } from './add-dir';
 import { handleCdCommand } from './cd';
 import { handleCleanCommand } from './clean';
@@ -297,6 +305,37 @@ function dispatchInlineSkillCombo(host: SlashCommandHost, text: string): boolean
 
 async function executeSlashCommand(host: SlashCommandHost, input: string): Promise<void> {
   const parsedCommand = parseSlashInput(input);
+
+  // /mcp:<group> one-shot loader and /mcp:off reset — handled before intent
+  // resolution because `mcp:<group>` is not a registered command name.
+  if (parsedCommand !== null) {
+    if (parsedCommand.name === 'mcp:off') {
+      host.track('input_command', { command: 'mcp:off' });
+      try {
+        await handleUnloadMcpGroupsCommand(host);
+      } catch (error) {
+        host.showError(formatErrorMessage(error));
+      }
+      return;
+    }
+
+    const mcpGroupMatch = parsedCommand.name.match(/^mcp:(.+)$/);
+    if (mcpGroupMatch !== null) {
+      const groupName = mcpGroupMatch[1]!.trim();
+      if (groupName.length === 0) {
+        host.showError('Usage: /mcp:<group>');
+        return;
+      }
+      host.track('input_command', { command: 'mcp:group', group: groupName });
+      try {
+        await handleLoadMcpGroupCommand(host, groupName);
+      } catch (error) {
+        host.showError(formatErrorMessage(error));
+      }
+      return;
+    }
+  }
+
   const intent = resolveSlashCommandInput({
     input,
     skillCommandMap: host.skillCommandMap,
@@ -490,7 +529,11 @@ async function handleBuiltInSlashCommand(
       void host.tasksBrowserController.show();
       return;
     case 'mcp':
-      void showMcpServers(host);
+      try {
+        await handleMcpCommand(host, args);
+      } catch (error) {
+        host.showError(formatErrorMessage(error));
+      }
       return;
     case 'plugins':
       // `handlePluginsCommand` throws when no session is active (its own

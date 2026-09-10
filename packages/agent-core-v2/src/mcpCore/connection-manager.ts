@@ -13,7 +13,7 @@ import { StdioMcpClient } from './client-stdio';
 import type { McpOAuthService } from '#/mcpCore/oauth/service';
 import { assertMcpInputSchema, type MCPClient, type MCPToolDefinition } from './types';
 
-export type McpServerStatus = 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth' | 'removed';
+export type McpServerStatus = 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth' | 'removed' | 'registered';
 
 export interface McpServerEntry {
   readonly name: string;
@@ -179,7 +179,16 @@ export class McpConnectionManager implements McpConnectionView {
   async connect(name: string, config: McpServerConfig): Promise<void> {
     const previous = this.entries.get(name);
     if (previous !== undefined) {
-      if (
+      if (previous.status === 'registered') {
+        if (mcpServerConfigsEqual(previous.config, config)) {
+          previous.status = 'pending';
+          previous.attemptId = 0;
+          this.emit(previous);
+          await this.connectOne(previous, this.beginConnectAttempt(previous));
+          return;
+        }
+        this.entries.delete(name);
+      } else if (
         (previous.status === 'pending' || previous.status === 'connected') &&
         mcpServerConfigsEqual(previous.config, config)
       ) {
@@ -199,6 +208,47 @@ export class McpConnectionManager implements McpConnectionView {
     if (!disabled) {
       await this.connectOne(entry, this.beginConnectAttempt(entry));
     }
+  }
+
+  register(name: string, config: McpServerConfig): void {
+    const previous = this.entries.get(name);
+    if (previous !== undefined && previous.status === 'registered') return;
+    if (config.enabled === false) {
+      this.connect(name, config).catch(() => {});
+      return;
+    }
+    if (previous !== undefined) {
+      void this.closeClient(previous).then(() => {
+        previous.tools = undefined;
+        previous.enabledNames = undefined;
+        previous.rawTools = undefined;
+        previous.error = undefined;
+        previous.status = 'registered';
+        this.emit(previous);
+      });
+      return;
+    }
+    const entry: InternalEntry = {
+      name,
+      config,
+      attemptId: 0,
+      status: 'registered',
+    };
+    this.entries.set(name, entry);
+    this.emit(entry);
+  }
+
+  async disconnectToRegistered(name: string): Promise<boolean> {
+    const entry = this.entries.get(name);
+    if (entry === undefined || entry.status === 'registered') return false;
+    await this.closeClient(entry);
+    entry.tools = undefined;
+    entry.enabledNames = undefined;
+    entry.rawTools = undefined;
+    entry.error = undefined;
+    entry.status = 'registered';
+    this.emit(entry);
+    return true;
   }
 
   async remove(name: string): Promise<boolean> {

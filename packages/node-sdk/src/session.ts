@@ -24,6 +24,8 @@ import type {
   GoalSnapshot,
   GoalToolResult,
   JsonObject,
+  McpGroupInfo,
+  McpGroupServerOutcome,
   McpServerConfig,
   McpServerInfo,
   McpStartupMetrics,
@@ -631,6 +633,21 @@ export class Session {
   async listMcpServers(): Promise<readonly McpServerInfo[]> {
     this.ensureOpen();
     return this.rpc.listMcpServers({ sessionId: this.id });
+  }
+
+  async listMcpGroups(): Promise<readonly McpGroupInfo[]> {
+    this.ensureOpen();
+    return this.rpc.listMcpGroups({ sessionId: this.id });
+  }
+
+  async loadMcpGroup(groupName: string): Promise<readonly McpGroupServerOutcome[]> {
+    this.ensureOpen();
+    return this.rpc.loadMcpGroup({ sessionId: this.id, groupName });
+  }
+
+  async unloadMcpGroup(groupName: string): Promise<readonly McpGroupServerOutcome[]> {
+    this.ensureOpen();
+    return this.rpc.unloadMcpGroup({ sessionId: this.id, groupName });
   }
 
   async getMcpStartupMetrics(): Promise<McpStartupMetrics> {

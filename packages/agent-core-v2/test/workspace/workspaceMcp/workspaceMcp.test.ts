@@ -18,6 +18,7 @@ import { IMcpOAuthService } from '#/app/mcpConfig/oauthService';
 import { ISessionManager } from '#/app/sessionManager/sessionManager';
 import { ITelemetryService, noopTelemetryService } from '#/app/telemetry/telemetry';
 import type { McpServerConfig } from '#/mcpCore/config-schema';
+import type { McpGroup } from '#/mcpCore/group-config';
 import {
   McpConnectionManager,
   type McpServerEntry,
@@ -66,6 +67,7 @@ describe('WorkspaceMcpService', () => {
   let cwd: string;
   let disposables: DisposableStore;
   let current: Record<string, McpServerConfig>;
+  let currentGroups: Record<string, McpGroup>;
   let tunablesValue: McpTunables;
   let tunablesFn: Mock<() => McpTunables>;
   let configChanges: AsyncEmitter<McpServersChangeEvent>;
@@ -78,6 +80,7 @@ describe('WorkspaceMcpService', () => {
     cwd = mkdtempSync(join(tmpdir(), 'kimi-workspace-mcp-cwd-'));
     disposables = new DisposableStore();
     current = {};
+    currentGroups = {};
     tunablesValue = {};
     tunablesFn = vi.fn(() => tunablesValue);
     configChanges = disposables.add(new AsyncEmitter<McpServersChangeEvent>());
@@ -103,6 +106,7 @@ describe('WorkspaceMcpService', () => {
       _serviceBrand: undefined,
       ready: Promise.resolve(),
       servers: () => current,
+      groups: () => currentGroups,
       tunables: () => tunablesFn() as McpTunables,
       onDidChange: configChanges.event,
     };
@@ -152,6 +156,79 @@ describe('WorkspaceMcpService', () => {
     expect(connectAll).toHaveBeenCalledTimes(1);
     expect(Object.keys(connectAll.mock.calls[0]?.[0] ?? {}).toSorted()).toEqual(['alpha', 'beta']);
   });
+
+  it('registers grouped servers without connecting them at the initial load', async () => {
+    current = { grouped: stdioServer(), plain: stdioServer() };
+    currentGroups = { g: { servers: ['grouped'] } };
+
+    const service = createService();
+    manager = service.connectionManager();
+    await service.ready;
+
+    expect(manager.get('grouped')?.status).toBe('registered');
+    expect(manager.get('plain')?.status).toBe('connected');
+    const infos = service.sessionHandle().listMcpGroups?.() ?? [];
+    expect(infos).toHaveLength(1);
+    expect(infos[0]?.name).toBe('g');
+    expect(infos[0]?.loaded).toBe(false);
+  }, 20000);
+
+  it('loadGroup connects the registered servers and flips the loaded flag', async () => {
+    current = { grouped: stdioServer() };
+    currentGroups = { g: { servers: ['grouped'] } };
+
+    const service = createService();
+    manager = service.connectionManager();
+    await service.ready;
+
+    const outcomes = await service.loadGroup('g');
+    expect(outcomes).toEqual([{ server: 'grouped', ok: true }]);
+    expect(manager.get('grouped')?.status).toBe('connected');
+    const infos = service.sessionHandle().listMcpGroups?.() ?? [];
+    expect(infos[0]?.loaded).toBe(true);
+
+    const unloaded = await service.unloadGroup('g');
+    expect(unloaded).toEqual([{ server: 'grouped', ok: true }]);
+    expect(manager.get('grouped')?.status).toBe('registered');
+    const after = service.sessionHandle().listMcpGroups?.() ?? [];
+    expect(after[0]?.loaded).toBe(false);
+  }, 20000);
+
+  it('loadGroup reports group servers that are not configured', async () => {
+    current = {};
+    currentGroups = { g: { servers: ['missing'] } };
+
+    const service = createService();
+    manager = service.connectionManager();
+    await service.ready;
+
+    const outcomes = await service.loadGroup('g');
+    expect(outcomes).toEqual([{ server: 'missing', ok: false, error: 'not configured' }]);
+  }, 20000);
+
+  it('loadGroup and unloadGroup reject an unknown group name', async () => {
+    const service = createService();
+    manager = service.connectionManager();
+    await service.ready;
+
+    await expect(service.loadGroup('nope')).rejects.toThrow('Unknown MCP group "nope"');
+    await expect(service.unloadGroup('nope')).rejects.toThrow('Unknown MCP group "nope"');
+  }, 20000);
+
+  it('registers grouped servers that arrive through a config change', async () => {
+    const service = createService();
+    manager = service.connectionManager();
+    await service.ready;
+
+    current = { late: stdioServer() };
+    currentGroups = { g: { servers: ['late'] } };
+    await configChanges.fireAsync(
+      { upsert: { late: stdioServer() }, remove: [] },
+      new AbortController().signal,
+    );
+
+    expect(manager.get('late')?.status).toBe('registered');
+  }, 20000);
 
   it('reads timeout tunables from the config domain at connect', async () => {
     tunablesValue = { startupTimeoutMs: 4321, toolTimeoutMs: 9876 };

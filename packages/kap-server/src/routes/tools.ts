@@ -220,6 +220,8 @@ function mapMcpStatus(status: McpEntry['status']): McpServer['status'] {
       return 'disconnected';
     case 'removed':
       return 'disconnected';
+    case 'registered':
+      return 'disconnected';
     case 'failed':
       return 'error';
     case 'needs-auth':

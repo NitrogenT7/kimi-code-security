@@ -46,6 +46,8 @@ export type {
   AppMcpServerInspection,
   GlobalMcpServerAuthState,
   GlobalMcpServerAuthStatus,
+  McpGroupInfo,
+  McpGroupServerOutcome,
   McpManagedServerInfo,
   McpServerInfo,
   McpServerLocator,

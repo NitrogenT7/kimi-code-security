@@ -14,10 +14,12 @@ function mcpStartupStatusPriority(status: McpServerStatusSnapshot['status']): nu
       return 2;
     case 'connected':
       return 3;
-    case 'disabled':
+    case 'registered':
       return 4;
-    case 'removed':
+    case 'disabled':
       return 5;
+    case 'removed':
+      return 6;
   }
 }
 
@@ -25,7 +27,12 @@ export function selectMcpStartupStatusRows(
   servers: readonly McpServerStatusSnapshot[],
 ): McpServerStatusSnapshot[] {
   return [...servers]
-    .filter((server) => server.status !== 'disabled' && server.status !== 'removed')
+    .filter(
+      (server) =>
+        server.status !== 'disabled' &&
+        server.status !== 'removed' &&
+        server.status !== 'registered',
+    )
     .toSorted((a, b) => mcpStartupStatusPriority(a.status) - mcpStartupStatusPriority(b.status))
     .slice(0, MCP_STARTUP_STATUS_ROW_LIMIT);
 }
@@ -37,6 +44,7 @@ export function formatMcpStartupStatusSummary(
   let needsAuth = 0;
   let connecting = 0;
   let connected = 0;
+  let registered = 0;
   let disabled = 0;
   let removed = 0;
   for (const server of servers) {
@@ -53,6 +61,9 @@ export function formatMcpStartupStatusSummary(
       case 'connected':
         connected++;
         break;
+      case 'registered':
+        registered++;
+        break;
       case 'disabled':
         disabled++;
         break;
@@ -67,6 +78,7 @@ export function formatMcpStartupStatusSummary(
   if (needsAuth > 0) parts.push(`${needsAuth} need auth`);
   if (connecting > 0) parts.push(`${connecting} connecting`);
   if (connected > 0) parts.push(`${connected} connected`);
+  if (registered > 0) parts.push(`${registered} registered`);
   if (disabled > 0) parts.push(`${disabled} disabled`);
   if (removed > 0) parts.push(`${removed} removed`);
   return parts.join(', ');

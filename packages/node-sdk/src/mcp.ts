@@ -42,11 +42,25 @@ export type McpManagedServerInfo = McpServerConfig & {
 export interface McpServerInfo {
   readonly name: string;
   readonly transport: 'stdio' | 'http' | 'sse';
-  readonly status: 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth' | 'removed';
+  readonly status: 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth' | 'removed' | 'registered';
   readonly toolCount: number;
   readonly error?: string;
   readonly source?: McpServerSource;
   readonly config?: AppMcpServerConfig;
+}
+
+export interface McpGroupInfo {
+  readonly name: string;
+  readonly description?: string;
+  readonly servers: readonly string[];
+  readonly skillPrefixes: readonly string[];
+  readonly loaded: boolean;
+}
+
+export interface McpGroupServerOutcome {
+  readonly server: string;
+  readonly ok: boolean;
+  readonly error?: string;
 }
 
 export interface McpStartupMetrics {

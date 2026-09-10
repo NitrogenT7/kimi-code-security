@@ -12,6 +12,7 @@ import { MCP_SECTION, type McpSection } from '#/app/mcpConfig/configSection';
 import { IMcpConfigStore } from '#/app/mcpConfig/configStore';
 import { IPluginService } from '#/app/plugin/plugin';
 import type { McpServerConfig } from '#/mcpCore/config-schema';
+import { loadMcpGroups, type McpGroup } from '#/mcpCore/group-config';
 import { IHostFileSystem } from '#/os/interface/hostFileSystem';
 import { IWorkspaceContext } from '#/workspace/workspaceContext/workspaceContext';
 import { IWorkspaceTrust } from '#/workspace/workspaceTrust/workspaceTrust';
@@ -33,6 +34,8 @@ export class WorkspaceMcpConfigService extends Disposable implements IWorkspaceM
   private fileServers = new Map<string, McpServerConfig>();
   private pluginServers = new Map<string, McpServerConfig>();
   private current: Readonly<Record<string, McpServerConfig>> = {};
+  private currentGroups: Readonly<Record<string, McpGroup>> = {};
+  private lastGroupsFingerprint = '';
   private readonly watchDebounce = this._register(new TimeoutTimer());
   private readonly changeEmitter = this._register(new AsyncEmitter<McpServersChangeEvent>());
   readonly onDidChange = this.changeEmitter.event;
@@ -83,6 +86,10 @@ export class WorkspaceMcpConfigService extends Disposable implements IWorkspaceM
     return this.current;
   }
 
+  groups(): Readonly<Record<string, McpGroup>> {
+    return this.currentGroups;
+  }
+
   tunables(): McpTunables {
     const section = this.config.get<McpSection | undefined>(MCP_SECTION);
     return {
@@ -100,7 +107,7 @@ export class WorkspaceMcpConfigService extends Disposable implements IWorkspaceM
   private async initialize(): Promise<void> {
     await this.config.ready;
     await this.trust.ready;
-    const [fileServers, pluginServers] = await Promise.all([
+    const [fileServers, pluginServers, groups] = await Promise.all([
       loadMcpServers({
         fs: this.fs,
         cwd: this.workspace.cwd,
@@ -108,10 +115,25 @@ export class WorkspaceMcpConfigService extends Disposable implements IWorkspaceM
         includeProject: this.trust.isTrusted(),
       }),
       this.plugins.enabledMcpServers(),
+      this.loadGroups().catch((error: unknown) => {
+        this.log.warn(`mcp group config ignored: ${String(error)}`);
+        return {} as Record<string, McpGroup>;
+      }),
     ]);
     this.fileServers = new Map(Object.entries(fileServers));
     this.pluginServers = new Map(Object.entries(pluginServers));
     this.current = this.merged();
+    this.currentGroups = groups;
+    this.lastGroupsFingerprint = JSON.stringify(groups);
+  }
+
+  private loadGroups(): Promise<Record<string, McpGroup>> {
+    return loadMcpGroups({
+      fs: this.fs,
+      cwd: this.workspace.cwd,
+      homeDir: this.bootstrap.homeDir,
+      includeProject: this.trust.isTrusted(),
+    });
   }
 
   private merged(): Record<string, McpServerConfig> {
@@ -160,13 +182,20 @@ export class WorkspaceMcpConfigService extends Disposable implements IWorkspaceM
   private async reloadFileServers(): Promise<void> {
     await this.ready;
     await this.mutate(async () => {
-      const fresh = await loadMcpServers({
-        fs: this.fs,
-        cwd: this.workspace.cwd,
-        homeDir: this.bootstrap.homeDir,
-        includeProject: this.trust.isTrusted(),
-      });
+      const [fresh, groups] = await Promise.all([
+        loadMcpServers({
+          fs: this.fs,
+          cwd: this.workspace.cwd,
+          homeDir: this.bootstrap.homeDir,
+          includeProject: this.trust.isTrusted(),
+        }),
+        this.loadGroups().catch((error: unknown) => {
+          this.log.warn(`mcp group config ignored: ${String(error)}`);
+          return {} as Record<string, McpGroup>;
+        }),
+      ]);
       this.fileServers = new Map(Object.entries(fresh));
+      this.currentGroups = groups;
       await this.publishIfChanged();
     });
   }
@@ -194,7 +223,10 @@ export class WorkspaceMcpConfigService extends Disposable implements IWorkspaceM
       if (!Object.hasOwn(next, name)) remove.push(name);
     }
     this.current = next;
-    if (Object.keys(upsert).length === 0 && remove.length === 0) return;
+    const groupsFingerprint = JSON.stringify(this.currentGroups);
+    const groupsChanged = groupsFingerprint !== this.lastGroupsFingerprint;
+    this.lastGroupsFingerprint = groupsFingerprint;
+    if (Object.keys(upsert).length === 0 && remove.length === 0 && !groupsChanged) return;
     await this.changeEmitter.fireAsync({ upsert, remove }, NO_ABORT);
   }
 }

@@ -51,6 +51,8 @@ import type {
   KimiConfig,
   KimiConfigPatch,
   ListSessionsOptions,
+  McpGroupInfo,
+  McpGroupServerOutcome,
   McpServerInfo,
   McpStartupMetrics,
   McpTestResult,
@@ -443,6 +445,13 @@ export abstract class SDKRpcClientBase {
   abstract getCronTasks(input: SessionIdRpcInput): Promise<GetCronTasksResult>;
 
   abstract listMcpServers(input: SessionIdRpcInput): Promise<readonly McpServerInfo[]>;
+  abstract listMcpGroups(input: SessionIdRpcInput): Promise<readonly McpGroupInfo[]>;
+  abstract loadMcpGroup(
+    input: SessionIdRpcInput & { groupName: string },
+  ): Promise<readonly McpGroupServerOutcome[]>;
+  abstract unloadMcpGroup(
+    input: SessionIdRpcInput & { groupName: string },
+  ): Promise<readonly McpGroupServerOutcome[]>;
 
   abstract listWorkspaceMcpServers(workDir: string): Promise<readonly McpServerInfo[]>;
 

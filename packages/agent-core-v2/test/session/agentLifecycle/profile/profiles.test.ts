@@ -19,6 +19,15 @@ describe('builtin agent profiles', () => {
 
   it('caps the default profile delegation at non-spawning profiles', () => {
     const agent = profile('agent');
-    expect(agent.subagents).toEqual(['coder', 'explore', 'plan']);
+    expect(agent.subagents).toEqual([
+      'coder',
+      'explore',
+      'plan',
+      'security-analyst',
+      'android-reverser',
+      'web-pentester',
+      'binary-reverser',
+      'code-auditor',
+    ]);
   });
 });

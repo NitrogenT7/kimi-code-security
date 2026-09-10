@@ -466,6 +466,7 @@ export * from '#/features/cron/tools/cron-list/cron-list';
 export * from '#/features/cron/tools/cron-delete/cron-delete';
 
 import '#/session/agentLifecycle/profile/profiles';
+import '#/session/agentLifecycle/profile/security-profiles';
 export * from '#/session/agentLifecycle/agentLifecycle';
 export * from '#/session/agentLifecycle/agentLifecycleService';
 export * from '#/session/agentLifecycle/mainAgent';
@@ -749,6 +750,7 @@ export * from '#/features/notify/flag';
 export * from '#/features/notify/notifyUserAvailability';
 export * from '#/features/notify/tools/notify-user/notify-user';
 import '#/features/notify/notifyFeature';
+import '#/features/mcpManager/mcpManagerFeature';
 export * from '#/tool/toolContract';
 export * from '#/agent/toolExecutor/toolHooks';
 export * from '#/agent/toolExecutor/toolExecutor';

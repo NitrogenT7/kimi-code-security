@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'pathe';
 
@@ -7,6 +7,7 @@ import type { AutocompleteItem } from '@moonshot-ai/pi-tui';
 import { completeLeadingArg, type ArgCompletionSpec } from './complete-args';
 import type { KimiSlashCommand, SlashCommandAvailability } from './types';
 import { productDisplayName } from '#/utils/host-package';
+import { getDataDir } from '#/utils/paths';
 
 /** Subcommands offered when autocompleting `/goal <…>`. */
 const GOAL_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
@@ -43,6 +44,44 @@ const NOTEPAD_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'status', description: 'Show the notepad content' },
   { value: 'edit', description: 'Edit the notepad in an external editor' },
 ];
+
+/**
+ * Group names for `/mcp` argument completion, read best-effort from the same
+ * mcp.json layers the engine loads (user file + cwd project files). Any read
+ * or parse failure just yields fewer suggestions — completion never throws.
+ */
+function listMcpGroupNames(): readonly string[] {
+  const candidates = [
+    join(getDataDir(), 'mcp.json'),
+    join(process.cwd(), '.mcp.json'),
+    join(process.cwd(), '.kimi-code', 'mcp.json'),
+  ];
+  const names = new Set<string>();
+  for (const filePath of candidates) {
+    try {
+      const data: unknown = JSON.parse(readFileSync(filePath, 'utf8'));
+      if (typeof data !== 'object' || data === null || Array.isArray(data)) continue;
+      const groups = (data as Record<string, unknown>)['mcpGroups'];
+      if (typeof groups !== 'object' || groups === null || Array.isArray(groups)) continue;
+      for (const name of Object.keys(groups)) names.add(name);
+    } catch {
+      continue;
+    }
+  }
+  return [...names];
+}
+
+/** Argument autocompletion for the `/mcp` command (group names + `off`). */
+export function mcpArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  const specs: ArgCompletionSpec[] = [
+    ...listMcpGroupNames().map((name) => ({
+      value: name,
+      description: `Load MCP group "${name}"`,
+    })),
+    { value: 'off', description: 'Unload all MCP groups' },
+  ];
+  return completeLeadingArg(specs, argumentPrefix);
+}
 
 /** Argument autocompletion for the `/notepad` command (subcommands). */
 export function notepadArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
@@ -279,9 +318,11 @@ export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'mcp',
     aliases: [],
-    description: 'Show MCP server status',
+    description: 'Show MCP server status or load a group (/mcp <group> or /mcp:<group>)',
     priority: 60,
     availability: 'always',
+    argumentHint: '[<group> | off]',
+    completeArgs: mcpArgumentCompletions,
   },
   {
     name: 'plugins',

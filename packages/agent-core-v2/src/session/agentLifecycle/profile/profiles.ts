@@ -41,6 +41,7 @@ const AGENT_TOOLS = [
   'TowerInit',
   'TowerStatus',
   'TowerTeardown',
+  'MCPManager',
   'mcp__*',
 ] as const;
 
@@ -89,13 +90,36 @@ const CODER_ROLE =
   'or worth follow-up. If you are stopped before finishing, the parent receives only what ' +
   'you have written so far, so keep the handoff current.';
 
+const AGENT_MCP_GROUP_ROLE = [
+  'You have exclusive access to the `MCPManager` tool, which loads MCP server groups on demand.',
+  '',
+  'When the user asks you to load an MCP group, or before you use tools from an MCP group that',
+  'has not been connected yet, call `MCPManager(action="list_groups")` to see available groups,',
+  'then call `MCPManager(action="load_group", group_name="<group>")` to connect it. Only after',
+  'the group reports success should you use the corresponding `mcp__*` tools. The user can also',
+  'load a group directly with the /mcp:<group> slash command.',
+  '',
+  'Do not delegate MCP group loading to a subagent; subagents do not have `MCPManager`.',
+].join('\n');
+
 registerAgentProfile({
   name: 'agent',
   description: 'Default agent',
   tools: AGENT_TOOLS,
-  subagents: ['coder', 'explore', 'plan'],
+  subagents: [
+    'coder',
+    'explore',
+    'plan',
+    'security-analyst',
+    'android-reverser',
+    'web-pentester',
+    'binary-reverser',
+    'code-auditor',
+  ],
   renderSystemPrompt: (context) =>
-    renderSystemPromptResult('', context, { skillActive: skillActiveFor(AGENT_TOOLS) }),
+    renderSystemPromptResult(AGENT_MCP_GROUP_ROLE, context, {
+      skillActive: skillActiveFor(AGENT_TOOLS),
+    }),
 });
 
 registerAgentProfile({

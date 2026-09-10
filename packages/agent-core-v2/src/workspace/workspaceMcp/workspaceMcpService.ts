@@ -5,17 +5,19 @@ import { IAgentIdentity } from '#/app/agentIdentity/agentIdentity';
 import { IMcpOAuthService } from '#/app/mcpConfig/oauthService';
 import { ISessionManager } from '#/app/sessionManager/sessionManager';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
+import { ErrorCodes, Error2 } from '#/errors';
 import type { McpServerConfig } from '#/mcpCore/config-schema';
 import {
   McpConnectionManager,
   type McpConnectionView,
   type McpServerEntry,
 } from '#/mcpCore/connection-manager';
+import { McpGroupRegistry } from '#/mcpCore/group-registry';
 import type { McpOAuthEvent, McpOAuthService } from '#/mcpCore/oauth/service';
 import { canonicalMcpOAuthResource } from '#/mcpCore/oauth/store';
 import { ISessionEphemeralMcpServers } from '#/session/mcp/ephemeralMcpServers';
 import { MergedMcpConnectionView } from '#/session/mcp/mergedConnectionView';
-import { ISessionMcpHandle } from '#/session/mcp/sessionMcpHandle';
+import { ISessionMcpHandle, type McpGroupInfoDto } from '#/session/mcp/sessionMcpHandle';
 import { ISessionContext } from '#/session/sessionContext/sessionContext';
 import { IWorkspaceContext } from '#/workspace/workspaceContext/workspaceContext';
 import { IRuntimeResolver } from '#/workspace/workspaceInstance/workspaceInstanceManager';
@@ -27,6 +29,7 @@ import {
 import {
   IWorkspaceMcpService,
   type ISessionMcpOverlay,
+  type McpGroupLoadOutcome,
   type SessionMcpOverlayOptions,
 } from './workspaceMcp';
 
@@ -37,6 +40,7 @@ export class WorkspaceMcpService extends Disposable implements IWorkspaceMcpServ
   private readonly oauthService: McpOAuthService;
   private readonly stdioCwd: string;
   private readonly workspaceId: string;
+  private groups: McpGroupRegistry | undefined;
   readonly ready: Promise<void>;
   private mutationTail: Promise<void> = Promise.resolve();
   private readonly resolveClientName = (): string | undefined => this.identity.current().slug;
@@ -113,6 +117,9 @@ export class WorkspaceMcpService extends Disposable implements IWorkspaceMcpServ
       ready: this.ready,
       connectionManager: this.manager,
       isBaselineServer: this.sessionBaseline(this.manager, this.ready),
+      listMcpGroups: () => this.listGroupInfos(),
+      loadMcpGroup: (groupName: string) => this.loadGroup(groupName),
+      unloadMcpGroup: (groupName: string) => this.unloadGroup(groupName),
     };
   }
 
@@ -260,9 +267,89 @@ export class WorkspaceMcpService extends Disposable implements IWorkspaceMcpServ
     await this.mcpConfig.ready;
     await this.identity.resolved();
     const servers = this.mcpConfig.servers();
+    const declaredGroups = this.mcpConfig.groups();
+    if (Object.keys(declaredGroups).length > 0) {
+      this.groups = new McpGroupRegistry(declaredGroups, { ...servers });
+    }
     if (Object.keys(servers).length === 0) return;
-    await this.manager.connectAll(servers);
+    const lazyNames = new Set<string>();
+    if (this.groups !== undefined) {
+      for (const group of this.groups.list()) {
+        for (const name of this.groups.serversOfGroup(group.name) ?? []) {
+          lazyNames.add(name);
+        }
+      }
+    }
+    const eager: Record<string, McpServerConfig> = {};
+    for (const [name, config] of Object.entries(servers)) {
+      if (lazyNames.has(name)) this.manager.register(name, config);
+      else eager[name] = config;
+    }
+    if (Object.keys(eager).length > 0) {
+      await this.manager.connectAll(eager);
+    }
     this.trackMcpInitialLoad();
+  }
+
+  groupRegistry(): McpGroupRegistry | undefined {
+    return this.groups;
+  }
+
+  private listGroupInfos(): readonly McpGroupInfoDto[] {
+    const registry = this.groups;
+    if (registry === undefined) return [];
+    return registry.list().map((entry) => ({
+      name: entry.name,
+      description: entry.description,
+      servers: entry.servers,
+      skillPrefixes: entry.skillPrefixes,
+      loaded: entry.servers.some((name) => {
+        const server = this.manager.get(name);
+        return server !== undefined && server.status !== 'registered';
+      }),
+    }));
+  }
+
+  async loadGroup(groupName: string): Promise<readonly McpGroupLoadOutcome[]> {
+    const registry = this.groups;
+    const servers = this.mcpConfig.servers();
+    if (registry === undefined || !registry.has(groupName)) {
+      throw new Error2(ErrorCodes.REQUEST_INVALID, `Unknown MCP group "${groupName}"`);
+    }
+    const names = registry.serversOfGroup(groupName) ?? [];
+    const outcomes: McpGroupLoadOutcome[] = [];
+    for (const name of names) {
+      const config = servers[name];
+      if (config === undefined) {
+        outcomes.push({ server: name, ok: false, error: 'not configured' });
+        continue;
+      }
+      try {
+        await this.manager.connect(name, config);
+        outcomes.push({ server: name, ok: true });
+      } catch (error) {
+        outcomes.push({
+          server: name,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return outcomes;
+  }
+
+  async unloadGroup(groupName: string): Promise<readonly McpGroupLoadOutcome[]> {
+    const registry = this.groups;
+    if (registry === undefined || !registry.has(groupName)) {
+      throw new Error2(ErrorCodes.REQUEST_INVALID, `Unknown MCP group "${groupName}"`);
+    }
+    const names = registry.serversOfGroup(groupName) ?? [];
+    const outcomes: McpGroupLoadOutcome[] = [];
+    for (const name of names) {
+      const changed = await this.manager.disconnectToRegistered(name);
+      if (changed) outcomes.push({ server: name, ok: true });
+    }
+    return outcomes;
   }
 
   private scheduleApply(change: McpServersChange): Promise<void> {
@@ -274,11 +361,37 @@ export class WorkspaceMcpService extends Disposable implements IWorkspaceMcpServ
   }
 
   private async apply(change: McpServersChange): Promise<void> {
+    const declaredGroups = this.mcpConfig.groups();
+    const servers = this.mcpConfig.servers();
+    this.groups =
+      Object.keys(declaredGroups).length > 0
+        ? new McpGroupRegistry(declaredGroups, { ...servers })
+        : undefined;
+    const lazyNames = new Set<string>();
+    if (this.groups !== undefined) {
+      for (const group of this.groups.list()) {
+        for (const name of this.groups.serversOfGroup(group.name) ?? []) {
+          lazyNames.add(name);
+        }
+      }
+    }
     for (const name of change.remove) {
       await this.manager.markRemoved(name);
     }
     for (const [name, config] of Object.entries(change.upsert)) {
+      if (lazyNames.has(name) && this.manager.get(name)?.status !== 'connected') {
+        this.manager.register(name, config);
+        continue;
+      }
       await this.manager.connect(name, config);
+    }
+    for (const [name, config] of Object.entries(servers)) {
+      const entry = this.manager.get(name);
+      if (lazyNames.has(name)) {
+        if (entry === undefined) this.manager.register(name, config);
+      } else if (entry?.status === 'registered') {
+        await this.manager.connect(name, config);
+      }
     }
   }
 

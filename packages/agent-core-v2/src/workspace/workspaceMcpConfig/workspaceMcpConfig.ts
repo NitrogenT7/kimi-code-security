@@ -1,6 +1,7 @@
 import { createDecorator, type ServiceIdentifier } from '#/_base/di/instantiation';
 import type { Event, IWaitUntil } from '#/_base/event';
 import type { McpServerConfig } from '#/mcpCore/config-schema';
+import type { McpGroup } from '#/mcpCore/group-config';
 
 export interface McpServersChange {
   readonly upsert: Readonly<Record<string, McpServerConfig>>;
@@ -20,6 +21,8 @@ export interface IWorkspaceMcpConfigService {
   readonly ready: Promise<void>;
 
   servers(): Readonly<Record<string, McpServerConfig>>;
+
+  groups(): Readonly<Record<string, McpGroup>>;
 
   tunables(): McpTunables;
 

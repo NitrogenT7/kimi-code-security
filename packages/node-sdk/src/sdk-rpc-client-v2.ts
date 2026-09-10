@@ -294,6 +294,8 @@ import type {
   KimiHarnessOptions,
   KimiHostIdentity,
   ListSessionsOptions,
+  McpGroupInfo,
+  McpGroupServerOutcome,
   McpManagedServerInfo,
   McpServerConfig,
   McpServerInfo,
@@ -2664,6 +2666,43 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
   override async listMcpServers(input: SessionIdRpcInput): Promise<readonly McpServerInfo[]> {
     const mcp = this.requireLiveSession(input.sessionId).accessor.get(ISessionMcpHandle);
     return mcp.connectionManager.list() as readonly McpServerInfo[];
+  }
+
+  /**
+   * MCP group lazy loading, through the session scope's seeded handle (the
+   * workspace handler's group registry + shared connection manager). The
+   * seed is absent on sessions with ephemeral MCP servers — list degrades to
+   * empty, load/unload reject loudly like the other merged-view gaps.
+   */
+  override async listMcpGroups(input: SessionIdRpcInput): Promise<readonly McpGroupInfo[]> {
+    const mcp = this.requireLiveSession(input.sessionId).accessor.get(ISessionMcpHandle);
+    return mcp.listMcpGroups?.() ?? [];
+  }
+
+  override async loadMcpGroup(
+    input: SessionIdRpcInput & { groupName: string },
+  ): Promise<readonly McpGroupServerOutcome[]> {
+    const mcp = this.requireLiveSession(input.sessionId).accessor.get(ISessionMcpHandle);
+    if (mcp.loadMcpGroup === undefined) {
+      throw new KimiError(
+        ErrorCodes.NOT_IMPLEMENTED,
+        'MCP groups are not supported for v2 sessions with ephemeral MCP servers',
+      );
+    }
+    return mcp.loadMcpGroup(input.groupName);
+  }
+
+  override async unloadMcpGroup(
+    input: SessionIdRpcInput & { groupName: string },
+  ): Promise<readonly McpGroupServerOutcome[]> {
+    const mcp = this.requireLiveSession(input.sessionId).accessor.get(ISessionMcpHandle);
+    if (mcp.unloadMcpGroup === undefined) {
+      throw new KimiError(
+        ErrorCodes.NOT_IMPLEMENTED,
+        'MCP groups are not supported for v2 sessions with ephemeral MCP servers',
+      );
+    }
+    return mcp.unloadMcpGroup(input.groupName);
   }
 
   /**

@@ -1,6 +1,6 @@
 import { release as osRelease, type as osType } from 'node:os';
 
-import type { McpServerInfo, SessionStatus, SessionUsage } from '@moonshot-ai/kimi-code-sdk';
+import type { McpGroupInfo, McpServerInfo, SessionStatus, SessionUsage } from '@moonshot-ai/kimi-code-sdk';
 
 import { buildMcpStatusReportLines } from '../components/messages/mcp-status-panel';
 import { buildStatusReportLines } from '../components/messages/status-panel';
@@ -208,14 +208,96 @@ export async function showMcpServers(host: SlashCommandHost): Promise<void> {
     return;
   }
 
+  // Group status rides the session-scoped RPC; in session-less startup (or on
+  // an engine without groups) the panel simply renders servers only.
+  let groups: readonly McpGroupInfo[] | undefined;
+  if (host.session !== undefined) {
+    try {
+      groups = await host.session.listMcpGroups();
+    } catch {
+      groups = undefined;
+    }
+  }
+
   const title = servers.length > 0 ? ` MCP (${servers.length}) ` : ' MCP ';
   const panel = new UsagePanelComponent(
-    () => buildMcpStatusReportLines({ servers }),
+    () => buildMcpStatusReportLines({ servers, groups }),
     'primary',
     title,
   );
   host.state.transcriptContainer.addChild(panel);
   host.state.ui.requestRender();
+}
+
+export async function handleLoadMcpGroupCommand(
+  host: SlashCommandHost,
+  groupName: string,
+): Promise<void> {
+  const session =
+    host.session ??
+    // Loading a group implies the intent to use its tools, so lazily create
+    // the session — the same path the first prompt takes.
+    (await host.ensureSession());
+  if (session === undefined) return;
+  host.showStatus(`Loading MCP group: ${groupName} …`);
+  try {
+    const outcomes = await session.loadMcpGroup(groupName);
+    const failed = outcomes.filter((outcome) => !outcome.ok);
+    if (failed.length > 0) {
+      host.showError(
+        `MCP group "${groupName}" loaded with ${failed.length} failure(s): ${failed
+          .map((outcome) => `${outcome.server} (${outcome.error ?? 'unknown error'})`)
+          .join(', ')}`,
+      );
+    } else {
+      host.showStatus(`MCP group "${groupName}" loaded (${outcomes.length} server(s))`, 'success');
+    }
+    await showMcpServers(host);
+  } catch (error) {
+    host.showError(`Failed to load MCP group "${groupName}": ${formatErrorMessage(error)}`);
+  }
+}
+
+export async function handleUnloadMcpGroupsCommand(host: SlashCommandHost): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showStatus('No session — nothing to unload.');
+    return;
+  }
+  let groups: readonly McpGroupInfo[];
+  try {
+    groups = await session.listMcpGroups();
+  } catch (error) {
+    host.showError(`Failed to list MCP groups: ${formatErrorMessage(error)}`);
+    return;
+  }
+  const loaded = groups.filter((group) => group.loaded);
+  if (loaded.length === 0) {
+    host.showStatus('No MCP group is loaded.', 'textDim');
+    return;
+  }
+  for (const group of loaded) {
+    try {
+      await session.unloadMcpGroup(group.name);
+      host.showStatus(`MCP group "${group.name}" unloaded`, 'success');
+    } catch (error) {
+      host.showError(`Failed to unload MCP group "${group.name}": ${formatErrorMessage(error)}`);
+    }
+  }
+  await showMcpServers(host);
+}
+
+export async function handleMcpCommand(host: SlashCommandHost, args: string): Promise<void> {
+  const groupName = args.trim();
+  if (groupName.length === 0) {
+    await showMcpServers(host);
+    return;
+  }
+  if (groupName.toLowerCase() === 'off') {
+    await handleUnloadMcpGroupsCommand(host);
+    return;
+  }
+  await handleLoadMcpGroupCommand(host, groupName);
 }
 
 async function loadSessionUsageReport(host: SlashCommandHost): Promise<SessionUsageResult> {
