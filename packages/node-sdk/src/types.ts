@@ -387,11 +387,28 @@ export interface PlanInfo {
 
 export type SessionPlan = PlanInfo | null;
 
-export type SessionTodoStatus = 'pending' | 'in_progress' | 'done';
+export type SessionTodoStatus = 'pending' | 'investigating' | 'resolved' | 'inconclusive';
+
+export type SessionTodoEvidenceStatus = 'confirmed' | 'refuted' | 'checking';
+
+export interface SessionTodoEvidenceItem {
+  readonly status: SessionTodoEvidenceStatus;
+  readonly description: string;
+}
 
 export interface SessionTodoItem {
-  readonly title: string;
+  readonly type: 'question';
+  readonly id: string;
+  readonly question: string;
+  readonly hypothesis?: string;
+  readonly conclusion?: string;
+  readonly evidence: readonly SessionTodoEvidenceItem[];
+  readonly blockers: readonly string[];
+  readonly confidence: 'low' | 'medium' | 'high';
+  readonly depth: 'quick' | 'deep';
   readonly status: SessionTodoStatus;
+  readonly parentId?: string;
+  readonly subQuestions: readonly string[];
 }
 
 export interface TokenUsage {

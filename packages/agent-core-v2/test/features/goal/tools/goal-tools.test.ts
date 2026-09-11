@@ -8,6 +8,7 @@ import {
 import { USER_PROMPT_ORIGIN } from '#/agent/contextMemory/types';
 import { IAgentGoalService } from '#/features/goal/goalService';
 import { IAgentTodoService } from '#/features/todo/todoService';
+import type { QuestionItem } from '#/features/todo/todoItem';
 import { CreateGoalTool } from '#/features/goal/tools/create-goal/createGoalTool';
 import { GetGoalTool } from '#/features/goal/tools/get-goal/getGoalTool';
 import { SetGoalBudgetTool } from '#/features/goal/tools/set-goal-budget/setGoalBudgetTool';
@@ -35,6 +36,20 @@ import { stubAgentSwarm } from '../stubs';
 import { stubAgentContext } from '../../../agent/agentContext/stubs';
 
 const signal = new AbortController().signal;
+
+function makeQuestion(overrides: Partial<QuestionItem> & { question: string }): QuestionItem {
+  return {
+    type: 'question',
+    id: `test-${Math.random().toString(36).slice(2, 8)}`,
+    status: 'pending',
+    evidence: [],
+    blockers: [],
+    confidence: 'medium',
+    depth: 'deep',
+    subQuestions: [],
+    ...overrides,
+  };
+}
 
 describe('goal tools', () => {
   let ctx: TestAgentContext;
@@ -285,25 +300,37 @@ describe('goal tools', () => {
   it('UpdateGoal complete is rejected with the open list while unfinished todo items remain', async () => {
     await goals.createGoal({ objective: 'ship it' });
     await ctx.get(IAgentTodoService).replace([
-      { title: 'Check the auth flow', status: 'pending' },
-      { title: 'Probe rate limits', status: 'in_progress' },
-      { title: 'Ship notes', status: 'done' },
+      makeQuestion({ question: 'Check the auth flow' }),
+      makeQuestion({ question: 'Probe rate limits', status: 'investigating' }),
+      makeQuestion({
+        question: 'Ship notes',
+        status: 'resolved',
+        conclusion: 'shipped',
+        evidence: [{ status: 'confirmed', description: 'proof' }],
+      }),
     ]);
     const execution = updateGoalTool.resolveExecution({ status: 'complete' });
     if (execution.isError === true) throw new Error('execution should not be an error');
     const result = await execution.execute({ turnId: 0, toolCallId: 'call_open', signal });
 
     expect(result.isError).toBe(true);
-    expect(result.output).toContain('2 open item(s) remain');
+    expect(result.output).toContain('2 open question(s) remain');
     expect(result.output).toContain('1. [pending] Check the auth flow');
-    expect(result.output).toContain('2. [in_progress] Probe rate limits');
+    expect(result.output).toContain('2. [investigating] Probe rate limits');
     expect(result.stopTurn).toBeFalsy();
     expect(goals.getGoal().goal?.status).toBe('active');
   });
 
   it('UpdateGoal complete passes when every todo item is done', async () => {
     await goals.createGoal({ objective: 'ship it' });
-    await ctx.get(IAgentTodoService).replace([{ title: 'Check the auth flow', status: 'done' }]);
+    await ctx.get(IAgentTodoService).replace([
+      makeQuestion({
+        question: 'Check the auth flow',
+        status: 'resolved',
+        conclusion: 'works',
+        evidence: [{ status: 'confirmed', description: 'proof' }],
+      }),
+    ]);
     const execution = updateGoalTool.resolveExecution({ status: 'complete' });
     if (execution.isError === true) throw new Error('execution should not be an error');
     const result = await execution.execute({ turnId: 0, toolCallId: 'call_done', signal });
@@ -315,7 +342,7 @@ describe('goal tools', () => {
 
   it('UpdateGoal complete passes through after five rejected attempts', async () => {
     await goals.createGoal({ objective: 'ship it' });
-    await ctx.get(IAgentTodoService).replace([{ title: 'Unanswerable question', status: 'pending' }]);
+    await ctx.get(IAgentTodoService).replace([makeQuestion({ question: 'Unanswerable question' })]);
     const execution = updateGoalTool.resolveExecution({ status: 'complete' });
     if (execution.isError === true) throw new Error('execution should not be an error');
 
@@ -333,17 +360,14 @@ describe('goal tools', () => {
   it('UpdateGoal complete truncates the open list to ten items', async () => {
     await goals.createGoal({ objective: 'ship it' });
     await ctx.get(IAgentTodoService).replace(
-      Array.from({ length: 12 }, (_, i) => ({
-        title: `open item ${String(i + 1)}`,
-        status: 'pending' as const,
-      })),
+      Array.from({ length: 12 }, (_, i) => makeQuestion({ question: `open item ${String(i + 1)}` })),
     );
     const execution = updateGoalTool.resolveExecution({ status: 'complete' });
     if (execution.isError === true) throw new Error('execution should not be an error');
     const result = await execution.execute({ turnId: 0, toolCallId: 'call_truncate', signal });
 
     expect(result.isError).toBe(true);
-    expect(result.output).toContain('12 open item(s) remain');
+    expect(result.output).toContain('12 open question(s) remain');
     expect(result.output).toContain('10. [pending] open item 10');
     expect(result.output).not.toContain('open item 11');
   });

@@ -1304,15 +1304,21 @@ key = "${titleOAuthRef.key}"
       const manager = handle!.accessor.get(IAgentLifecycleService);
       await manager.create({ agentId: 'main' });
       const todo = manager.handleOf('main')!.accessor.get(IAgentTodoService);
-      await todo.replace([
-        { title: 'write tests', status: 'in_progress' },
-        { title: 'ship it', status: 'pending' },
-      ]);
+      const first = {
+        type: 'question' as const,
+        id: 'q-1',
+        question: 'write tests',
+        status: 'investigating' as const,
+        evidence: [],
+        blockers: [],
+        confidence: 'medium' as const,
+        depth: 'deep' as const,
+        subQuestions: [],
+      };
+      const second = { ...first, id: 'q-2', question: 'ship it', status: 'pending' as const };
+      await todo.replace([first, second]);
 
-      expect(await client.getTodos({ sessionId: 'ses_todos' })).toEqual([
-        { title: 'write tests', status: 'in_progress' },
-        { title: 'ship it', status: 'pending' },
-      ]);
+      expect(await client.getTodos({ sessionId: 'ses_todos' })).toEqual([first, second]);
 
       const served = await client.getTodos({ sessionId: 'ses_todos' });
       const stored = todo.get();

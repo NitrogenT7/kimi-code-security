@@ -1,12 +1,13 @@
 /**
- * TodoPanel — live-updating TODO list shown before the input area.
+ * TodoPanel — live-updating investigation board shown before the input area.
  *
- * Mounted as a dedicated `Container` slot between the activity pane
- * (spinners / thinking stream) and the queue / editor block. The host
- * calls {@link setTodos} whenever the LLM invokes the `TodoList`
- * tool; state survives across turns so the list stays visible until
- * explicitly cleared (`todos: []`), a new session starts, or `/clear`
- * is issued.
+ * Renders active investigation questions (evidence chains, confidence/depth
+ * badges, blockers) plus a resolved-findings section. Mounted as a dedicated
+ * `Container` slot between the activity pane and the queue / editor block.
+ * The host calls {@link setTodos} / {@link setFindings} whenever the LLM
+ * writes the TodoList (or replay hydrates the tool store). State survives
+ * across turns so the board stays visible until explicitly cleared
+ * (`todos: []`), a new session starts, or `/clear` is issued.
  */
 
 import type { Component } from '@moonshot-ai/pi-tui';
@@ -16,125 +17,73 @@ import chalk from 'chalk';
 import { currentTheme } from '#/tui/theme';
 import type { ColorPalette } from '#/tui/theme/colors';
 
-export type TodoStatus = 'pending' | 'in_progress' | 'done';
+export type QuestionStatus = 'pending' | 'investigating' | 'resolved' | 'inconclusive';
+export type EvidenceStatus = 'confirmed' | 'refuted' | 'checking';
 
-export interface TodoItem {
-  readonly title: string;
-  readonly status: TodoStatus;
+export interface UiEvidenceItem {
+  readonly status: EvidenceStatus;
+  readonly description: string;
 }
 
-const MAX_VISIBLE = 5;
-
-export interface VisibleTodos {
-  readonly rows: readonly TodoItem[];
-  readonly hidden: number;
-  readonly hiddenCounts: Record<TodoStatus, number>;
+export interface UiQuestionItem {
+  readonly id: string;
+  readonly question: string;
+  readonly status: QuestionStatus;
+  readonly evidence: readonly UiEvidenceItem[];
+  readonly blockers: readonly string[];
+  readonly confidence: string;
+  readonly depth: string;
+  readonly conclusion?: string;
+  readonly parentId?: string;
 }
 
-/**
- * Pick which todos to render when the list exceeds {@link MAX_VISIBLE}.
- *
- * The selector is order-agnostic — the TodoList tool keeps whatever
- * order the model produced and does not group items by status, so an
- * interleaved sequence like `pending, done, pending, done, ...` is
- * possible and must still yield MAX_VISIBLE rows when enough exist.
- *
- * Strategy:
- * 1. Include every `in_progress` item (capped at MAX_VISIBLE).
- * 2. Fill remaining slots with "what's next" — the earliest `pending`
- *    items in their original positions — while reserving one slot for
- *    "what just finished" — the latest `done` item — when both kinds
- *    exist. If one side has too few candidates, the other expands.
- *
- * Items are returned in their original order.
- */
-export function selectVisibleTodos(todos: readonly TodoItem[]): VisibleTodos {
-  if (todos.length <= MAX_VISIBLE) {
-    return {
-      rows: [...todos],
-      hidden: 0,
-      hiddenCounts: { done: 0, in_progress: 0, pending: 0 },
-    };
-  }
-
-  const inProgress: number[] = [];
-  const pending: number[] = [];
-  const done: number[] = [];
-  for (const [i, todo] of todos.entries()) {
-    if (todo.status === 'in_progress') inProgress.push(i);
-    else if (todo.status === 'pending') pending.push(i);
-    else done.push(i);
-  }
-
-  const picked = new Set<number>();
-  for (const i of inProgress.slice(0, MAX_VISIBLE)) picked.add(i);
-
-  if (picked.size < MAX_VISIBLE) {
-    // Most recent done first; earliest pending first.
-    const doneCandidates = done.toReversed();
-    const pendingCandidates = pending;
-
-    const remaining = MAX_VISIBLE - picked.size;
-    let doneCount: number;
-    let pendingCount: number;
-    if (doneCandidates.length === 0) {
-      doneCount = 0;
-      pendingCount = Math.min(remaining, pendingCandidates.length);
-    } else if (pendingCandidates.length === 0) {
-      pendingCount = 0;
-      doneCount = Math.min(remaining, doneCandidates.length);
-    } else {
-      doneCount = 1;
-      pendingCount = Math.min(remaining - 1, pendingCandidates.length);
-      if (pendingCount < remaining - 1) {
-        doneCount = Math.min(doneCandidates.length, remaining - pendingCount);
-      }
-    }
-
-    for (let i = 0; i < doneCount; i++) picked.add(doneCandidates[i] as number);
-    for (let i = 0; i < pendingCount; i++) picked.add(pendingCandidates[i] as number);
-  }
-
-  const sortedIdx = [...picked].toSorted((a, b) => a - b);
-
-  const hiddenCounts: Record<TodoStatus, number> = { done: 0, in_progress: 0, pending: 0 };
-  for (const [i, todo] of todos.entries()) {
-    if (!picked.has(i)) {
-      hiddenCounts[todo.status] += 1;
-    }
-  }
-
-  return {
-    rows: sortedIdx.map((i) => todos[i] as TodoItem),
-    hidden: todos.length - sortedIdx.length,
-    hiddenCounts,
-  };
+export interface UiFindingItem {
+  readonly id: string;
+  readonly question: string;
+  readonly conclusion: string;
+  readonly confidence: string;
+  readonly depth: string;
+  readonly status: 'resolved' | 'inconclusive';
 }
+
+const MAX_ACTIVE_QUESTIONS = 5;
+const MAX_EVIDENCE_PER_QUESTION = 3;
+const MAX_RESOLVED = 3;
 
 export class TodoPanelComponent implements Component {
-  private todos: readonly TodoItem[] = [];
+  private questions: readonly UiQuestionItem[] = [];
+  private findings: readonly UiFindingItem[] = [];
   private expanded = false;
 
-  setTodos(todos: readonly TodoItem[]): void {
-    this.todos = todos.map((t) => ({ title: t.title, status: t.status }));
+  setTodos(questions: readonly UiQuestionItem[]): void {
+    this.questions = questions.map((q) => ({ ...q }));
   }
 
-  getTodos(): readonly TodoItem[] {
-    return this.todos;
+  getTodos(): readonly UiQuestionItem[] {
+    return this.questions;
+  }
+
+  setFindings(findings: readonly UiFindingItem[]): void {
+    this.findings = findings.map((f) => ({ ...f }));
+  }
+
+  getFindings(): readonly UiFindingItem[] {
+    return this.findings;
   }
 
   clear(): void {
-    this.todos = [];
+    this.questions = [];
+    this.findings = [];
     this.expanded = false;
   }
 
   isEmpty(): boolean {
-    return this.todos.length === 0;
+    return this.questions.length === 0 && this.findings.length === 0;
   }
 
-  /** True when the list exceeds the collapsed cap, i.e. there is something to expand. */
+  /** True when the collapsed caps hide content, i.e. there is something to expand. */
   hasOverflow(): boolean {
-    return this.todos.length > MAX_VISIBLE;
+    return this.questions.length > MAX_ACTIVE_QUESTIONS || this.findings.length > MAX_RESOLVED;
   }
 
   setExpanded(expanded: boolean): void {
@@ -148,76 +97,134 @@ export class TodoPanelComponent implements Component {
   invalidate(): void {}
 
   render(width: number): string[] {
-    if (this.todos.length === 0) return [];
-    const c = currentTheme.palette;
-    const lines: string[] = [
-      chalk.hex(c.border)('─'.repeat(width)),
-      chalk.hex(c.primary).bold('  Todo'),
-    ];
+    if (this.isEmpty()) return [];
 
-    if (this.expanded) {
-      for (const todo of this.todos) {
-        lines.push(renderRow(todo, c));
+    const c = currentTheme.palette;
+    const lines: string[] = [];
+    const innerW = Math.max(20, width - 4);
+
+    lines.push(chalk.hex(c.border)('─'.repeat(width)));
+    lines.push(chalk.hex(c.primary).bold(' Investigation'));
+
+    if (this.questions.length > 0) {
+      const visible = this.expanded
+        ? this.questions
+        : this.questions.slice(0, MAX_ACTIVE_QUESTIONS);
+      for (const q of visible) {
+        lines.push(...renderQuestion(q, c, innerW));
       }
-      if (this.todos.length > MAX_VISIBLE) {
-        lines.push(
-          chalk.hex(c.textDim)(`  all ${String(this.todos.length)} items · ctrl+t to collapse`),
-        );
+      if (!this.expanded && this.questions.length > MAX_ACTIVE_QUESTIONS) {
+        const hidden = this.questions.length - MAX_ACTIVE_QUESTIONS;
+        lines.push(chalk.hex(c.textDim)(`  … +${hidden} more questions`));
       }
-    } else {
-      const { rows, hidden, hiddenCounts } = selectVisibleTodos(this.todos);
-      for (const todo of rows) {
-        lines.push(renderRow(todo, c));
+    }
+
+    if (this.findings.length > 0) {
+      const resolvedCount = this.findings.filter((f) => f.status === 'resolved').length;
+      const inconclusiveCount = this.findings.length - resolvedCount;
+      const parts: string[] = [];
+      if (resolvedCount > 0) parts.push(`${resolvedCount} resolved`);
+      if (inconclusiveCount > 0) parts.push(`${inconclusiveCount} inconclusive`);
+      const label = parts.join(' / ');
+      lines.push(
+        chalk.hex(c.border)(
+          `  ── ${label} ──${'─'.repeat(Math.max(0, innerW - 7 - label.length))}`,
+        ),
+      );
+
+      const visible = this.expanded ? this.findings : this.findings.slice(0, MAX_RESOLVED);
+      for (const f of visible) {
+        lines.push(...renderFinding(f, c, innerW));
       }
-      if (hidden > 0) {
-        const distribution = formatHiddenCounts(hiddenCounts);
-        const suffix = distribution.length > 0 ? ` (${distribution})` : '';
-        lines.push(
-          chalk.hex(c.textDim)(`  … +${hidden} more${suffix} · ctrl+t to expand`),
-        );
+      if (!this.expanded && this.findings.length > MAX_RESOLVED) {
+        const hidden = this.findings.length - MAX_RESOLVED;
+        lines.push(chalk.hex(c.textDim)(`  … +${hidden} more`));
       }
+    }
+
+    if (this.hasOverflow()) {
+      lines.push(
+        chalk.hex(c.textDim)(
+          this.expanded ? '  ctrl+t to collapse' : '  ctrl+t to expand',
+        ),
+      );
     }
 
     return lines.map((line) => truncateToWidth(line, width));
   }
 }
 
-function renderRow(todo: TodoItem, colors: ColorPalette): string {
-  const marker = statusMarker(todo.status, colors);
-  const titleStyled = styleTitle(todo.title, todo.status, colors);
-  return `  ${marker} ${titleStyled}`;
+function confidenceBadge(confidence: string, depth: string, colors: ColorPalette): string {
+  const confMap: Record<string, string> = { low: '低', medium: '中', high: '高' };
+  const depthMap: Record<string, string> = { quick: 'quick', deep: 'deep' };
+  const label = `${confMap[confidence] ?? confidence} ${depthMap[depth] ?? depth}`;
+  const color =
+    confidence === 'high' ? colors.primary : confidence === 'low' ? colors.textDim : colors.text;
+  return chalk.hex(color)(`[${label}]`);
 }
 
-function statusMarker(status: TodoStatus, colors: ColorPalette): string {
-  switch (status) {
-    case 'in_progress':
-      return chalk.hex(colors.primary).bold('●');
-    case 'done':
-      return chalk.hex(colors.success)('✓');
-    case 'pending':
-      return chalk.hex(colors.textDim)('○');
+function statusMarker(status: QuestionStatus, colors: ColorPalette): string {
+  if (status === 'investigating') return chalk.hex(colors.primary).bold('●');
+  if (status === 'pending') return chalk.hex(colors.textDim)('○');
+  return '';
+}
+
+function evidenceMarker(status: EvidenceStatus, colors: ColorPalette): string {
+  if (status === 'confirmed') return chalk.hex(colors.success)('✅');
+  if (status === 'refuted') return chalk.hex(colors.error)('❌');
+  return chalk.hex(colors.warning)('❓');
+}
+
+function findingMarker(status: 'resolved' | 'inconclusive', colors: ColorPalette): string {
+  if (status === 'resolved') return chalk.hex(colors.success)('✅');
+  return chalk.hex(colors.warning)('❓');
+}
+
+function questionTitle(status: QuestionStatus, title: string, colors: ColorPalette): string {
+  if (status === 'investigating') return chalk.hex(colors.text).bold(title);
+  return chalk.hex(colors.text)(title);
+}
+
+function renderQuestion(q: UiQuestionItem, colors: ColorPalette, width: number): string[] {
+  const lines: string[] = [];
+  const marker = statusMarker(q.status, colors);
+  const badge = confidenceBadge(q.confidence, q.depth, colors);
+  const title = questionTitle(q.status, q.question, colors);
+
+  const firstLine = `  ${marker} ${truncateToWidth(title, width - 20)} ${badge}`;
+  lines.push(firstLine);
+
+  const evidence = q.evidence ?? [];
+  if (evidence.length > 0) {
+    const showEvidence = evidence.slice(0, MAX_EVIDENCE_PER_QUESTION);
+    for (const ev of showEvidence) {
+      const em = evidenceMarker(ev.status, colors);
+      lines.push(
+        `    ${em} ${chalk.hex(colors.textDim)(truncateToWidth(ev.description, width - 10))}`,
+      );
+    }
+    if (evidence.length > MAX_EVIDENCE_PER_QUESTION) {
+      lines.push(`    ${chalk.hex(colors.textDim)('…')}`);
+    }
   }
-}
 
-function styleTitle(title: string, status: TodoStatus, colors: ColorPalette): string {
-  switch (status) {
-    case 'in_progress':
-      return chalk.hex(colors.text).bold(title);
-    case 'done':
-      return chalk.hex(colors.textDim).strikethrough(title);
-    case 'pending':
-      return chalk.hex(colors.text)(title);
+  const blockers = q.blockers ?? [];
+  if (blockers.length > 0) {
+    const blockerText = blockers.slice(0, 2).join('; ');
+    const more = blockers.length > 2 ? ` …+${blockers.length - 2}` : '';
+    lines.push(
+      `    ${chalk.hex(colors.warning)(`⚡ ${truncateToWidth(blockerText + more, width - 10)}`)}`,
+    );
   }
+
+  return lines;
 }
 
-const STATUS_LABELS: readonly { status: TodoStatus; label: string }[] = [
-  { status: 'done', label: 'done' },
-  { status: 'in_progress', label: 'in progress' },
-  { status: 'pending', label: 'pending' },
-];
+function renderFinding(f: UiFindingItem, colors: ColorPalette, width: number): string[] {
+  const marker = findingMarker(f.status, colors);
+  const badge = confidenceBadge(f.confidence, f.depth, colors);
+  const conclusion = chalk.hex(colors.success).dim(truncateToWidth(f.conclusion, width - 25));
 
-export function formatHiddenCounts(counts: Record<TodoStatus, number>): string {
-  return STATUS_LABELS.filter(({ status }) => counts[status] > 0)
-    .map(({ status, label }) => `${counts[status]} ${label}`)
-    .join(' · ');
+  const shortQuestion = truncateToWidth(f.question, Math.max(10, width - 35));
+  return [`  ${marker} ${chalk.hex(colors.text)(shortQuestion)} → ${conclusion} ${badge}`];
 }

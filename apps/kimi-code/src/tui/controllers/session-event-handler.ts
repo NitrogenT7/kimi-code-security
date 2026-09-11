@@ -49,7 +49,11 @@ import {
   argsRecord,
   formatErrorPayload,
   formatErrorMessage,
+  isQuestionItemShape,
   isTodoItemShape,
+  migrateTodoItemShape,
+  normalizeQuestionItem,
+  questionToFinding,
   serializeToolResultOutput,
   stringValue,
 } from '../utils/event-payload';
@@ -62,6 +66,7 @@ import {
 import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
 import { formatHookResultMarkdown } from '../utils/hook-result-format';
 import { McpOAuthAuthorizationUrlOpener } from '../utils/mcp-oauth';
+import type { UiFindingItem, UiQuestionItem } from '../components/chrome/todo-panel';
 import {
   formatMcpStartupStatusSummary,
   mcpServerStatusKey,
@@ -166,6 +171,7 @@ export class SessionEventHandler {
   renderedMcpServerStatusKeys: Map<string, string> = new Map();
   mcpServerStatusSpinners: Map<string, MoonLoader> = new Map();
   mcpServers: Map<string, McpServerStatusSnapshot> = new Map();
+  private readonly investigationFindings: Map<string, UiFindingItem> = new Map();
   private goalCompletionAwaitingClear = false;
   private goalCompletionTurnEnded = false;
   private currentTurnHasAssistantText = false;
@@ -186,6 +192,7 @@ export class SessionEventHandler {
     this.renderedPluginCommandActivationIds.clear();
     this.renderedMcpServerStatusKeys.clear();
     this.mcpServers.clear();
+    this.investigationFindings.clear();
     this.goalCompletionAwaitingClear = false;
     this.goalCompletionTurnEnded = false;
     this.currentTurnHasAssistantText = false;
@@ -197,6 +204,14 @@ export class SessionEventHandler {
     this.clearQueuedGoalPromotionTimer();
     this.clearStepRetryAttemptTimer();
     this.stopAllMcpServerStatusSpinners();
+  }
+
+  /** Seeds the findings accumulator from replay hydration (findings tool store). */
+  setInvestigationFindings(findings: readonly UiFindingItem[]): void {
+    this.investigationFindings.clear();
+    for (const finding of findings) {
+      this.investigationFindings.set(finding.id, finding);
+    }
   }
 
   clearAgentSwarmProgress(): void {
@@ -382,10 +397,6 @@ export class SessionEventHandler {
     }
     if (event.reason === 'blocked') {
       this.host.showStatus('Turn stopped: prompt hook blocked the request.', 'error');
-    }
-    const todos = this.host.state.todoPanel.getTodos();
-    if (todos.length > 0 && todos.every((t) => t.status === 'done')) {
-      this.host.streamingUI.setTodoList([]);
     }
     this.host.streamingUI.resetToolUi();
     this.host.streamingUI.finalizeTurn(sendQueued);
@@ -704,12 +715,22 @@ export class SessionEventHandler {
     if (matchedCall !== undefined && matchedCall.name === 'TodoList' && !event.isError) {
       const rawTodos = (matchedCall.args as { todos?: unknown }).todos;
       if (Array.isArray(rawTodos)) {
-        const sanitized = rawTodos
-          .filter((todo): todo is { title: string; status: 'pending' | 'in_progress' | 'done' } =>
-            isTodoItemShape(todo),
-          )
-          .map((t) => ({ title: t.title, status: t.status }));
-        streamingUI.setTodoList(sanitized);
+        if (rawTodos.length === 0) this.investigationFindings.clear();
+        const questions: UiQuestionItem[] = [];
+        for (const item of rawTodos) {
+          const q = isQuestionItemShape(item)
+            ? normalizeQuestionItem(item)
+            : isTodoItemShape(item)
+              ? migrateTodoItemShape(item)
+              : null;
+          if (q === null) continue;
+          if (q.status === 'pending' || q.status === 'investigating') {
+            questions.push(q);
+          } else {
+            this.investigationFindings.set(q.id, questionToFinding(q));
+          }
+        }
+        streamingUI.setTodoList(questions, [...this.investigationFindings.values()]);
       }
     }
     this.host.patchLivePane({ mode: 'waiting' });

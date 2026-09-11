@@ -4,6 +4,8 @@ import { isKimiError } from '@moonshot-ai/kimi-code-sdk';
 
 import { WelcomeComponent } from '../components/chrome/welcome';
 import { CompactionComponent } from '../components/dialogs/compaction';
+import type { UiFindingItem, UiQuestionItem } from '../components/chrome/todo-panel';
+import { normalizeQuestionItem, questionToFinding } from '../utils/event-payload';
 import {
   UndoSelectorComponent,
   type UndoChoice,
@@ -163,11 +165,19 @@ async function refreshTodoPanel(host: SlashCommandHost): Promise<void> {
   if (session === undefined) return;
   try {
     const todos = await session.getTodos();
-    if (todos.length > 0 && todos.every((todo) => todo.status === 'done')) {
-      host.streamingUI.setTodoList([]);
-      return;
+    const questions: UiQuestionItem[] = [];
+    const findings = new Map<string, UiFindingItem>();
+    for (const todo of todos) {
+      const q = normalizeQuestionItem(todo);
+      if (q === null) continue;
+      if (q.status === 'pending' || q.status === 'investigating') {
+        questions.push(q);
+      } else {
+        findings.set(q.id, questionToFinding(q));
+      }
     }
-    host.streamingUI.setTodoList(todos);
+    host.sessionEventHandler.setInvestigationFindings([...findings.values()]);
+    host.streamingUI.setTodoList(questions, [...findings.values()]);
   } catch {
     return;
   }

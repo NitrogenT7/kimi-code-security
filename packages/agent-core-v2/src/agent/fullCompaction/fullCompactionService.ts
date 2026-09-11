@@ -25,6 +25,7 @@ import { IAgentToolRegistryService } from '#/agent/toolRegistry/toolRegistry';
 import { stripDynamicToolContext } from '#/agent/toolSelect/dynamicTools';
 import { IAgentToolSelectService } from '#/agent/toolSelect/toolSelect';
 import { IAgentTodoService } from '#/features/todo/todoService';
+import { renderFindingsDigest } from '#/features/todo/findings';
 import { renderTodoList } from '#/features/todo/todoItem';
 import { ISessionNotepadService } from '#/features/notepad/sessionNotepad';
 import { renderNotepad } from '#/features/notepad/notepadContent';
@@ -802,13 +803,17 @@ export class AgentFullCompactionService extends Service implements IAgentFullCom
 
   private async postProcessSummary(summary: string): Promise<string> {
     const todos = this.todo.get();
+    const findingsDigest = renderFindingsDigest(this.todo.getFindings());
     const notepadDigest = renderNotepad(this.notepad.getContent());
-    if (todos.length === 0 && notepadDigest === undefined) {
+    if (todos.length === 0 && findingsDigest === undefined && notepadDigest === undefined) {
       return summary;
     }
     const sections = [summary.trim()];
     if (todos.length > 0) {
       sections.push(renderTodoList(todos, '## TODO List'));
+    }
+    if (findingsDigest !== undefined) {
+      sections.push(findingsDigest);
     }
     if (notepadDigest !== undefined) {
       sections.push(notepadDigest);

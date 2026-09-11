@@ -2,23 +2,18 @@ import { z } from 'zod';
 
 import { createDecorator } from '#/_base/di/instantiation';
 import { type AgentTool } from '#/tool/toolContract';
-import { type TodoStatus } from '#/features/todo/todoItem';
-
-const TodoItemSchema = z.object({
-  title: z.string().min(1).describe('Short, actionable title for the todo.'),
-  status: z.enum(['pending', 'in_progress', 'done']).describe('Current status of the todo.'),
-});
+import { QuestionItemSchema } from '#/features/todo/todoItem';
 
 export interface TodoListInput {
-  todos?: Array<{ title: string; status: TodoStatus }>;
+  todos?: Array<unknown>;
 }
 
 export const TodoListInputSchema: z.ZodType<TodoListInput> = z.object({
   todos: z
-    .array(TodoItemSchema)
+    .array(QuestionItemSchema)
     .optional()
     .describe(
-      'The updated todo list. Omit to read the current todo list without making changes. Pass an empty array to clear the list.',
+      'The updated todo list. Omit to read the current list. Pass an empty array to clear.',
     ),
 });
 

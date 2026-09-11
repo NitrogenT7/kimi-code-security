@@ -6,7 +6,7 @@ import { IFeatureManager } from '#/app/feature/featureManager';
 import { IAgentReminderService } from '#/features/reminder/reminderService';
 import { TodoFeature } from '#/features/todo/todoFeature';
 import { IAgentTodoService } from '#/features/todo/todoService';
-import type { TodoItem } from '#/features/todo/todoItem';
+import type { QuestionItem, TodoItem } from '#/features/todo/todoItem';
 import { TODO_LIST_REMINDER_VARIANT } from '#/features/todo/todoListReminder';
 import { IAgentLifecycleService } from '#/session/agentLifecycle/agentLifecycle';
 import type { WireRecord } from '#/wire/record';
@@ -16,6 +16,20 @@ import {
   InMemoryWireRecordPersistence,
   type TestAgentContext,
 } from '../../harness';
+
+function makeQuestion(overrides: Partial<QuestionItem> & { question: string }): QuestionItem {
+  return {
+    type: 'question',
+    id: `test-${Math.random().toString(36).slice(2, 8)}`,
+    status: 'pending',
+    evidence: [],
+    blockers: [],
+    confidence: 'medium',
+    depth: 'deep',
+    subQuestions: [],
+    ...overrides,
+  };
+}
 
 function reminderInjected(ctx: TestAgentContext): boolean {
   return ctx.context.get().some(
@@ -51,14 +65,10 @@ describe('AgentTodoService', () => {
 
     expect(todo.get()).toEqual([]);
 
-    await todo.replace([
-      { title: 'first', status: 'pending' },
-      { title: 'second', status: 'in_progress' },
-    ]);
-    expect(todo.get()).toEqual([
-      { title: 'first', status: 'pending' },
-      { title: 'second', status: 'in_progress' },
-    ]);
+    const first = makeQuestion({ question: 'first' });
+    const second = makeQuestion({ question: 'second', status: 'investigating' });
+    await todo.replace([first, second]);
+    expect(todo.get()).toEqual([first, second]);
 
     await todo.clear();
     expect(todo.get()).toEqual([]);
@@ -69,34 +79,27 @@ describe('AgentTodoService', () => {
     const seen: TodoItem[][] = [];
     const subscription = todo.onDidChange((todos) => { seen.push([...todos]); });
 
-    await todo.replace([{ title: 'a', status: 'pending' }]);
-    await todo.replace([
-      { title: 'a', status: 'pending' },
-      { title: 'b', status: 'done' },
-    ]);
+    const a = makeQuestion({ question: 'a' });
+    const b = makeQuestion({ question: 'b', status: 'resolved', conclusion: 'done', evidence: [{ status: 'confirmed', description: 'proof' }] });
+    await todo.replace([a]);
+    await todo.replace([a, b]);
     await todo.clear();
 
-    expect(seen).toEqual([
-      [{ title: 'a', status: 'pending' }],
-      [
-        { title: 'a', status: 'pending' },
-        { title: 'b', status: 'done' },
-      ],
-      [],
-    ]);
+    expect(seen).toEqual([[a], [a, b], []]);
     subscription.dispose();
   });
 
   it('appends todos through the existing tools.update_store wire record', async () => {
     const todo = ctx.get(IAgentTodoService);
-    await todo.replace([{ title: 'persist me', status: 'in_progress' }]);
+    const item = makeQuestion({ question: 'persist me', status: 'investigating' });
+    await todo.replace([item]);
 
     const records = await ctx.persistedWireRecords();
     expect(records.filter((record) => record.type === 'tools.update_store')).toEqual([{
       type: 'tools.update_store',
       agentId: 'main',
       key: 'todo',
-      value: [{ title: 'persist me', status: 'in_progress' }],
+      value: [item],
       time: expect.any(Number),
     }]);
   });
@@ -107,11 +110,18 @@ describe('AgentTodoService', () => {
     const mainTodo = ctx.get(IAgentTodoService);
     const subTodo = lifecycle.handleOf(sub.agentId)!.accessor.get(IAgentTodoService);
 
-    await mainTodo.replace([{ title: 'main todo', status: 'pending' }]);
-    await subTodo.replace([{ title: 'sub todo', status: 'done' }]);
+    const mainItem = makeQuestion({ question: 'main todo' });
+    const subItem = makeQuestion({
+      question: 'sub todo',
+      status: 'resolved',
+      conclusion: 'answered',
+      evidence: [{ status: 'confirmed', description: 'proof' }],
+    });
+    await mainTodo.replace([mainItem]);
+    await subTodo.replace([subItem]);
 
-    expect(mainTodo.get()).toEqual([{ title: 'main todo', status: 'pending' }]);
-    expect(subTodo.get()).toEqual([{ title: 'sub todo', status: 'done' }]);
+    expect(mainTodo.get()).toEqual([mainItem]);
+    expect(subTodo.get()).toEqual([subItem]);
     await lifecycle.remove(sub);
   });
 
@@ -119,22 +129,22 @@ describe('AgentTodoService', () => {
     const persistence = new InMemoryWireRecordPersistence();
     const first = createTestAgent({ persistence, autoConfigure: false });
     await first.restorePersisted();
-    await first.get(IAgentTodoService).replace([{ title: 'kept', status: 'in_progress' }]);
+    const kept = makeQuestion({ question: 'kept', status: 'investigating' });
+    await first.get(IAgentTodoService).replace([kept]);
     await first.dispose();
 
     const restarted = createTestAgent({ persistence, autoConfigure: false });
     try {
       await restarted.restorePersisted();
-      expect(restarted.get(IAgentTodoService).get()).toEqual([
-        { title: 'kept', status: 'in_progress' },
-      ]);
+      expect(restarted.get(IAgentTodoService).get()).toEqual([kept]);
     } finally {
       await restarted.dispose();
     }
   });
 
   it('restores todos and resumes operations when the feature is re-provided after restore', async () => {
-    await ctx.get(IAgentTodoService).replace([{ title: 'kept', status: 'in_progress' }]);
+    const kept = makeQuestion({ question: 'kept', status: 'investigating' });
+    await ctx.get(IAgentTodoService).replace([kept]);
 
     await ctx.get(IFeatureManager).unprovideUnit('todo');
     expect(() => ctx.get(IAgentTodoService)).toThrow("unknown service 'agentTodoService'");
@@ -143,20 +153,21 @@ describe('AgentTodoService', () => {
 
     const revived = await vi.waitFor(() => {
       const service = ctx.get(IAgentTodoService);
-      expect(service.get()).toEqual([{ title: 'kept', status: 'in_progress' }]);
+      expect(service.get()).toEqual([kept]);
       return service;
     });
-    await revived.replace([
-      { title: 'kept', status: 'done' },
-      { title: 'added', status: 'pending' },
-    ]);
-    expect(revived.get()).toEqual([
-      { title: 'kept', status: 'done' },
-      { title: 'added', status: 'pending' },
-    ]);
+    const resolved = makeQuestion({
+      question: 'kept',
+      status: 'resolved',
+      conclusion: 'answered',
+      evidence: [{ status: 'confirmed', description: 'proof' }],
+    });
+    const added = makeQuestion({ question: 'added' });
+    await revived.replace([resolved, added]);
+    expect(revived.get()).toEqual([resolved, added]);
   });
 
-  it('filters malformed persisted values during replay', async () => {
+  it('migrates legacy persisted items and filters malformed values during replay', async () => {
     const persistence = new InMemoryWireRecordPersistence();
     const seeded = createTestAgent({ persistence, autoConfigure: false });
     try {
@@ -164,7 +175,8 @@ describe('AgentTodoService', () => {
         type: 'tools.update_store',
         key: 'todo',
         value: [
-          { title: 'valid', status: 'done' },
+          { title: 'legacy done', status: 'done' },
+          { title: 'legacy active', status: 'in_progress' },
           { title: 'missing status' },
           { title: 123, status: 'pending' },
           'garbage',
@@ -172,9 +184,79 @@ describe('AgentTodoService', () => {
       } as unknown as WireRecord);
       await seeded.restorePersisted();
 
-      expect(seeded.get(IAgentTodoService).get()).toEqual([{ title: 'valid', status: 'done' }]);
+      const todos = seeded.get(IAgentTodoService).get();
+      expect(todos).toHaveLength(2);
+      expect(todos[0]).toMatchObject({
+        type: 'question',
+        question: 'legacy done',
+        status: 'resolved',
+      });
+      expect(todos[1]).toMatchObject({
+        type: 'question',
+        question: 'legacy active',
+        status: 'investigating',
+      });
     } finally {
       await seeded.dispose();
+    }
+  });
+
+  it('archives resolved questions dropped from the replacement list into the findings store', async () => {
+    const todo = ctx.get(IAgentTodoService);
+    const answered = makeQuestion({
+      question: 'answered question',
+      status: 'resolved',
+      conclusion: 'yes it works',
+      evidence: [{ status: 'confirmed', description: 'proof' }],
+    });
+    const open = makeQuestion({ question: 'still open' });
+    await todo.replace([answered, open]);
+    expect(todo.getFindings()).toEqual([]);
+
+    await todo.replace([open]);
+
+    expect(todo.get()).toEqual([open]);
+    expect(todo.getFindings()).toEqual([
+      expect.objectContaining({
+        id: answered.id,
+        question: 'answered question',
+        conclusion: 'yes it works',
+        status: 'resolved',
+      }),
+    ]);
+
+    const records = await ctx.persistedWireRecords();
+    const keys = records
+      .filter((record) => record.type === 'tools.update_store')
+      .map((record) => (record as { key?: string }).key);
+    expect(keys).toContain('findings');
+  });
+
+  it('restores findings from persisted wire records after restart', async () => {
+    const persistence = new InMemoryWireRecordPersistence();
+    const first = createTestAgent({ persistence, autoConfigure: false });
+    await first.restorePersisted();
+    const answered = makeQuestion({
+      question: 'answered question',
+      status: 'resolved',
+      conclusion: 'concluded',
+      evidence: [{ status: 'confirmed', description: 'proof' }],
+    });
+    const todo = first.get(IAgentTodoService);
+    await todo.replace([answered]);
+    await todo.clear();
+    expect(todo.getFindings()).toHaveLength(1);
+    await first.dispose();
+
+    const restarted = createTestAgent({ persistence, autoConfigure: false });
+    try {
+      await restarted.restorePersisted();
+      expect(restarted.get(IAgentTodoService).get()).toEqual([]);
+      expect(restarted.get(IAgentTodoService).getFindings()).toEqual([
+        expect.objectContaining({ question: 'answered question', conclusion: 'concluded' }),
+      ]);
+    } finally {
+      await restarted.dispose();
     }
   });
 
@@ -187,7 +269,7 @@ describe('AgentTodoService', () => {
     await reminder.reconcileWhenIdle(TODO_LIST_REMINDER_VARIANT);
     expect(reminderInjected(ctx)).toBe(false);
 
-    await todo.replace([{ title: 'track me', status: 'pending' }]);
+    await todo.replace([makeQuestion({ question: 'track me' })]);
     appendAssistantTurns(ctx.context, 10);
     await reminder.reconcileWhenIdle(TODO_LIST_REMINDER_VARIANT);
     expect(reminderInjected(ctx)).toBe(true);
@@ -196,7 +278,7 @@ describe('AgentTodoService', () => {
     const subTodo = lifecycle.handleOf(sub.agentId)!.accessor.get(IAgentTodoService);
     const subReminder = lifecycle.handleOf(sub.agentId)!.accessor.get(IAgentReminderService);
     const subMemory = lifecycle.handleOf(sub.agentId)!.accessor.get(IAgentContextMemoryService);
-    await subTodo.replace([{ title: 'sub task', status: 'pending' }]);
+    await subTodo.replace([makeQuestion({ question: 'sub task' })]);
     appendAssistantTurns(subMemory, 10);
     await subReminder.reconcileWhenIdle(TODO_LIST_REMINDER_VARIANT);
     expect(

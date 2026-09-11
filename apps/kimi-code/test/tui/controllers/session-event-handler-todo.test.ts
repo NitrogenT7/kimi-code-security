@@ -74,7 +74,49 @@ describe('SessionEventHandler — todo panel feed', () => {
     expect(streamingUI.setTodoList).not.toHaveBeenCalled();
 
     handler.handleEvent(todoResult('tc-1'), vi.fn());
-    expect(streamingUI.setTodoList).toHaveBeenCalledWith(todos);
+    expect(streamingUI.setTodoList).toHaveBeenCalledWith(
+      [expect.objectContaining({ question: '测试 Todo 项', status: 'investigating' })],
+      [],
+    );
+  });
+
+  it('accumulates resolved questions into findings across writes', () => {
+    const { handler, streamingUI } = makeHarness();
+    const first = [
+      {
+        type: 'question',
+        id: 'q1',
+        question: 'answered?',
+        status: 'resolved',
+        confidence: 'high',
+        depth: 'deep',
+        conclusion: 'yes',
+        evidence: [{ status: 'confirmed', description: 'proof' }],
+      },
+    ];
+    const second = [
+      {
+        type: 'question',
+        id: 'q2',
+        question: 'still open?',
+        status: 'investigating',
+        confidence: 'low',
+        depth: 'quick',
+      },
+    ];
+
+    handler.handleEvent(todoCallStarted('tc-1', first), vi.fn());
+    handler.handleEvent(todoResult('tc-1'), vi.fn());
+    expect(streamingUI.setTodoList).toHaveBeenLastCalledWith([], [
+      expect.objectContaining({ id: 'q1', question: 'answered?', conclusion: 'yes' }),
+    ]);
+
+    handler.handleEvent(todoCallStarted('tc-2', second), vi.fn());
+    handler.handleEvent(todoResult('tc-2'), vi.fn());
+    expect(streamingUI.setTodoList).toHaveBeenLastCalledWith(
+      [expect.objectContaining({ id: 'q2', status: 'investigating' })],
+      [expect.objectContaining({ id: 'q1', conclusion: 'yes' })],
+    );
   });
 
   it('ignores failed TodoList results', () => {

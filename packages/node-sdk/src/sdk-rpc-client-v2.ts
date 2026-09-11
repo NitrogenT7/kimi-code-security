@@ -1233,11 +1233,14 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
 
   override async listSessionsPage(input: ListSessionsOptions = {}): Promise<SessionSummaryPage> {
     // v1 rejects an empty workDir and bucket-filters by the normalized path;
-    // the v2 index filters by workspace-id set instead.
-    const workspaceIds =
+    // the v2 index filters by workspace-id set instead. Sessions re-bound to
+    // the directory via /cd live in their original bucket, so the filter also
+    // matches on the persisted cwd.
+    const workDir =
       input.workDir === undefined
         ? undefined
-        : await this.workspaceIdsFor(normalizeRequiredWorkDir('listSessions', input.workDir));
+        : normalizeRequiredWorkDir('listSessions', input.workDir);
+    const workspaceIds = workDir === undefined ? undefined : await this.workspaceIdsFor(workDir);
     const workspacesById = new Map(
       (await this.klient.global.workspaces.list()).map((workspace) => [workspace.id, workspace]),
     );
@@ -1251,6 +1254,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
       if (remaining !== undefined && remaining <= 0) break;
       const page = await this.klient.global.sessions.list({
         workspaceIds,
+        cwds: workDir === undefined ? undefined : [workDir],
         sessionId: input.sessionId,
         includeArchived: input.includeArchived,
         limit: remaining,
@@ -1933,7 +1937,7 @@ export class SDKRpcClientV2 extends SDKRpcClientBase {
     const main = agents.handleOf(MAIN_AGENT_ID);
     if (main === undefined) return [];
     const todos = main.accessor.get(IAgentTodoService).get();
-    return todos.map((todo) => ({ title: todo.title, status: todo.status }));
+    return todos.map((todo) => ({ ...todo }));
   }
 
   override async undoHistory(input: SessionIdRpcInput & { count: number }): Promise<void> {

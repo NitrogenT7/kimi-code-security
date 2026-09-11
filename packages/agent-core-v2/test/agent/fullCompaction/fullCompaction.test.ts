@@ -50,6 +50,21 @@ import {
 import { IAgentLoopService } from '#/agent/loop/loop';
 import { IWireService } from '#/wire/wire';
 import { IAgentTodoService } from '#/features/todo/todoService';
+import type { QuestionItem } from '#/features/todo/todoItem';
+
+function makeQuestion(overrides: Partial<QuestionItem> & { question: string }): QuestionItem {
+  return {
+    type: 'question',
+    id: `test-${Math.random().toString(36).slice(2, 8)}`,
+    status: 'pending',
+    evidence: [],
+    blockers: [],
+    confidence: 'medium',
+    depth: 'deep',
+    subQuestions: [],
+    ...overrides,
+  };
+}
 import { ISessionNotepadService } from '#/features/notepad/sessionNotepad';
 import { IAgentGoalService } from '#/features/goal/goalService';
 import { HostFileSystem } from '#/os/backends/node-local/hostFsService';
@@ -3296,8 +3311,8 @@ describe('FullCompaction', () => {
 
   it('appends the todo list to the compaction summary', async () => {
     const todos = [
-      { title: 'Fix the auth bug', status: 'in_progress' },
-      { title: 'Add tests', status: 'pending' },
+      makeQuestion({ question: 'Fix the auth bug', status: 'investigating' }),
+      makeQuestion({ question: 'Add tests' }),
     ] as const;
     const ctx = testAgent();
     ctx.configure({
@@ -3333,7 +3348,7 @@ describe('FullCompaction', () => {
     expect(history[2]).toMatchObject({
       role: 'user',
       text: expect.stringContaining(
-        'Compacted summary.\n\n## TODO List\n  [in_progress] Fix the auth bug\n  [pending] Add tests',
+        'Compacted summary.\n\n## TODO List\n1. [investigating] Fix the auth bug\n   置信度：medium｜深度：deep\n2. [pending] Add tests\n   置信度：medium｜深度：deep',
       ),
     });
     expect(history[3]).toMatchObject({

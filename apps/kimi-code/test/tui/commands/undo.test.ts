@@ -109,9 +109,33 @@ describe('/undo todo panel refresh', () => {
     const host = hostWith(entries);
     const setTodoList = vi.fn();
     (host as { streamingUI?: unknown }).streamingUI = { setTodoList };
+    (host as { sessionEventHandler?: unknown }).sessionEventHandler = {
+      setInvestigationFindings: vi.fn(),
+    };
     (host as { session?: unknown }).session = session;
     return { host, setTodoList };
   }
+
+  const keptQuestionInput = {
+    type: 'question',
+    id: 'q-1',
+    question: 'kept',
+    status: 'pending',
+    evidence: [],
+    blockers: [],
+    confidence: 'medium',
+    depth: 'deep',
+    subQuestions: [],
+  };
+  const keptQuestion = {
+    id: 'q-1',
+    question: 'kept',
+    status: 'pending',
+    evidence: [],
+    blockers: [],
+    confidence: 'medium',
+    depth: 'deep',
+  };
 
   it('re-pulls the engine todo state after a successful undo', async () => {
     const entries: TranscriptEntry[] = [
@@ -120,12 +144,12 @@ describe('/undo todo panel refresh', () => {
     ];
     const { host, setTodoList } = hostWithTodos(entries, {
       undoHistory: vi.fn(async () => {}),
-      getTodos: vi.fn(async () => [{ title: 'kept', status: 'pending' }]),
+      getTodos: vi.fn(async () => [keptQuestionInput]),
     });
 
     await handleUndoCommand(host, '1');
 
-    expect(setTodoList).toHaveBeenCalledWith([{ title: 'kept', status: 'pending' }]);
+    expect(setTodoList).toHaveBeenCalledWith([expect.objectContaining(keptQuestion)], []);
   });
 
   it('keeps the panel as-is when the engine has no todo read surface', async () => {
@@ -145,18 +169,26 @@ describe('/undo todo panel refresh', () => {
     expect(setTodoList).not.toHaveBeenCalled();
   });
 
-  it('hides the panel when the restored todos are all done', async () => {
+  it('surfaces resolved todos as findings when the undo restores them', async () => {
     const entries: TranscriptEntry[] = [
       entry({ kind: 'user', content: 'question' }),
       entry({ kind: 'assistant', content: 'answer' }),
     ];
+    const finished = {
+      ...keptQuestionInput,
+      question: 'finished',
+      status: 'resolved',
+      conclusion: 'done',
+    };
     const { host, setTodoList } = hostWithTodos(entries, {
       undoHistory: vi.fn(async () => {}),
-      getTodos: vi.fn(async () => [{ title: 'finished', status: 'done' }]),
+      getTodos: vi.fn(async () => [finished]),
     });
 
     await handleUndoCommand(host, '1');
 
-    expect(setTodoList).toHaveBeenCalledWith([]);
+    expect(setTodoList).toHaveBeenCalledWith([], [
+      expect.objectContaining({ question: 'finished', status: 'resolved' }),
+    ]);
   });
 });

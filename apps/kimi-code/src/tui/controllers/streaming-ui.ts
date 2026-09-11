@@ -12,7 +12,7 @@ import { hasDispose } from '../utils/component-capabilities';
 import { appendStreamingArgsPreview, parseStreamingArgs } from '../utils/event-payload';
 import { notifyTerminalOnce } from '../utils/terminal-notification';
 import { nextTranscriptId } from '../utils/transcript-id';
-import type { TodoItem } from '../components/chrome/todo-panel';
+import type { UiFindingItem, UiQuestionItem } from '../components/chrome/todo-panel';
 import type {
   AppState,
   LivePaneState,
@@ -720,9 +720,13 @@ export class StreamingUIController {
     this.host.mergeCurrentTurnSteps();
   }
 
-  setTodoList(todos: readonly TodoItem[]): void {
+  setTodoList(
+    questions: readonly UiQuestionItem[],
+    findings: readonly UiFindingItem[] = [],
+  ): void {
     const { state } = this.host;
-    state.todoPanel.setTodos(todos);
+    state.todoPanel.setTodos(questions);
+    state.todoPanel.setFindings(findings);
     state.todoPanelContainer.clear();
     if (!state.todoPanel.isEmpty()) {
       state.todoPanelContainer.addChild(state.todoPanel);

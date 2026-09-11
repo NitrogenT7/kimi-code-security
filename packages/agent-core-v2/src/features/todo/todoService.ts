@@ -1,7 +1,7 @@
 import { assign, fromCallback, setup, type Snapshot } from 'xstate';
 
 import { createDecorator, IInstantiationService } from '#/_base/di/instantiation';
-import type { Event } from '#/_base/event';
+import { Emitter, type Event } from '#/_base/event';
 import { registerEvent2Class } from '#/app/event/event2';
 import {
   AgentActorService,
@@ -15,23 +15,37 @@ import { IAgentReminderService } from '#/features/reminder/reminderService';
 import { MAIN_AGENT_ID } from '#/session/agentLifecycle/agentLifecycle';
 import { IEventDispatcher } from '#/state/eventDispatcher';
 
-import { TODO_LIST_TOOL_NAME, readTodoItems, type TodoItem } from './todoItem';
+import {
+  FINDINGS_STORE_KEY,
+  mergeArchivedFindings,
+  readFindingItems,
+  type FindingItem,
+} from './findings';
+import { TODO_STORE_KEY, readTodoItems, type TodoItem } from './todoItem';
+import { TODO_LIST_TOOL_NAME } from './todoItem';
 import { TODO_LIST_REMINDER_VARIANT, todoListStaleReminder } from './todoListReminder';
-import { ToolsUpdateStore, type TodoState } from './todoOps';
+import { ToolsUpdateStore } from './todoOps';
 
 import '#/agent/contextMemory/conversationTime';
 
 registerEvent2Class(ToolsUpdateStore);
 
+export interface TodoDurableState {
+  readonly todos: readonly TodoItem[];
+  readonly findings: readonly FindingItem[];
+}
+
 interface TodoActorContext {
-  readonly todos: TodoState;
-  readonly runtime: AgentActorContext<TodoState>;
+  readonly todos: readonly TodoItem[];
+  readonly findings: readonly FindingItem[];
+  readonly runtime: AgentActorContext<TodoDurableState>;
   readonly used: boolean;
 }
 
 interface TodoCommitEvent {
   readonly type: 'todo.commit';
-  readonly todos: TodoState;
+  readonly todos: readonly TodoItem[];
+  readonly findings: readonly FindingItem[];
 }
 
 interface TodoUsedEvent {
@@ -44,7 +58,7 @@ const todoReminder = fromCallback(({
   input,
 }: {
   input: {
-    readonly runtime: AgentActorContext<TodoState>;
+    readonly runtime: AgentActorContext<TodoDurableState>;
   };
 }) => {
   if (input.runtime.agent.agentId !== MAIN_AGENT_ID) return;
@@ -55,7 +69,7 @@ const todoReminder = fromCallback(({
     todoListStaleReminder({
       active: toolPolicy.isToolActive(TODO_LIST_TOOL_NAME, 'builtin'),
       history: memory.get(),
-      todos: input.runtime.getState(),
+      todos: input.runtime.getState().todos,
     }),
   );
   return () => { registration.dispose(); };
@@ -64,12 +78,12 @@ const todoReminder = fromCallback(({
 const todoActorLogic = setup({
   types: {} as {
     context: TodoActorContext;
-    input: AgentActorContext<TodoState>;
+    input: AgentActorContext<TodoDurableState>;
     events: TodoCommitEvent | TodoUsedEvent | AgentActorRestoreEvent;
   },
   actors: { todoReminder },
 }).createMachine({
-  context: ({ input }) => ({ todos: [], runtime: input, used: false }),
+  context: ({ input }) => ({ todos: [], findings: [], runtime: input, used: false }),
   initial: 'beforeRestore',
   states: {
     beforeRestore: {
@@ -95,26 +109,31 @@ const todoActorLogic = setup({
   },
   on: {
     'todo.commit': {
-      actions: assign({ todos: ({ event }) => event.todos }),
+      actions: assign({
+        todos: ({ event }) => event.todos,
+        findings: ({ event }) => event.findings,
+      }),
     },
   },
 });
 
 export interface IAgentTodoService {
   readonly _serviceBrand: undefined;
-  readonly onDidChange: Event<TodoState>;
+  readonly onDidChange: Event<readonly TodoItem[]>;
   get(): readonly TodoItem[];
+  getFindings(): readonly FindingItem[];
   replace(todos: readonly TodoItem[]): Promise<void>;
   clear(): Promise<void>;
 }
 
 export const IAgentTodoService = createDecorator<IAgentTodoService>('agentTodoService');
 
-export class AgentTodoService extends AgentActorService<TodoState> implements IAgentTodoService {
+export class AgentTodoService extends AgentActorService<TodoDurableState> implements IAgentTodoService {
   declare readonly _serviceBrand: undefined;
   readonly onDidChange: IAgentTodoService['onDidChange'];
 
-  private readonly actor: AgentActorContext<TodoState>;
+  private readonly actor: AgentActorContext<TodoDurableState>;
+  private readonly onDidChangeEmitter = new Emitter<readonly TodoItem[]>();
 
   constructor(
     @IEventDispatcher dispatcher: IEventDispatcher,
@@ -122,42 +141,82 @@ export class AgentTodoService extends AgentActorService<TodoState> implements IA
     @IInstantiationService instantiation: IInstantiationService,
   ) {
     super(dispatcher, scopeContext, instantiation);
+    this.onDidChange = this.onDidChangeEmitter.event;
+    let lastRead: TodoDurableState | undefined;
     this.actor = this.attachActor(todoActorLogic, {
       id: 'todo',
       durable: {
         events: [ToolsUpdateStore],
         undoable: true,
-        transition: (_state, event) => {
-          if (!(event instanceof ToolsUpdateStore) || event.key !== 'todo') return;
-          return readTodoItems(event.value);
+        transition: (state, event) => {
+          if (!(event instanceof ToolsUpdateStore)) return;
+          if (event.key === TODO_STORE_KEY) {
+            return { todos: readTodoItems(event.value), findings: state.findings };
+          }
+          if (event.key === FINDINGS_STORE_KEY) {
+            return { todos: state.todos, findings: readFindingItems(event.value) };
+          }
+          return;
         },
-        read: (snapshot) => (snapshot as TodoActorSnapshot).context.todos,
-        commit: (actor, todos) => { actor.send({ type: 'todo.commit', todos }); },
+        read: (snapshot) => {
+          const context = (snapshot as TodoActorSnapshot).context;
+          if (
+            lastRead !== undefined &&
+            lastRead.todos === context.todos &&
+            lastRead.findings === context.findings
+          ) {
+            return lastRead;
+          }
+          lastRead = { todos: context.todos, findings: context.findings };
+          return lastRead;
+        },
+        commit: (actor, state) => {
+          actor.send({ type: 'todo.commit', todos: state.todos, findings: state.findings });
+        },
       },
     });
-    this.onDidChange = this.actor.onDidChange;
+    let previousTodos: readonly TodoItem[] | undefined;
+    this._register(
+      this.actor.onDidChange((state) => {
+        if (previousTodos === state.todos) return;
+        previousTodos = state.todos;
+        this.onDidChangeEmitter.fire(state.todos);
+      }),
+    );
   }
 
   get(): readonly TodoItem[] {
     this.actor.send({ type: 'todo.used' });
-    return this.actor.getState();
+    return this.actor.getState().todos;
   }
 
-  replace(todos: readonly TodoItem[]): Promise<void> {
+  getFindings(): readonly FindingItem[] {
+    return this.actor.getState().findings;
+  }
+
+  async replace(todos: readonly TodoItem[]): Promise<void> {
     this.actor.send({ type: 'todo.used' });
+    const next: readonly TodoItem[] = todos.map((todo) => ({ ...todo }));
+    const findings = mergeArchivedFindings(
+      this.actor.getState().todos,
+      next,
+      this.actor.getState().findings,
+    );
+    if (findings !== undefined) {
+      await this.actor.dispatch(new ToolsUpdateStore({
+        agentId: this.actor.agent.agentId,
+        key: FINDINGS_STORE_KEY,
+        value: findings,
+      }));
+    }
     return this.actor.dispatch(new ToolsUpdateStore({
       agentId: this.actor.agent.agentId,
-      key: 'todo',
-      value: todos.map((todo) => ({ title: todo.title, status: todo.status })),
+      key: TODO_STORE_KEY,
+      value: next,
     }));
   }
 
   clear(): Promise<void> {
-    this.actor.send({ type: 'todo.used' });
-    return this.actor.dispatch(new ToolsUpdateStore({
-      agentId: this.actor.agent.agentId,
-      key: 'todo',
-      value: [],
-    }));
+    return this.replace([]);
   }
 }

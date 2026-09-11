@@ -66,16 +66,18 @@ export class UpdateGoalTool implements IUpdateGoalTool {
         if (status === 'complete') {
           const MAX_COMPLETION_RETRIES = 5;
           const todos = this.todo.get();
-          const open = todos.filter((todo: TodoItem) => todo.status !== 'done');
+          const open = todos.filter(
+            (todo: TodoItem) => todo.status === 'pending' || todo.status === 'investigating',
+          );
           if (open.length > 0 && this.goal.getCompletionRetries() < MAX_COMPLETION_RETRIES) {
             this.goal.incrementCompletionRetries();
             const list = open
               .slice(0, 10)
-              .map((todo, i) => `${String(i + 1)}. [${todo.status}] ${todo.title}`)
+              .map((todo, i) => `${String(i + 1)}. [${todo.status}] ${todo.question}`)
               .join('\n');
             return {
               isError: true,
-              output: `Goal not completed: ${String(open.length)} open item(s) remain:\n${list}\n\nFinish or clear these todo items before marking the goal complete. Do not repeat completed work.`,
+              output: `Goal not completed: ${String(open.length)} open question(s) remain:\n${list}\n\nInvestigate and answer these questions before marking the goal complete. Do not repeat completed work.`,
             };
           }
           const completed = await this.goal.markComplete({}, 'model');

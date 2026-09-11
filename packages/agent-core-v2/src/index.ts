@@ -735,7 +735,27 @@ export * from '#/features/sessionInit/sessionInit';
 export * from '#/features/sessionInit/sessionInitService';
 export * from '#/features/sessionInit/profile/init';
 import '#/features/sessionInit/sessionInitFeature';
-export * from '#/features/todo/todoItem';
+export {
+  TODO_LIST_TOOL_NAME,
+  TODO_STORE_KEY,
+  EvidenceItemSchema,
+  QuestionItemSchema,
+  isOldFormatTodo,
+  migrateOldTodo,
+  looksLikeQuestionItem,
+  normalizeQuestionItem,
+  validateTodoItem,
+  readTodoItems,
+  renderTodoList,
+  type QuestionStatus,
+  type EvidenceStatus,
+  type Confidence,
+  type Depth,
+  type EvidenceItem,
+  type TodoItem,
+  type OldTodoItem,
+} from '#/features/todo/todoItem';
+export * from '#/features/todo/findings';
 export * from '#/features/todo/todoListReminder';
 export * from '#/features/todo/todoService';
 export * from '#/features/todo/tools/todo-list/todo-list';
