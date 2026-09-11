@@ -66,6 +66,19 @@ describe('resolveStdioCommand', () => {
     expect(result.command.toLowerCase().endsWith('mock-server.cmd')).toBe(true);
   });
 
+  it('resolves a bare name when the env block stores mixed-case Path on win32', () => {
+    const binDir = makeBinDir(['mock-server.cmd']);
+    const result = resolveStdioCommand('mock-server', options({ win32: true, env: { Path: binDir } }));
+    expect(result.command.toLowerCase().endsWith('mock-server.cmd')).toBe(true);
+    expect(result.shell).toBe(true);
+  });
+
+  it('honours a mixed-case Pathext on win32', () => {
+    const binDir = makeBinDir(['mock-server.exe', 'mock-server.cmd']);
+    const result = resolveStdioCommand('mock-server', options({ win32: true, env: { Path: binDir, Pathext: '.CMD;.EXE' } }));
+    expect(result.command.toLowerCase().endsWith('mock-server.cmd')).toBe(true);
+  });
+
   it('tries an explicitly suffixed name as-is before appending extensions', () => {
     const binDir = makeBinDir(['mock-server.cmd']);
     const result = resolveStdioCommand('mock-server.cmd', options({ win32: true, env: { PATH: binDir } }));

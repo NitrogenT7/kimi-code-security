@@ -68,10 +68,23 @@ function isInsideCwd(candidate: string, cwd: string, win32: boolean): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
+function readEnvKey(
+  env: Readonly<Record<string, string | undefined>>,
+  key: string,
+): string | undefined {
+  const direct = env[key];
+  if (direct !== undefined) return direct;
+  const lowered = key.toLowerCase();
+  for (const [name, value] of Object.entries(env)) {
+    if (name.toLowerCase() === lowered) return value;
+  }
+  return undefined;
+}
+
 function searchPath(command: string, options: ResolveStdioCommandOptions): string | undefined {
-  const pathValue = options.env['PATH'] ?? '';
+  const pathValue = readEnvKey(options.env, 'PATH') ?? '';
   const separator = options.win32 ? ';' : ':';
-  const extensions = options.win32 ? pathExtensions(options.env['PATHEXT']) : [''];
+  const extensions = options.win32 ? pathExtensions(readEnvKey(options.env, 'PATHEXT')) : [''];
   for (const dir of pathValue.split(separator)) {
     if (dir === '') continue;
     for (const name of candidateNames(command, extensions)) {
