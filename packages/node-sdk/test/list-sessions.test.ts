@@ -15,6 +15,7 @@ import {
 
 import { createKimiHarness, SDKRpcClientV2 } from '#/index';
 import type { KimiError } from '#/index';
+import { normalizeWorkDir } from '#/v2/session-mapper';
 
 import { TEST_IDENTITY } from './test-identity';
 
@@ -147,6 +148,62 @@ describe('KimiHarness.listSessions', () => {
       expect(sessions.map((item) => item.id)).toEqual([session.id]);
     } finally {
       await harness.close();
+    }
+  });
+
+  it('lists a session in the directory it was moved into via changeWorkDir (read model off)', async () => {
+    vi.stubEnv('KIMI_CODE_PERSISTENCE_MINIDB_READMODEL', '0');
+    const homeDir = await makeTempDir();
+    const workDirA = await makeTempDir();
+    const workDirB = await makeTempDir();
+    const harness = createKimiHarness({
+      identity: TEST_IDENTITY,
+      homeDir,
+    });
+
+    try {
+      await harness.createSession({ id: 'ses_moved_off', workDir: workDirA });
+      const session = await harness.resumeSession({ id: 'ses_moved_off' });
+      await session.changeWorkDir(workDirB, { persist: true });
+
+      const inB = await harness.listSessions({ workDir: workDirB });
+      expect(inB.map((item) => item.id)).toEqual(['ses_moved_off']);
+      expect(inB[0]?.workDir).toBe(normalizeWorkDir(workDirB));
+
+      const inA = await harness.listSessions({ workDir: workDirA });
+      expect(inA.map((item) => item.id)).toEqual(['ses_moved_off']);
+    } finally {
+      await harness.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('lists a session in the directory it was moved into via changeWorkDir (read model on)', async () => {
+    vi.stubEnv('KIMI_CODE_PERSISTENCE_MINIDB_READMODEL', '1');
+    const homeDir = await makeTempDir();
+    const workDirA = await makeTempDir();
+    const workDirB = await makeTempDir();
+    const harness = createKimiHarness({
+      identity: TEST_IDENTITY,
+      homeDir,
+    });
+
+    try {
+      await harness.createSession({ id: 'ses_moved_on', workDir: workDirA });
+      const session = await harness.resumeSession({ id: 'ses_moved_on' });
+      await session.changeWorkDir(workDirB, { persist: true });
+
+      const inB = await harness.listSessions({ workDir: workDirB });
+      expect(inB.map((item) => item.id)).toEqual(['ses_moved_on']);
+      expect(inB[0]?.workDir).toBe(normalizeWorkDir(workDirB));
+
+      const inA = await harness.listSessions({ workDir: workDirA });
+      expect(inA.map((item) => item.id)).toEqual(['ses_moved_on']);
+    } finally {
+      await harness.close();
+      await drainSessionIndexMirror();
+      await drainQueryStoreDisposals();
+      vi.unstubAllEnvs();
     }
   });
 });

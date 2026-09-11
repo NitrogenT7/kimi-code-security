@@ -24,6 +24,7 @@ export interface SessionSummary {
 
 export interface SessionListQuery {
   readonly workspaceIds?: readonly string[];
+  readonly cwds?: readonly string[];
   readonly sessionId?: string;
   readonly includeArchived?: boolean;
   readonly limit?: number;

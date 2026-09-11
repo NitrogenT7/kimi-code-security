@@ -29,6 +29,12 @@ export function canonicalWorkspaceRoot(cwd: string): string {
   return workspaceRootKey(resolved) || resolved;
 }
 
+export function normalizeWorkDirPath(workDir: string): string {
+  return isWindowsAbsolutePath(workDir)
+    ? nodePath.win32.resolve(workDir).replaceAll('\\', '/')
+    : resolve(workDir);
+}
+
 export interface UpwardRootPathApi {
   resolve(dir: string): string;
   dirname(dir: string): string;

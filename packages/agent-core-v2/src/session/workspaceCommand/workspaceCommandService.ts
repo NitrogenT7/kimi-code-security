@@ -3,6 +3,7 @@ import { isAbsolute } from 'node:path';
 import { Service } from '#/_base/di/service';
 import { LifecycleScope } from '#/app/scopes';
 import { ScopeActivation, registerScopedService } from '#/_base/di/scope';
+import { normalizeWorkDirPath } from '#/_base/utils/paths';
 import { IAgentContextMemoryService } from '#/agent/contextMemory/contextMemory';
 import type { ContextMessage } from '#/agent/contextMemory/types';
 import { ErrorCodes, Error2 } from '#/errors';
@@ -60,7 +61,7 @@ export class SessionWorkspaceCommandService extends Service implements ISessionW
     this.workspace.setWorkDir(input.path);
     let persisted = false;
     if (input.persist === true) {
-      await this.metadata.update({ cwd: this.workspace.workDir });
+      await this.metadata.update({ cwd: normalizeWorkDirPath(this.workspace.workDir) });
       persisted = true;
     }
     this.injectWorkDirChanged(previousWorkDir, this.workspace.workDir, persisted);

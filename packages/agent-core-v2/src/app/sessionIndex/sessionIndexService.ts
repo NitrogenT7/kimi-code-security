@@ -47,6 +47,7 @@ import {
   readSessionSummary,
   scanSessionsMaxMtime,
   summaryMatchesChildOf,
+  summaryMatchesListScope,
 } from './sessionIndexSource';
 
 const RECONCILE_INTERVAL_MS = 60_000;
@@ -480,7 +481,7 @@ export class FileSessionIndex extends Disposable implements ISessionIndex {
       .pending()
       .filter(
         (summary) =>
-          (query.workspaceIds === undefined || query.workspaceIds.includes(summary.workspaceId)) &&
+          summaryMatchesListScope(summary, query) &&
           (query.includeArchived === true || !summary.archived) &&
           summaryMatchesChildOf(summary, query.childOf) &&
           (position === undefined ||
@@ -543,11 +544,22 @@ export class FileSessionIndex extends Disposable implements ISessionIndex {
 
   private baseFilter(query: SessionListQuery): QueryFilter {
     const filter: Record<string, unknown> = {};
-    if (query.workspaceIds !== undefined) {
-      filter['workspaceId'] =
-        query.workspaceIds.length === 1
-          ? query.workspaceIds[0]
-          : { $in: [...query.workspaceIds] };
+    const workspaceCond =
+      query.workspaceIds === undefined
+        ? undefined
+        : query.workspaceIds.length === 1
+          ? { workspaceId: query.workspaceIds[0] }
+          : { workspaceId: { $in: [...query.workspaceIds] } };
+    const cwdCond =
+      query.cwds === undefined
+        ? undefined
+        : query.cwds.length === 1
+          ? { cwd: query.cwds[0] }
+          : { cwd: { $in: [...query.cwds] } };
+    if (workspaceCond !== undefined && cwdCond !== undefined) {
+      filter['$and'] = [{ $or: [workspaceCond, cwdCond] }];
+    } else {
+      Object.assign(filter, workspaceCond ?? cwdCond);
     }
     if (query.childOf !== undefined) {
       filter[`custom.${PARENT_SESSION_ID_KEY}`] = query.childOf;
@@ -571,7 +583,7 @@ export class FileSessionIndex extends Disposable implements ISessionIndex {
       return { items: query.limit !== undefined ? items.slice(0, query.limit) : items };
     }
 
-    const collected = (await this.collectAuthoritative(query.workspaceIds)).filter(
+    const collected = (await this.collectAuthoritative(query.workspaceIds, query.cwds)).filter(
       (summary) =>
         (query.includeArchived === true || !summary.archived) &&
         summaryMatchesChildOf(summary, query.childOf),
@@ -616,7 +628,9 @@ export class FileSessionIndex extends Disposable implements ISessionIndex {
 
   private async collectAuthoritative(
     workspaceIds: readonly string[] | undefined,
+    cwds?: readonly string[],
   ): Promise<SessionSummary[]> {
+    const scope = { workspaceIds, cwds };
     let collected: SessionSummary[];
     if (
       this.readModelEnabled() &&
@@ -624,16 +638,19 @@ export class FileSessionIndex extends Disposable implements ISessionIndex {
     ) {
       const { summaries } = await this.projector.sharedScanForRead();
       collected =
-        workspaceIds === undefined
+        workspaceIds === undefined && cwds === undefined
           ? summaries
-          : summaries.filter((summary) => workspaceIds.includes(summary.workspaceId));
+          : summaries.filter((summary) => summaryMatchesListScope(summary, scope));
     } else {
-      const ids = workspaceIds ?? (await listWorkspaceIds(this.storage, this.sessionsScope));
+      const ids =
+        workspaceIds === undefined || cwds !== undefined
+          ? await listWorkspaceIds(this.storage, this.sessionsScope)
+          : workspaceIds;
       collected = [];
       for (const workspaceId of ids) {
         for (const sessionId of await listSessionIds(this.storage, this.sessionsScope, workspaceId)) {
           const summary = await readSessionSummary(this.docs, this.sessionsScope, workspaceId, sessionId);
-          if (summary !== undefined) collected.push(summary);
+          if (summary !== undefined && summaryMatchesListScope(summary, scope)) collected.push(summary);
         }
       }
     }
@@ -641,7 +658,7 @@ export class FileSessionIndex extends Disposable implements ISessionIndex {
     if (pending.length === 0) return collected;
     const byId = new Map(collected.map((summary) => [summary.id, summary]));
     for (const summary of pending) {
-      if (workspaceIds !== undefined && !workspaceIds.includes(summary.workspaceId)) continue;
+      if (!summaryMatchesListScope(summary, scope)) continue;
       byId.set(summary.id, summary);
     }
     return [...byId.values()];

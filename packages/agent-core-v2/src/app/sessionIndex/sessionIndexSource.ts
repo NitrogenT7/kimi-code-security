@@ -7,7 +7,12 @@ import {
   StorageErrors,
 } from '#/persistence/interface/storage';
 
-import { CHILD_SESSION_KIND, CHILD_SESSION_KIND_KEY, type SessionSummary } from './sessionIndex';
+import {
+  CHILD_SESSION_KIND,
+  CHILD_SESSION_KIND_KEY,
+  type SessionListQuery,
+  type SessionSummary,
+} from './sessionIndex';
 
 const META_SCOPE = 'session-meta';
 const META_KEY = 'state.json';
@@ -79,6 +84,17 @@ export function summaryMatchesChildOf(
     custom?.['parent_session_id'] === parentId &&
     custom?.[CHILD_SESSION_KIND_KEY] === CHILD_SESSION_KIND
   );
+}
+
+export function summaryMatchesListScope(
+  summary: SessionSummary,
+  query: Pick<SessionListQuery, 'workspaceIds' | 'cwds'>,
+): boolean {
+  if (query.workspaceIds === undefined && query.cwds === undefined) return true;
+  if (query.workspaceIds !== undefined && query.workspaceIds.includes(summary.workspaceId)) {
+    return true;
+  }
+  return query.cwds !== undefined && summary.cwd !== undefined && query.cwds.includes(summary.cwd);
 }
 
 export function summaryEquals(a: SessionSummary, b: SessionSummary): boolean {

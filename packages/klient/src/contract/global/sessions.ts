@@ -24,6 +24,7 @@ export const sessionSummarySchema = z.object({
 
 export const sessionListQuerySchema = z.object({
   workspaceIds: z.array(z.string()).optional(),
+  cwds: z.array(z.string()).optional(),
   sessionId: z.string().optional(),
   includeArchived: z.boolean().optional(),
   limit: z.number().optional(),

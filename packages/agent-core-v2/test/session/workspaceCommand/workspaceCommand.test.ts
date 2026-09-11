@@ -258,13 +258,21 @@ describe('SessionWorkspaceCommandService', () => {
 
       expect(result.persisted).toBe(true);
       expect(workspace.workDir).toBe(otherDir);
-      expect((await meta.read()).cwd).toBe(otherDir);
+      expect((await meta.read()).cwd).toBe(otherDir.replaceAll('\\', '/'));
       expect(agents.mainContext.messages[0]?.content).toEqual([
         {
           type: 'text',
           text: expect.stringContaining('Binding persisted'),
         },
       ]);
+    });
+
+    it('persists a normalized cwd when the target carries redundant segments', async () => {
+      const { svc, meta, otherDir } = await build(true);
+
+      await svc.changeWorkDir({ path: join(otherDir, '.'), persist: true });
+
+      expect((await meta.read()).cwd).toBe(otherDir.replaceAll('\\', '/'));
     });
 
     it('leaves the persisted binding untouched without persist', async () => {

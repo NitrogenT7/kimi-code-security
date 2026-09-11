@@ -244,6 +244,31 @@ describe('FileSessionIndex (legacy)', () => {
     expect(page.nextCursor).toBe('b2');
   });
 
+  it('listRecent matches summaries by cwd outside the workspace-id set when cwds are given', async () => {
+    const otherId = encodeWorkDirKey('/home/user/other');
+    await seedSession('local', { cwd: WORK_DIR, createdAt: 1, updatedAt: 3 });
+    await seedSession('moved', { cwd: WORK_DIR, createdAt: 1, updatedAt: 2 }, otherId);
+    await seedSession('elsewhere', { cwd: '/home/user/elsewhere', createdAt: 1, updatedAt: 1 }, otherId);
+
+    const store = build();
+    const bucketsOnly = await store.listRecent({ workspaceIds: [workspaceId] });
+    expect(bucketsOnly.items.map((s) => s.id)).toEqual(['local']);
+
+    const widened = await store.listRecent({ workspaceIds: [workspaceId], cwds: [WORK_DIR] });
+    expect(widened.items.map((s) => s.id)).toEqual(['local', 'moved']);
+  });
+
+  it('listRecent matches cwds alone when no workspace-id set is given', async () => {
+    const otherId = encodeWorkDirKey('/home/user/other');
+    await seedSession('local', { cwd: WORK_DIR, createdAt: 1, updatedAt: 3 });
+    await seedSession('moved', { cwd: WORK_DIR, createdAt: 1, updatedAt: 2 }, otherId);
+    await seedSession('elsewhere', { cwd: '/home/user/elsewhere', createdAt: 1, updatedAt: 1 });
+
+    const store = build();
+    const page = await store.listRecent({ cwds: [WORK_DIR] });
+    expect(page.items.map((s) => s.id)).toEqual(['local', 'moved']);
+  });
+
   it('listRecent filters archived across every bucket of the id set', async () => {
     const otherId = encodeWorkDirKey('/home/user/other');
     await seedSession('active', {});
@@ -587,6 +612,65 @@ describe('FileSessionIndex (read model)', () => {
     const walked = await walkPages(store, { workspaceIds: [workspaceId] }, 3);
     expect(walked).toEqual(canonicalIds(summaries));
     expect(new Set(walked).size).toBe(specs.length);
+  });
+
+  it('listRecent matches summaries by cwd outside the workspace-id set when cwds are given', async () => {
+    const otherId = encodeWorkDirKey('/home/user/other');
+    await seedSession('local', { cwd: WORK_DIR, createdAt: 1, updatedAt: 3 });
+    await seedSession('moved', { cwd: WORK_DIR, createdAt: 1, updatedAt: 2 }, otherId);
+    await seedSession('elsewhere', { cwd: '/home/user/elsewhere', createdAt: 1, updatedAt: 1 }, otherId);
+
+    const store = build();
+    await store.prepare();
+
+    const bucketsOnly = await store.listRecent({ workspaceIds: [workspaceId] });
+    expect(bucketsOnly.items.map((s) => s.id)).toEqual(['local']);
+
+    const widened = await store.listRecent({ workspaceIds: [workspaceId], cwds: [WORK_DIR] });
+    expect(widened.items.map((s) => s.id)).toEqual(['local', 'moved']);
+  });
+
+  it('paginates the widened workspace/cwd filter without leaking other buckets', async () => {
+    const otherId = encodeWorkDirKey('/home/user/other');
+    await seedSession('b9', { cwd: '/home/user/elsewhere', createdAt: 9, updatedAt: 9 }, otherId);
+    await seedSession('a3', { cwd: WORK_DIR, createdAt: 3, updatedAt: 3 });
+    await seedSession('b2', { cwd: WORK_DIR, createdAt: 2, updatedAt: 2 }, otherId);
+    await seedSession('a1', { cwd: WORK_DIR, createdAt: 1, updatedAt: 1 });
+    await seedSession('b0', { cwd: '/home/user/elsewhere', createdAt: 0, updatedAt: 0 }, otherId);
+
+    const store = build();
+    await store.prepare();
+
+    const page1 = await store.listRecent({ workspaceIds: [workspaceId], cwds: [WORK_DIR], limit: 2 });
+    expect(page1.items.map((s) => s.id)).toEqual(['a3', 'b2']);
+    expect(page1.nextCursor).toBe('b2');
+
+    const page2 = await store.listRecent({
+      workspaceIds: [workspaceId],
+      cwds: [WORK_DIR],
+      limit: 2,
+      before: page1.nextCursor,
+    });
+    expect(page2.items.map((s) => s.id)).toEqual(['a1']);
+    expect(page2.nextCursor).toBeUndefined();
+  });
+
+  it('merges a pending mirror record matched by cwd into the widened listing', async () => {
+    await seedSession('local', { cwd: WORK_DIR, createdAt: 1, updatedAt: 2 });
+
+    const store = build();
+    await store.prepare();
+
+    mirror.record(
+      summary('pending-moved', {
+        workspaceId: encodeWorkDirKey('/home/user/other'),
+        cwd: WORK_DIR,
+        updatedAt: 5,
+      }),
+    );
+
+    const page = await store.listRecent({ workspaceIds: [workspaceId], cwds: [WORK_DIR] });
+    expect(page.items.map((s) => s.id)).toEqual(['pending-moved', 'local']);
   });
 
   it('listRecent treats a cache entry missing required fields as a cold miss', async () => {
