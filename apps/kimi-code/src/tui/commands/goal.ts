@@ -57,7 +57,7 @@ export interface GoalStartOptions {
 export type ParsedGoalCommand =
   | { readonly kind: 'status' }
   | { readonly kind: 'pause' }
-  | { readonly kind: 'resume' }
+  | { readonly kind: 'resume'; readonly suggestion?: string }
   | { readonly kind: 'cancel' }
   | {
       readonly kind: 'create';
@@ -96,6 +96,12 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
   }
   if (first !== undefined && CONTROL_SUBCOMMANDS.has(first) && tokens.length === 1) {
     return { kind: first as 'pause' | 'resume' | 'cancel' };
+  }
+  // `/goal resume <guidance>` carries free-text direction for the resumed run
+  // (e.g. "先修测试"). Pause/cancel stay strict: extra tokens fall through to
+  // objective parsing as before.
+  if (first === 'resume') {
+    return { kind: 'resume', suggestion: tokens.slice(1).join(' ') };
   }
 
   let index = 0;
@@ -150,7 +156,7 @@ export async function handleGoalCommand(host: SlashCommandHost, args: string): P
       await pauseGoal(host);
       return;
     case 'resume':
-      await resumeGoal(host);
+      await resumeGoal(host, parsed.suggestion);
       return;
     case 'cancel':
       await cancelGoal(host);
@@ -517,7 +523,7 @@ async function pauseGoal(host: SlashCommandHost): Promise<void> {
   host.showStatus('Goal paused. Use `/goal resume` to continue.');
 }
 
-async function resumeGoal(host: SlashCommandHost): Promise<void> {
+async function resumeGoal(host: SlashCommandHost, suggestion?: string): Promise<void> {
   if (host.state.appState.model.trim().length === 0 || host.session === undefined) {
     host.showError(LLM_NOT_SET_MESSAGE);
     return;
@@ -533,8 +539,13 @@ async function resumeGoal(host: SlashCommandHost): Promise<void> {
     host.showError(formatErrorMessage(error));
     return;
   }
-  host.track('goal_resume');
-  host.sendNormalUserInput(RESUME_GOAL_INPUT);
+  host.track('goal_resume', suggestion === undefined ? undefined : { guidance: true });
+  const guidance = suggestion?.trim();
+  host.sendNormalUserInput(
+    guidance !== undefined && guidance.length > 0
+      ? `${RESUME_GOAL_INPUT}\n\nUser's guidance for the next steps — follow this direction when continuing: ${guidance}`
+      : RESUME_GOAL_INPUT,
+  );
 }
 
 async function cancelGoal(host: SlashCommandHost): Promise<void> {

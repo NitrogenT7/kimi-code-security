@@ -389,7 +389,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     aliases: [],
     description: 'Start or manage an autonomous goal',
     priority: 80,
-    argumentHint: '[status|pause|resume|cancel|replace|next] | <objective>',
+    argumentHint: '[status|pause|resume [guidance]|cancel|replace|next] | <objective>',
     completeArgs: goalArgumentCompletions,
     // status / pause / cancel are always available; creation, replacement, and
     // resume start (or restart) a turn and so are idle-only.

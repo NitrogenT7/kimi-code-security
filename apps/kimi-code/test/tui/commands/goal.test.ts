@@ -158,6 +158,17 @@ describe('parseGoalCommand', () => {
     expect(parseGoalCommand('cancel')).toEqual({ kind: 'cancel' });
   });
 
+  it('parses resume guidance as free text after the subcommand', () => {
+    expect(parseGoalCommand('resume 先修测试')).toEqual({
+      kind: 'resume',
+      suggestion: '先修测试',
+    });
+    expect(parseGoalCommand('resume fix the tests then commit')).toEqual({
+      kind: 'resume',
+      suggestion: 'fix the tests then commit',
+    });
+  });
+
   it('treats `clear` as an objective, not a subcommand (cancel is the remove action)', () => {
     expect(parseGoalCommand('clear')).toMatchObject({ kind: 'create', objective: 'clear' });
   });
@@ -723,9 +734,18 @@ describe('handleGoalCommand', () => {
   it('/goal resume calls resumeGoal and sends a resume input', async () => {
     await handleGoalCommand(host, 'resume');
     expect(session.resumeGoal).toHaveBeenCalledOnce();
-    expect(host.track).toHaveBeenCalledWith('goal_resume');
+    expect(host.track).toHaveBeenCalledWith('goal_resume', undefined);
     expect(host.showStatus).not.toHaveBeenCalledWith('Goal resumed.');
     expect(host.sendNormalUserInput).toHaveBeenCalledWith('Resume the active goal.');
+  });
+
+  it('/goal resume <guidance> appends the guidance to the resume input', async () => {
+    await handleGoalCommand(host, 'resume 先修测试再提交');
+    expect(session.resumeGoal).toHaveBeenCalledOnce();
+    expect(host.track).toHaveBeenCalledWith('goal_resume', { guidance: true });
+    expect(host.sendNormalUserInput).toHaveBeenCalledWith(
+      'Resume the active goal.\n\nUser\'s guidance for the next steps — follow this direction when continuing: 先修测试再提交',
+    );
   });
 
   it('/goal cancel calls cancelGoal and does not send input', async () => {
