@@ -70,6 +70,7 @@ export interface EditorKeyboardHost {
   detachCurrentForegroundTask(): void;
   cancelRunningShellCommand(): void;
   hideSessionPicker(): void;
+  showSessionPicker(): Promise<void>;
   openUndoSelector(): void;
   stop(exitCode?: number): Promise<void>;
   ensureSession(): Promise<Session | undefined>;
@@ -309,6 +310,11 @@ export class EditorKeyboardController {
       this.clearPendingExit();
       host.track('shortcut_notify_page', { direction: direction < 0 ? 'previous' : 'next' });
       return true;
+    };
+
+    editor.onOpenSessionPicker = () => {
+      host.track('shortcut_session_picker');
+      void host.showSessionPicker();
     };
 
     editor.onCtrlS = () => {

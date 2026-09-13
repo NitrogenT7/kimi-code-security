@@ -15,6 +15,7 @@ interface Harness {
   readonly cancelCompaction: ReturnType<typeof vi.fn>;
   readonly btwCancelRunning: ReturnType<typeof vi.fn>;
   readonly btwCloseOrCancel: ReturnType<typeof vi.fn>;
+  readonly showSessionPicker: ReturnType<typeof vi.fn>;
   readonly survey: {
     readonly handlePreInput: ReturnType<typeof vi.fn<(data: string) => boolean>>;
     readonly handleSubmit: ReturnType<typeof vi.fn<(text: string) => boolean>>;
@@ -35,6 +36,7 @@ function createHarness(options: { streamingPhase?: string; isCompacting?: boolea
   const cancelCompaction = vi.fn(async () => {});
   const btwCancelRunning = vi.fn(() => false);
   const btwCloseOrCancel = vi.fn(() => false);
+  const showSessionPicker = vi.fn(async () => {});
   const survey = {
     handlePreInput: vi.fn<(data: string) => boolean>(() => false),
     handleSubmit: vi.fn<(text: string) => boolean>(() => false),
@@ -60,6 +62,7 @@ function createHarness(options: { streamingPhase?: string; isCompacting?: boolea
     surveyController: survey,
     openUndoSelector,
     cancelRunningShellCommand,
+    showSessionPicker,
     updateEditorBorderHighlight: vi.fn(),
     updateGoalLengthWarning: vi.fn(),
     handleUserInput: vi.fn(),
@@ -83,6 +86,7 @@ function createHarness(options: { streamingPhase?: string; isCompacting?: boolea
     cancelCompaction,
     btwCancelRunning,
     btwCloseOrCancel,
+    showSessionPicker,
     survey,
   };
 }
@@ -741,5 +745,18 @@ describe('EditorKeyboardController survey wiring', () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe('EditorKeyboardController session picker shortcut', () => {
+  it('opens the sessions picker when the editor fires onOpenSessionPicker', () => {
+    const { host, editor, showSessionPicker } = createHarness();
+    const onOpenSessionPicker = editor['onOpenSessionPicker'] as unknown as () => void;
+    if (onOpenSessionPicker === undefined) throw new Error('onOpenSessionPicker not installed');
+
+    onOpenSessionPicker();
+
+    expect(showSessionPicker).toHaveBeenCalledTimes(1);
+    expect(host.track).toHaveBeenCalledWith('shortcut_session_picker');
   });
 });

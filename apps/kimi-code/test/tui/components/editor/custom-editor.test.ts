@@ -116,6 +116,27 @@ describe('CustomEditor onNonEscapeInput', () => {
   });
 });
 
+describe('CustomEditor session picker shortcut', () => {
+  it('fires onOpenSessionPicker for Ctrl+R without inserting text', () => {
+    const editor = makeEditor();
+    const onOpenSessionPicker = vi.fn();
+    editor.onOpenSessionPicker = onOpenSessionPicker;
+
+    editor.handleInput('\u0012');
+
+    expect(onOpenSessionPicker).toHaveBeenCalledOnce();
+    expect(editor.getText()).toBe('');
+  });
+
+  it('swallows Ctrl+R even when no handler is installed', () => {
+    const editor = makeEditor();
+
+    editor.handleInput('\u0012');
+
+    expect(editor.getText()).toBe('');
+  });
+});
+
 describe('CustomEditor slash argument completion refresh', () => {
   it('reopens /add-dir directory completions after tab completion and entering slash', async () => {
     const editor = makeEditor();
@@ -549,7 +570,7 @@ describe('CustomEditor paste marker expansion', () => {
     expect(editor.getText()).toContain(longText);
 
     // Undo (Ctrl+-) restores both the marker text and its paste-registry entry.
-    editor.handleInput('\x1b[45;5u');
+    editor.handleInput('\x1B[45;5u');
     expect(editor.getText()).toContain('[paste #1');
 
     simulateLargePaste(editor, 'anything');
