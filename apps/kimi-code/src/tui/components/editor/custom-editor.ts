@@ -480,7 +480,7 @@ export class CustomEditor extends Editor {
       if (this.onCtrlB?.() === true) return;
     }
 
-    if (matchesKey(normalized, Key.ctrl('r'))) {
+    if (matchesKey(normalized, Key.ctrl('l'))) {
       this.onOpenSessionPicker?.();
       return;
     }

@@ -117,23 +117,33 @@ describe('CustomEditor onNonEscapeInput', () => {
 });
 
 describe('CustomEditor session picker shortcut', () => {
-  it('fires onOpenSessionPicker for Ctrl+R without inserting text', () => {
+  it('fires onOpenSessionPicker for Ctrl+L without inserting text', () => {
+    const editor = makeEditor();
+    const onOpenSessionPicker = vi.fn();
+    editor.onOpenSessionPicker = onOpenSessionPicker;
+
+    editor.handleInput('\u000C');
+
+    expect(onOpenSessionPicker).toHaveBeenCalledOnce();
+    expect(editor.getText()).toBe('');
+  });
+
+  it('swallows Ctrl+L even when no handler is installed', () => {
+    const editor = makeEditor();
+
+    editor.handleInput('\u000C');
+
+    expect(editor.getText()).toBe('');
+  });
+
+  it('does not bind Ctrl+R so the picker-internal rename shortcut stays unambiguous', () => {
     const editor = makeEditor();
     const onOpenSessionPicker = vi.fn();
     editor.onOpenSessionPicker = onOpenSessionPicker;
 
     editor.handleInput('\u0012');
 
-    expect(onOpenSessionPicker).toHaveBeenCalledOnce();
-    expect(editor.getText()).toBe('');
-  });
-
-  it('swallows Ctrl+R even when no handler is installed', () => {
-    const editor = makeEditor();
-
-    editor.handleInput('\u0012');
-
-    expect(editor.getText()).toBe('');
+    expect(onOpenSessionPicker).not.toHaveBeenCalled();
   });
 });
 
@@ -570,7 +580,7 @@ describe('CustomEditor paste marker expansion', () => {
     expect(editor.getText()).toContain(longText);
 
     // Undo (Ctrl+-) restores both the marker text and its paste-registry entry.
-    editor.handleInput('\x1B[45;5u');
+    editor.handleInput('\u001B[45;5u');
     expect(editor.getText()).toContain('[paste #1');
 
     simulateLargePaste(editor, 'anything');
