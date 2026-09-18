@@ -27,6 +27,8 @@ import {
 import { IAgentScopeContext, makeAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentRuntimeService } from '#/agent/runtimeBinding/agentRuntime';
 import { IConfigService } from '#/app/config/config';
+import { ILogService } from '#/_base/log/log';
+import { IModelCatalog } from '#/llm-adapter/model/catalog';
 import { PERMISSION_SECTION } from '#/agent/permissionRules/configSection';
 import { IBashParserService } from '#/app/bashParser/bashParser';
 import { BashParserService } from '#/app/bashParser/bashParserService';
@@ -119,6 +121,17 @@ describe('AgentPermissionPolicyService chain', () => {
         });
         reg.defineInstance(ITelemetryService, recordingTelemetry([]));
         reg.definePartialInstance(IGitService, { findWorkTree: async () => null });
+        reg.definePartialInstance(ILogService, {
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        });
+        reg.definePartialInstance(IModelCatalog, {
+          getRequester: () => {
+            throw new Error('no reviewer model in policy-chain tests');
+          },
+        });
         reg.define(IBashParserService, BashParserService);
         reg.define(IAgentPermissionPolicyService, AgentPermissionPolicyService);
       },
@@ -479,6 +492,17 @@ describe('AgentPermissionPolicyService git cwd write approval', () => {
           makeAgentScopeContext({ agentId: 'main', agentScope: '' }),
         );
         reg.definePartialInstance(IAgentPermissionRulesService, permissionRulesStub());
+        reg.definePartialInstance(ILogService, {
+          info: () => {},
+          warn: () => {},
+          error: () => {},
+          debug: () => {},
+        });
+        reg.definePartialInstance(IModelCatalog, {
+          getRequester: () => {
+            throw new Error('no reviewer model in policy-chain tests');
+          },
+        });
         reg.defineInstance(ISessionWorkspaceContext, workspace.stub);
         reg.defineInstance(IHostEnvironment, kaosStub());
         reg.defineInstance(IAgentRuntimeService, {

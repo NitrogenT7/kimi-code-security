@@ -9,6 +9,7 @@ import { DefaultToolApprovePermissionPolicyService } from '#/agent/permissionPol
 import { FallbackAskPermissionPolicyService } from '#/agent/permissionPolicy/policies/fallback-ask';
 import { GitControlPathAccessAskPermissionPolicyService } from '#/agent/permissionPolicy/policies/git-control-path-access-ask';
 import { GitCwdWriteApprovePermissionPolicyService } from '#/agent/permissionPolicy/policies/git-cwd-write-approve';
+import { NetworkEgressLLMReviewPermissionPolicyService } from '#/agent/permissionPolicy/policies/network-egress-llm-review';
 import { SensitiveFileAccessAskPermissionPolicyService } from '#/agent/permissionPolicy/policies/sensitive-file-access-ask';
 import { SessionApprovalHistoryPermissionPolicyService } from '#/agent/permissionPolicy/policies/session-approval-history';
 import { UserConfiguredAllowPermissionPolicyService } from '#/agent/permissionPolicy/policies/user-configured-allow';
@@ -42,6 +43,7 @@ export class AgentPermissionPolicyService
       ...(bootstrap.args.nonInteractive
         ? []
         : [this.instantiation.createInstance(DangerousCommandAskPermissionPolicyService)]),
+      this.instantiation.createInstance(NetworkEgressLLMReviewPermissionPolicyService),
       this.instantiation.createInstance(AutoModeApprovePermissionPolicyService),
       this.instantiation.createInstance(SessionApprovalHistoryPermissionPolicyService),
       this.instantiation.createInstance(UserConfiguredAskPermissionPolicyService),
