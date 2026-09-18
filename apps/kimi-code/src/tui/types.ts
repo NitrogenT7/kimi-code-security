@@ -322,6 +322,7 @@ export interface TUIStartupOptions {
   readonly continueLast: boolean;
   readonly yolo: boolean;
   readonly auto: boolean;
+  readonly pentest: boolean;
   readonly plan: boolean;
   readonly model?: string;
   /** Resolved profile name from --agent/--agent-file; bound to the startup session only. */

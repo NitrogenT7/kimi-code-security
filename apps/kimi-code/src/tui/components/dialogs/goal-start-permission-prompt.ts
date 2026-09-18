@@ -3,7 +3,7 @@ import {
   type StartPermissionOption,
 } from './start-permission-prompt';
 
-export type GoalStartPermissionChoice = 'auto' | 'yolo' | 'manual' | 'cancel';
+export type GoalStartPermissionChoice = 'auto' | 'yolo' | 'pentest' | 'manual' | 'cancel';
 
 export interface GoalStartPermissionPromptOptions {
   readonly mode: 'manual' | 'yolo';
@@ -23,6 +23,12 @@ export const GOAL_START_MANUAL_OPTIONS: readonly StartPermissionOption[] = [
     label: 'Switch to Ask When Needed and start',
     description:
       'Tools and plan changes are approved automatically. Kimi Code may still ask you questions.',
+  },
+  {
+    value: 'pentest',
+    label: 'Switch to Pentest and start',
+    description:
+      'Local and private-network work runs unattended; outbound requests to public targets are vetted by a small reviewer model.',
   },
   {
     value: 'manual',

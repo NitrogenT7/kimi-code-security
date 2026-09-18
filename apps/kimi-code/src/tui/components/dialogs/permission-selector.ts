@@ -20,10 +20,15 @@ const PERMISSION_OPTIONS: readonly ChoiceOption[] = [
     label: PERMISSION_MODE_DISPLAY_NAMES.auto,
     description: PERMISSION_MODE_DESCRIPTIONS.auto,
   },
+  {
+    value: 'pentest',
+    label: PERMISSION_MODE_DISPLAY_NAMES.pentest,
+    description: PERMISSION_MODE_DESCRIPTIONS.pentest,
+  },
 ];
 
 function isPermissionModeChoice(value: string): value is PermissionMode {
-  return value === 'manual' || value === 'auto' || value === 'yolo';
+  return value === 'manual' || value === 'auto' || value === 'yolo' || value === 'pentest';
 }
 
 export interface PermissionSelectorOptions {

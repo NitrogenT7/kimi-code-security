@@ -902,7 +902,7 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
 }
 
 function isPermissionMode(value: unknown): value is PermissionMode {
-  return value === 'yolo' || value === 'manual' || value === 'auto';
+  return value === 'yolo' || value === 'manual' || value === 'auto' || value === 'pentest';
 }
 
 function resumeStateFromSummary(

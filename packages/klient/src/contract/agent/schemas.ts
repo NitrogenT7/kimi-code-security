@@ -115,7 +115,7 @@ export const runtimeBindingSchema = z.object({
   runtimeId: z.string(),
 });
 
-export const permissionModeSchema = z.enum(['manual', 'yolo', 'auto']);
+export const permissionModeSchema = z.enum(['manual', 'yolo', 'auto', 'pentest']);
 
 export const setPermissionPayloadSchema = z.object({
   mode: permissionModeSchema,

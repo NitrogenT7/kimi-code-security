@@ -357,8 +357,11 @@ function adaptGoalStartChoices(
 ): ApprovalPanelChoice[] {
   // Reuse the exact options the /goal start menu shows. Each mode option starts
   // the goal under that permission mode (the policy reads selected_label); "Do
-  // not start" declines so no goal is created.
-  return goalStartOptions(display.mode).map((option) =>
+  // not start" declines so no goal is created. Pentest mode never reaches this
+  // panel (the goal-start display is suppressed there), so it narrows to the
+  // two prompt variants.
+  const mode = display.mode === 'pentest' ? 'manual' : display.mode;
+  return goalStartOptions(mode).map((option) =>
     option.value === 'cancel'
       ? {
           label: option.label,

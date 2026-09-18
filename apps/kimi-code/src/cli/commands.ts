@@ -53,6 +53,7 @@ export function createProgram(
     .addOption(new Option('-C').hideHelp().default(false))
     .option('-y, --yolo', 'Start in Ask When Needed mode: routine edits and commands run automatically; risky actions, questions, and plans still ask.', false)
     .option('--auto', 'Start in Never Ask mode: never interrupts you; everything runs and is decided automatically.', false)
+    .option('--pentest', 'Start in Pentest mode: local and private-network work runs unattended; outbound requests to public targets are vetted by a small reviewer model.', false)
     .addOption(
       new Option(
         '-m, --model <model>',
@@ -167,12 +168,14 @@ export function createProgram(
     const sessionValue = rawSession === true ? '' : (rawSession as string | undefined);
     const yoloValue = raw['yolo'] === true || raw['yes'] === true || raw['autoApprove'] === true;
     const autoValue = raw['auto'] === true;
+    const pentestValue = raw['pentest'] === true;
 
     const opts: CLIOptions = {
       session: sessionValue,
       continue: raw['continue'] === true || raw['C'] === true,
       yolo: yoloValue,
       auto: autoValue,
+      pentest: pentestValue,
       plan: raw['plan'] as boolean,
       model: raw['model'] as string | undefined,
       outputFormat: raw['outputFormat'] as CLIOptions['outputFormat'],

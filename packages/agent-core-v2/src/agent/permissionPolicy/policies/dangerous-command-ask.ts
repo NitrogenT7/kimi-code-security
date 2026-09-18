@@ -119,7 +119,7 @@ export class DangerousCommandAskPermissionPolicyService implements PermissionPol
 
   evaluate(context: ResolvedToolExecutionHookContext): PermissionPolicyResult | undefined {
     if (!isDangerousCommandGuardEnabled(this.config)) return undefined;
-    if (this.modeService.mode === 'auto') return undefined;
+    if (this.modeService.mode === 'auto' || this.modeService.mode === 'pentest') return undefined;
     if (context.toolCall.name !== 'Bash') return undefined;
     const command = bashCommandText(context.args);
     const verdict =

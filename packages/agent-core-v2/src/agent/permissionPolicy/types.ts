@@ -3,7 +3,7 @@ import type { ExecutableToolResult } from '#/tool/toolContract';
 import type { ToolInputDisplay } from '#/tool/toolInputDisplay';
 import type { PermissionRule } from '#/agent/permissionRules/permissionRules';
 
-export type PermissionMode = 'manual' | 'yolo' | 'auto';
+export type PermissionMode = 'manual' | 'yolo' | 'auto' | 'pentest';
 
 
 export interface ApprovalRequest {

@@ -39,6 +39,7 @@ export interface CLIOptions {
   continue: boolean;
   yolo: boolean;
   auto: boolean;
+  pentest: boolean;
   plan: boolean;
   model: string | undefined;
   outputFormat: PromptOutputFormat | undefined;

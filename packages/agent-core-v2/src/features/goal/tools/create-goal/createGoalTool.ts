@@ -59,7 +59,7 @@ export class CreateGoalTool implements ICreateGoalTool {
 
   private resolveGoalStartDisplay(args: CreateGoalToolInput): ToolInputDisplay | undefined {
     const mode = this.permissionMode.mode;
-    if (mode === 'auto') return undefined;
+    if (mode === 'auto' || mode === 'pentest') return undefined;
     return {
       kind: 'goal_start',
       objective: args.objective,

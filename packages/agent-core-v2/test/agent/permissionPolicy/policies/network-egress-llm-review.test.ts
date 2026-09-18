@@ -5,6 +5,8 @@ import type { IConfigService } from '#/app/config/config';
 import type { ILogService } from '#/_base/log/log';
 import type { IModelCatalog } from '#/llm-adapter/model/catalog';
 import type { ModelRequester } from '#/llm-adapter/model/model-requester';
+import type { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
+import type { PermissionMode } from '#/agent/permissionPolicy/types';
 import type { ResolvedToolExecutionHookContext } from '#/agent/toolExecutor/toolHooks';
 import { ToolAccesses } from '#/tool/toolContract';
 import {
@@ -19,9 +21,21 @@ const signal = new AbortController().signal;
 function configWith(cfg: NetworkEgressReviewConfig | undefined): IConfigService {
   return {
     _serviceBrand: undefined,
-    get: vi.fn(() => cfg),
+    get: vi.fn((section: string) =>
+      section === NETWORK_EGRESS_REVIEW_SECTION ? cfg : undefined,
+    ),
     ready: Promise.resolve(),
   } as unknown as IConfigService;
+}
+
+function modeService(mode: PermissionMode): IAgentPermissionModeService {
+  return {
+    _serviceBrand: undefined,
+    mode,
+    setMode: () => {},
+    setModeAndBroadcast: () => {},
+    onDidChangeMode: () => ({ dispose: () => {} }),
+  } as unknown as IAgentPermissionModeService;
 }
 
 function reviewerReturning(text: string): ModelRequester {
@@ -57,7 +71,7 @@ const log: ILogService = {
   level: 'warn' as never,
   setLevel: () => {},
   flush: async () => {},
-  trace: () => {},
+  child: () => ({}) as never,
   debug: () => {},
   info: () => {},
   warn: () => {},
@@ -87,13 +101,26 @@ function policyContext(toolName: string, args: unknown): ResolvedToolExecutionHo
 }
 
 describe('NetworkEgressLLMReviewPermissionPolicyService', () => {
-  const enabled = { enabled: true, model: 'reviewer-model' };
+  const reviewerCfg = { model: 'reviewer-model' };
 
-  it('stays silent when the feature is disabled', async () => {
+  function pentestPolicy(
+    reviewer: ModelRequester | Error,
+    cfg: NetworkEgressReviewConfig | undefined = reviewerCfg,
+  ): NetworkEgressLLMReviewPermissionPolicyService {
+    return new NetworkEgressLLMReviewPermissionPolicyService(
+      configWith(cfg),
+      catalogWith(reviewer),
+      log,
+      modeService('pentest'),
+    );
+  }
+
+  it('stays silent outside pentest mode', async () => {
     const policy = new NetworkEgressLLMReviewPermissionPolicyService(
       configWith(undefined),
       catalogWith(reviewerReturning('ALLOW')),
       log,
+      modeService('auto'),
     );
     await expect(
       policy.evaluate(policyContext('Bash', { command: 'curl https://example.com' })),
@@ -101,11 +128,7 @@ describe('NetworkEgressLLMReviewPermissionPolicyService', () => {
   });
 
   it('approves loopback targets without consulting the reviewer', async () => {
-    const policy = new NetworkEgressLLMReviewPermissionPolicyService(
-      configWith(enabled),
-      catalogWith(reviewerReturning('DENY')),
-      log,
-    );
+    const policy = pentestPolicy(reviewerReturning('DENY'));
     await expect(
       policy.evaluate(policyContext('Bash', { command: 'curl http://127.0.0.1:8080/api' })),
     ).resolves.toEqual({
@@ -115,11 +138,7 @@ describe('NetworkEgressLLMReviewPermissionPolicyService', () => {
   });
 
   it('approves private-network targets without consulting the reviewer', async () => {
-    const policy = new NetworkEgressLLMReviewPermissionPolicyService(
-      configWith(enabled),
-      catalogWith(reviewerReturning('DENY')),
-      log,
-    );
+    const policy = pentestPolicy(reviewerReturning('DENY'));
     const result = await policy.evaluate(
       policyContext('Bash', { command: 'curl http://192.168.1.10/admin' }),
     );
@@ -130,11 +149,7 @@ describe('NetworkEgressLLMReviewPermissionPolicyService', () => {
   });
 
   it('routes public targets through the reviewer model and approves on ALLOW', async () => {
-    const policy = new NetworkEgressLLMReviewPermissionPolicyService(
-      configWith(enabled),
-      catalogWith(reviewerReturning('ALLOW read-only GET')),
-      log,
-    );
+    const policy = pentestPolicy(reviewerReturning('ALLOW read-only GET'));
     const result = await policy.evaluate(
       policyContext('Bash', { command: 'curl -s https://api.example.com/v1/users' }),
     );
@@ -142,11 +157,7 @@ describe('NetworkEgressLLMReviewPermissionPolicyService', () => {
   });
 
   it('denies on reviewer DENY with the reviewer reason surfaced to the agent', async () => {
-    const policy = new NetworkEgressLLMReviewPermissionPolicyService(
-      configWith(enabled),
-      catalogWith(reviewerReturning('DENY login form submission creates state')),
-      log,
-    );
+    const policy = pentestPolicy(reviewerReturning('DENY login form submission creates state'));
     const result = await policy.evaluate(
       policyContext('Bash', {
         command: 'curl -X POST -d "user=a&pass=b" https://example.com/login',
@@ -157,11 +168,7 @@ describe('NetworkEgressLLMReviewPermissionPolicyService', () => {
   });
 
   it('covers FetchURL tool calls', async () => {
-    const policy = new NetworkEgressLLMReviewPermissionPolicyService(
-      configWith(enabled),
-      catalogWith(reviewerReturning('ALLOW')),
-      log,
-    );
+    const policy = pentestPolicy(reviewerReturning('ALLOW'));
     const result = await policy.evaluate(
       policyContext('FetchURL', { url: 'https://example.com/page' }),
     );
@@ -169,11 +176,7 @@ describe('NetworkEgressLLMReviewPermissionPolicyService', () => {
   });
 
   it('falls back to ask when the reviewer model is not configured', async () => {
-    const policy = new NetworkEgressLLMReviewPermissionPolicyService(
-      configWith(enabled),
-      catalogWith(new Error('model not found')),
-      log,
-    );
+    const policy = pentestPolicy(new Error('model not found'));
     const result = await policy.evaluate(
       policyContext('Bash', { command: 'curl https://example.com' }),
     );
@@ -181,11 +184,7 @@ describe('NetworkEgressLLMReviewPermissionPolicyService', () => {
   });
 
   it('falls back to ask when the reviewer output has no verdict', async () => {
-    const policy = new NetworkEgressLLMReviewPermissionPolicyService(
-      configWith(enabled),
-      catalogWith(reviewerReturning('I am not sure about this one')),
-      log,
-    );
+    const policy = pentestPolicy(reviewerReturning('I am not sure about this one'));
     const result = await policy.evaluate(
       policyContext('Bash', { command: 'curl https://example.com' }),
     );
@@ -193,11 +192,7 @@ describe('NetworkEgressLLMReviewPermissionPolicyService', () => {
   });
 
   it('ignores purely local commands', async () => {
-    const policy = new NetworkEgressLLMReviewPermissionPolicyService(
-      configWith(enabled),
-      catalogWith(reviewerReturning('ALLOW')),
-      log,
-    );
+    const policy = pentestPolicy(reviewerReturning('ALLOW'));
     await expect(
       policy.evaluate(policyContext('Bash', { command: 'ls -la && rg pattern src/' })),
     ).resolves.toBeUndefined();

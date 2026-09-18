@@ -46,6 +46,7 @@ describe('createTUIState', () => {
         continueLast: false,
         yolo: false,
         auto: false,
+        pentest: false,
         plan: false,
       },
     };
@@ -99,6 +100,7 @@ describe('createTUIState', () => {
         continueLast: false,
         yolo: false,
         auto: false,
+        pentest: false,
         plan: false,
       },
     });
@@ -116,6 +118,7 @@ describe('createTUIState', () => {
         continueLast: false,
         yolo: false,
         auto: false,
+        pentest: false,
         plan: false,
       },
     });

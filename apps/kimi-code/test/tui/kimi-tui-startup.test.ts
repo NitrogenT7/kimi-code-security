@@ -84,6 +84,7 @@ function makeStartupInput(
       continue: false,
       yolo: false,
       auto: false,
+      pentest: false,
       plan: false,
       model: undefined,
       outputFormat: undefined,

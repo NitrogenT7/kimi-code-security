@@ -258,9 +258,11 @@ type MutableCreateSessionOptions = {
 function createInitialAppState(input: KimiTUIStartupInput): AppState {
   const startupPermission: PermissionMode = input.cliOptions.auto
     ? 'auto'
-    : input.cliOptions.yolo
-      ? 'yolo'
-      : 'manual';
+    : input.cliOptions.pentest
+      ? 'pentest'
+      : input.cliOptions.yolo
+        ? 'yolo'
+        : 'manual';
   return {
     model: '',
     workDir: input.workDir,
@@ -448,6 +450,7 @@ export class KimiTUI {
         continueLast: startupInput.cliOptions.continue,
         yolo: startupInput.cliOptions.yolo,
         auto: startupInput.cliOptions.auto,
+        pentest: startupInput.cliOptions.pentest,
         plan: startupInput.cliOptions.plan,
         model: startupInput.cliOptions.model,
         agentProfile: startupInput.agentProfile,
@@ -2410,6 +2413,8 @@ export class KimiTUI {
     const { startup } = this.options;
     if (startup.auto) {
       await session.setPermission('auto');
+    } else if (startup.pentest) {
+      await session.setPermission('pentest');
     } else if (startup.yolo) {
       await session.setPermission('yolo');
     }
@@ -2428,6 +2433,8 @@ export class KimiTUI {
     const { startup } = this.options;
     if (startup.auto) {
       this.setAppState({ permissionMode: 'auto' });
+    } else if (startup.pentest) {
+      this.setAppState({ permissionMode: 'pentest' });
     } else if (startup.yolo) {
       this.setAppState({ permissionMode: 'yolo' });
     }

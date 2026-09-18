@@ -13,12 +13,12 @@ export class AutoModeAskUserQuestionDenyPermissionPolicyService implements Permi
   ) {}
 
   evaluate(context: ResolvedToolExecutionHookContext): PermissionPolicyResult | undefined {
-    if (this.modeService.mode !== 'auto') return undefined;
+    if (this.modeService.mode !== 'auto' && this.modeService.mode !== 'pentest') return undefined;
     if (context.toolCall.name !== 'AskUserQuestion') return undefined;
     return {
       kind: 'deny',
       message:
-        'AskUserQuestion is disabled while auto permission mode is active. Make a reasonable decision and continue without asking the user.',
+        'AskUserQuestion is disabled while auto/pentest permission mode is active. Make a reasonable decision and continue without asking the user.',
     };
   }
 }

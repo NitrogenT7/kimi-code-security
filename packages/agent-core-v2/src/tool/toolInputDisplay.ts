@@ -69,7 +69,7 @@ export type ToolInputDisplay =
       kind: 'goal_start';
       objective: string;
       completionCriterion?: string | undefined;
-      mode: 'manual' | 'yolo';
+      mode: 'manual' | 'yolo' | 'pentest';
     }
   | {
       kind: 'generic';

@@ -48,6 +48,7 @@ function opts(overrides: Partial<Parameters<typeof runPrompt>[0]> = {}) {
     continue: false,
     yolo: false,
     auto: false,
+    pentest: false,
     plan: false,
     model: undefined,
     outputFormat: undefined,

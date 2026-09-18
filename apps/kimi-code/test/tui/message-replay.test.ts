@@ -53,6 +53,7 @@ function makeStartupInput(): KimiTUIStartupInput {
       continue: false,
       yolo: false,
       auto: false,
+      pentest: false,
       plan: false,
       model: undefined,
       outputFormat: undefined,

@@ -81,7 +81,7 @@ export async function runShell(
         reason: outcome.reason,
       });
     },
-    sessionStartedProperties: { yolo: opts.yolo, auto: opts.auto, plan: opts.plan, afk: false },
+    sessionStartedProperties: { yolo: opts.yolo, auto: opts.auto, plan: opts.plan, afk: false, pentest: opts.pentest },
   };
   const harness = createKimiHarness(harnessOptions);
   startupTrace('harness:created');

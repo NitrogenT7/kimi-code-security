@@ -1,7 +1,9 @@
 import { IConfigService } from '#/app/config/config';
 import { ILogService } from '#/_base/log/log';
-import { IModelCatalog } from '#/llm-adapter/model/catalog';import type { ModelRequester } from '#/llm-adapter/model/model-requester';
+import { IModelCatalog } from '#/llm-adapter/model/catalog';
+import type { ModelRequester } from '#/llm-adapter/model/model-requester';
 import { createUserMessage, type Message } from '#/llm-adapter/contract/message';
+import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
 import type { ResolvedToolExecutionHookContext } from '#/agent/toolExecutor/toolHooks';
 import type {
   PermissionPolicy,
@@ -9,8 +11,6 @@ import type {
 } from '#/agent/permissionPolicy/types';
 import {
   networkEgressReviewerModel,
-  NETWORK_EGRESS_REVIEW_SECTION,
-  type NetworkEgressReviewConfig,
 } from './network-egress-review-config';
 import { extractEgressTarget, type EgressTarget } from './network-egress-target';
 
@@ -36,15 +36,13 @@ export class NetworkEgressLLMReviewPermissionPolicyService implements Permission
     @IConfigService private readonly config: IConfigService,
     @IModelCatalog private readonly modelCatalog: IModelCatalog,
     @ILogService private readonly log: ILogService,
+    @IAgentPermissionModeService private readonly modeService: IAgentPermissionModeService,
   ) {}
 
   async evaluate(
     context: ResolvedToolExecutionHookContext,
   ): Promise<PermissionPolicyResult | undefined> {
-    const cfg = this.config.get<NetworkEgressReviewConfig | undefined>(
-      NETWORK_EGRESS_REVIEW_SECTION,
-    );
-    if (cfg?.enabled !== true) return undefined;
+    if (this.modeService.mode !== 'pentest') return undefined;
 
     const toolName = context.toolCall.name;
     let target: EgressTarget | undefined;

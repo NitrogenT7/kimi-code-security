@@ -1010,7 +1010,7 @@ function isGoalMutationTool(toolName: string): boolean {
 }
 
 function toGoalStartReviewPermissionMode(label: string | undefined): PermissionMode | undefined {
-  if (label === 'auto' || label === 'yolo' || label === 'manual') return label;
+  if (label === 'auto' || label === 'yolo' || label === 'manual' || label === 'pentest') return label;
   return undefined;
 }
 
@@ -1124,6 +1124,7 @@ function createGoalEffectHandlers(runtime: AgentActorContext<GoalRuntimeState>) 
       if (
         event.toolCall.name !== 'CreateGoal' ||
         permissionMode.mode === 'auto' ||
+        permissionMode.mode === 'pentest' ||
         event.execution.display?.kind !== 'goal_start'
       ) return;
       event.waitUntil(async () => runtime.get(IAgentToolApprovalService).requestToolApproval(
