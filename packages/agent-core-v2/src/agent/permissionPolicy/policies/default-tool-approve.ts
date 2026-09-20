@@ -12,6 +12,7 @@ const DEFAULT_APPROVE_TOOLS = new Set([
   'SetTodoList',
   'TodoList',
   'Notepad',
+  'JevTriage',
   'TaskList',
   'TaskOutput',
   'WaitFor',

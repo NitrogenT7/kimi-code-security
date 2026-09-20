@@ -17,6 +17,7 @@ import { UserConfiguredAllowPermissionPolicyService } from '#/agent/permissionPo
 import { UserConfiguredAskPermissionPolicyService } from '#/agent/permissionPolicy/policies/user-configured-ask';
 import { UserConfiguredDenyPermissionPolicyService } from '#/agent/permissionPolicy/policies/user-configured-deny';
 import { YoloModeApprovePermissionPolicyService } from '#/agent/permissionPolicy/policies/yolo-mode-approve';
+import { YoloModeDangerousReviewPermissionPolicyService } from '#/agent/permissionPolicy/policies/yolo-mode-dangerous-review';
 import {
   IAgentPermissionPolicyService,
   type PermissionPolicyEvaluation,
@@ -24,6 +25,8 @@ import {
 import type { PermissionPolicy } from "./types";
 import { LifecycleScope } from '#/app/scopes';
 import { ScopeActivation, registerScopedService } from '#/_base/di/scope';
+import type { QuestionAnswers } from '#/agent/interaction/question';
+import type { AskUserQuestionInput } from '#/agent/tools/ask-user-question/ask-user-question';
 
 export class AgentPermissionPolicyService
   extends Service
@@ -32,14 +35,18 @@ export class AgentPermissionPolicyService
   declare readonly _serviceBrand: undefined;
 
   private readonly policies: readonly PermissionPolicy[];
+  private readonly autoAskPolicy: AutoModeAskUserQuestionDenyPermissionPolicyService;
 
   constructor(
     @IInstantiationService private readonly instantiation: IInstantiationService,
     @IBootstrapService bootstrap: IBootstrapService,
   ) {
     super();
+    this.autoAskPolicy = this.instantiation.createInstance(
+      AutoModeAskUserQuestionDenyPermissionPolicyService,
+    );
     this.policies = [
-      this.instantiation.createInstance(AutoModeAskUserQuestionDenyPermissionPolicyService),
+      this.autoAskPolicy,
       this.instantiation.createInstance(UserConfiguredDenyPermissionPolicyService),
       ...(bootstrap.args.nonInteractive
         ? []
@@ -52,6 +59,7 @@ export class AgentPermissionPolicyService
       this.instantiation.createInstance(UserConfiguredAllowPermissionPolicyService),
       this.instantiation.createInstance(SensitiveFileAccessAskPermissionPolicyService),
       this.instantiation.createInstance(GitControlPathAccessAskPermissionPolicyService),
+      this.instantiation.createInstance(YoloModeDangerousReviewPermissionPolicyService),
       this.instantiation.createInstance(YoloModeApprovePermissionPolicyService),
       this.instantiation.createInstance(DefaultToolApprovePermissionPolicyService),
       this.instantiation.createInstance(GitCwdWriteApprovePermissionPolicyService),
@@ -67,6 +75,12 @@ export class AgentPermissionPolicyService
       if (result !== undefined) return { policyName: policy.name, result };
     }
     return undefined;
+  }
+
+  async answerAutoQuestions(
+    questions: AskUserQuestionInput['questions'],
+  ): Promise<QuestionAnswers | undefined> {
+    return this.autoAskPolicy.answerQuestions(questions);
   }
 }
 

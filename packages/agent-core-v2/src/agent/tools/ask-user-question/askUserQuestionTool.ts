@@ -7,6 +7,7 @@ import { isAbortError } from '#/_base/utils/abort';
 import { IAgentTaskService } from '#/agent/task/task';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentToolPolicyService } from '#/agent/toolPolicy/toolPolicy';
+import { IAgentPermissionPolicyService } from '#/agent/permissionPolicy/permissionPolicy';
 import { ITelemetryService } from '#/app/telemetry/telemetry';
 import type { QuestionAnsweredEvent, QuestionDismissedEvent } from '#/app/telemetry/events';
 import type {
@@ -67,6 +68,7 @@ export class AskUserQuestionTool implements IAskUserQuestionTool {
     @IAgentTaskService private readonly tasks: IAgentTaskService,
     @IAgentScopeContext private readonly scopeContext: IAgentScopeContext,
     @IAgentToolPolicyService private readonly toolPolicy: IAgentToolPolicyService,
+    @IAgentPermissionPolicyService private readonly permissionPolicy: IAgentPermissionPolicyService,
   ) {}
 
   get description(): string {
@@ -167,6 +169,19 @@ export class AskUserQuestionTool implements IAskUserQuestionTool {
     }: Pick<ExecutableToolContext, 'toolCallId' | 'signal' | 'turnId' | 'trace'>,
   ): Promise<ExecutableToolResult> {
     try {
+      const autoAnswers = await this.permissionPolicy.answerAutoQuestions?.(args.questions);
+      if (autoAnswers !== undefined) {
+        const properties: QuestionAnsweredEvent = {
+          answered: Object.keys(autoAnswers).length,
+          trace_id: trace?.traceId,
+        };
+        this.telemetry.track2('question_answered', properties);
+        return {
+          isError: false,
+          output: JSON.stringify({ answers: autoAnswers }),
+        };
+      }
+
       const result = await this.requestQuestion(args, { toolCallId, turnId, signal });
 
       const normalized = normalizeQuestionResult(result);

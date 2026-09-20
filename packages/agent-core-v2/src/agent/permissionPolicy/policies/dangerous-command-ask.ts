@@ -14,6 +14,8 @@ import type {
 
 const PARSE_OPTIONS = { timeoutMs: 500, maxNodes: 10_000 } as const;
 
+export const DANGEROUS_PARSE_OPTIONS = PARSE_OPTIONS;
+
 const MAX_NESTED_SHELL_DEPTH = 4;
 
 const UNSAFE_OPERAND = /[$`*?[\]~]/;
@@ -104,9 +106,18 @@ const DD_SAFE_DEVICE_TARGETS: ReadonlySet<string> = new Set([
   '/dev/stderr',
 ]);
 
-type DangerousVerdict =
+type DangerVerdict =
   | { readonly kind: 'dangerous'; readonly command: string }
   | { readonly kind: 'unanalyzable' };
+
+export type DangerousVerdict = DangerVerdict;
+
+export function analyzeDangerousCommand(
+  command: string,
+  parse: (source: string) => BashParseResult,
+): DangerousVerdict | undefined {
+  return analyzeSource(command, 0, parse);
+}
 
 export class DangerousCommandAskPermissionPolicyService implements PermissionPolicy {
   readonly name = 'dangerous-command-ask';

@@ -42,6 +42,13 @@ import { ISessionWorkspaceContext } from '#/session/workspaceContext/workspaceCo
 
 import { stubPermissionModeService } from '../permissionMode/stubs';
 import { recordingTelemetry } from '../../app/telemetry/stubs';
+import { IJevDecider } from '#/features/jev/jev-decider';
+
+const jevDeciderStub: IJevDecider = {
+  _serviceBrand: undefined,
+  available: () => false,
+  decide: async () => undefined,
+};
 
 const signal = new AbortController().signal;
 
@@ -68,6 +75,7 @@ describe('AgentPermissionPolicyService chain', () => {
     ix = createServices(disposables, {
       additionalServices: (reg) => {
         reg.defineInstance(IAgentPermissionModeService, stubPermissionModeService(() => mode));
+        reg.defineInstance(IJevDecider, jevDeciderStub);
         reg.definePartialInstance(IBootstrapService, {
           get args() {
             return hostArgs;
@@ -480,6 +488,7 @@ describe('AgentPermissionPolicyService git cwd write approval', () => {
     ix = createServices(disposables, {
       additionalServices: (reg) => {
         reg.defineInstance(IAgentPermissionModeService, stubPermissionModeService(() => mode));
+        reg.defineInstance(IJevDecider, jevDeciderStub);
         reg.definePartialInstance(IBootstrapService, {
           args: { requestHeaders: {}, nonInteractive: false },
         });

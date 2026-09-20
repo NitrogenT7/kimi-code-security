@@ -15,6 +15,7 @@ const SECURITY_BASE_TOOLS = [
   'FetchURL',
   'TodoList',
   'Notepad',
+  'JevTriage',
 ] as const;
 
 const SECURITY_SUMMARY_ROLE =

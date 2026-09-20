@@ -12,6 +12,7 @@ import { ITelemetryService } from '#/app/telemetry/telemetry';
 import { IAgentTaskService } from '#/agent/task/task';
 import { IAgentScopeContext } from '#/agent/scopeContext/scopeContext';
 import { IAgentToolPolicyService } from '#/agent/toolPolicy/toolPolicy';
+import { IAgentPermissionPolicyService } from '#/agent/permissionPolicy/permissionPolicy';
 import type {
   QuestionRequest,
   QuestionResult,
@@ -101,6 +102,9 @@ function makeTool(
       reg.definePartialInstance(IAgentScopeContext, { agentId: 'main' });
       reg.definePartialInstance(IAgentToolPolicyService, {
         isToolActive: (name: string) => activeTaskTools.has(name),
+      });
+      reg.definePartialInstance(IAgentPermissionPolicyService, {
+        answerAutoQuestions: undefined,
       });
       reg.define(IAskUserQuestionTool, AskUserQuestionTool);
     },

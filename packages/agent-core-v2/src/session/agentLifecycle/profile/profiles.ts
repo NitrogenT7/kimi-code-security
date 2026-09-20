@@ -42,6 +42,7 @@ const AGENT_TOOLS = [
   'TowerStatus',
   'TowerTeardown',
   'MCPManager',
+  'JevTriage',
   'mcp__*',
 ] as const;
 
