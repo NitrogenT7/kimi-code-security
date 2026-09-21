@@ -4,6 +4,7 @@ import { IModelCatalog } from '#/llm-adapter/model/catalog';
 import type { ModelRequester } from '#/llm-adapter/model/model-requester';
 import { createUserMessage, type Message } from '#/llm-adapter/contract/message';
 import { IAgentPermissionModeService } from '#/agent/permissionMode/permissionMode';
+import { IJevDecider, type JevQuestionSpec } from '#/features/jev/jev-decider';
 import type { ResolvedToolExecutionHookContext } from '#/agent/toolExecutor/toolHooks';
 import type {
   PermissionPolicy,
@@ -37,6 +38,7 @@ export class NetworkEgressLLMReviewPermissionPolicyService implements Permission
     @IModelCatalog private readonly modelCatalog: IModelCatalog,
     @ILogService private readonly log: ILogService,
     @IAgentPermissionModeService private readonly modeService: IAgentPermissionModeService,
+    @IJevDecider private readonly jev: IJevDecider,
   ) {}
 
   async evaluate(
@@ -62,6 +64,39 @@ export class NetworkEgressLLMReviewPermissionPolicyService implements Permission
       return {
         kind: 'approve',
         reason: { policy: this.name, target: target.hostname, scope: 'local' },
+      };
+    }
+
+    const jevVerdict = await this.reviewWithJev(context, target);
+    if (jevVerdict !== undefined) {
+      if (jevVerdict.kind === 'allow') {
+        return {
+          kind: 'approve',
+          reason: {
+            policy: this.name,
+            target: target.hostname,
+            reviewer: 'jev',
+            read_only: jevVerdict.scores.readOnly,
+            destructive: jevVerdict.scores.destructive,
+            exfil: jevVerdict.scores.exfil,
+          },
+        };
+      }
+      return {
+        kind: 'deny',
+        reason: {
+          policy: this.name,
+          target: target.hostname,
+          reviewer: 'jev',
+          signal: jevVerdict.signal ?? 'ambiguous',
+          read_only: jevVerdict.scores.readOnly,
+          destructive: jevVerdict.scores.destructive,
+          exfil: jevVerdict.scores.exfil,
+        },
+        message:
+          jevVerdict.signal === undefined
+            ? `Network egress to ${target.hostname} denied by the Jev decision model. Reframe the step to be read-only, or ask the operator to grant it.`
+            : `Network egress to ${target.hostname} denied by the Jev decision model (signal: ${jevVerdict.signal}). Reframe the step to be read-only, or ask the operator to grant it.`,
       };
     }
 
@@ -100,6 +135,66 @@ export class NetworkEgressLLMReviewPermissionPolicyService implements Permission
           ? `Network egress to ${target.hostname} denied by the safety reviewer model. Reframe the step to be read-only, or ask the operator to grant it.`
           : `Network egress to ${target.hostname} denied by the safety reviewer model: ${verdict.reason} Reframe the step to be read-only, or ask the operator to grant it.`,
     };
+  }
+
+  private async reviewWithJev(
+    context: ResolvedToolExecutionHookContext,
+    target: EgressTarget,
+  ): Promise<
+    | {
+        readonly kind: 'allow' | 'deny';
+        readonly signal?: string;
+        readonly scores: { readonly readOnly: number; readonly destructive: number; readonly exfil: number };
+      }
+    | undefined
+  > {
+    if (!this.jev.available()) return undefined;
+
+    const questions: Record<string, JevQuestionSpec> = {
+      read_only: {
+        type: 'noul',
+        instructions:
+          'The request only reads remote state (GET/HEAD/OPTIONS, DNS query, ping, port probe); it does not create, modify, or delete anything',
+      },
+      destructive: {
+        type: 'noul',
+        instructions:
+          'The request would create, modify, or delete remote state (form or login submission, file upload, posting a comment, message, or order)',
+      },
+      exfil: {
+        type: 'noul',
+        instructions:
+          'The request sends real credentials, secrets, or contents of local files to the remote host, or clearly targets a host outside the authorized testing scope',
+      },
+    };
+
+    const answers = await this.jev.decide(
+      {
+        tool: context.toolCall.name,
+        arguments: context.args,
+        target: { scheme: target.scheme, hostname: target.hostname, port: target.port },
+      },
+      questions,
+    );
+    if (answers === undefined) return undefined;
+
+    const readOnly = noulProbability(answers, 'read_only');
+    const destructive = noulProbability(answers, 'destructive');
+    const exfil = noulProbability(answers, 'exfil');
+    const scores = {
+      readOnly: round2(readOnly),
+      destructive: round2(destructive),
+      exfil: round2(exfil),
+    };
+
+    if (destructive >= 0.5 || exfil >= 0.5) {
+      const signal = exfil >= destructive ? 'exfil' : 'destructive';
+      return { kind: 'deny', signal, scores };
+    }
+    if (readOnly >= 0.8) {
+      return { kind: 'allow', scores };
+    }
+    return undefined;
   }
 
   private async review(
@@ -180,4 +275,16 @@ function isPrivateHost(hostname: string): boolean {
     return second >= 16 && second <= 31;
   }
   return false;
+}
+
+function noulProbability(
+  answers: Readonly<Record<string, import('#/features/jev/jev-decider').JevAnswer>>,
+  key: string,
+): number {
+  const answer = answers[key];
+  return answer?.type === 'noul' ? answer.probability : 0;
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }

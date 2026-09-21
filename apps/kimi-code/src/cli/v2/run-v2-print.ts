@@ -22,6 +22,7 @@ import {
   IAgentLifecycleService,
   IAgentLoopService,
   IAgentPermissionModeService,
+  type PermissionMode,
   IAgentProfileService,
   IAgentPromptService,
   IAgentTaskService,
@@ -405,12 +406,15 @@ async function resolveNativeSession(
     return session;
   };
 
+  const resolveHeadlessMode = (): PermissionMode =>
+    opts.pentest === true ? 'pentest' : 'auto';
+
   const forceAuto = (
     agent: IAgentScopeHandle,
   ): { readonly restorePermission: () => Promise<void> } => {
     const permissionMode = agent.accessor.get(IAgentPermissionModeService);
     const previous = permissionMode.mode;
-    permissionMode.setMode('auto');
+    permissionMode.setMode(resolveHeadlessMode());
     return {
       restorePermission: async () => {
         permissionMode.setMode(previous);
@@ -479,7 +483,7 @@ async function resolveNativeSession(
   });
   const agentContext = await ensureMainAgent(session);
   const agent = session.accessor.get(IAgentLifecycleService).handleOf(agentContext.agentId)!;
-  agent.accessor.get(IAgentPermissionModeService).setMode('auto');
+  agent.accessor.get(IAgentPermissionModeService).setMode(resolveHeadlessMode());
   return {
     session,
     agent,
