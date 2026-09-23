@@ -29,6 +29,10 @@ function buildSpawnOptions(options: HostProcessOptions): SpawnOptions {
     spawnOptions.shell = options.shell;
   }
 
+  if (options.windowsVerbatimArguments !== undefined) {
+    spawnOptions.windowsVerbatimArguments = options.windowsVerbatimArguments;
+  }
+
   return spawnOptions;
 }
 

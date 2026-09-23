@@ -197,12 +197,17 @@ class RuntimeStdioTransport implements Transport {
         : resolved.command;
       const serverArgs = this.config.args ?? [];
       const spawnArgs = resolved.shell
-        ? ['/d', '/s', '/c', resolved.command, ...serverArgs]
+        ? ['/d', '/s', '/c', wrapShellLine(resolved.command, serverArgs)]
         : serverArgs;
       const process = lease.track(await lease.runtime.process!.spawn(
         spawnCommand,
         spawnArgs,
-        { cwd, env, windowsHide: !resolved.shell },
+        {
+          cwd,
+          env,
+          windowsHide: !resolved.shell,
+          windowsVerbatimArguments: resolved.shell,
+        },
       ));
       this.process = process;
       lease.track(this);
@@ -315,4 +320,10 @@ export function mergeStdioEnv(
   Object.assign(merged, proxyEnvForChild(merged));
   reconcileChildNoProxy(merged, configEnv);
   return merged;
+}
+
+function wrapShellLine(command: string, args: readonly string[]): string {
+  const quotedCommand = command.includes(' ') ? `"${command}"` : command;
+  const line = [quotedCommand, ...args].join(' ');
+  return `"${line}"`;
 }

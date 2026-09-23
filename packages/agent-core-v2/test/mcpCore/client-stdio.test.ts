@@ -267,6 +267,43 @@ describe('StdioMcpClient', () => {
     }
   }, 15000);
 
+  it('spawns a .cmd shim whose resolved PATH contains spaces (win32)', async () => {
+    if (process.platform !== 'win32') return;
+    const spacedRoot = mkdtempSync(join(tmpdir(), 'kimi spaced shim-'));
+    const binDir = join(spacedRoot, 'bin dir');
+    mkdirSync(binDir, { recursive: true });
+    const localFixture = join(spacedRoot, 'mock-stdio-server.mjs');
+    writeFileSync(localFixture, SELF_CONTAINED_MOCK_SERVER);
+    writeFileSync(
+      join(binDir, 'mock-shim.cmd'),
+      `@echo off\r\n"${process.execPath}" "${localFixture}" %*\r\n`,
+    );
+    const client = createClient(
+      {
+        transport: 'stdio',
+        command: 'mock-shim',
+        env: { PATH: `${binDir};${process.env['PATH'] ?? ''}` },
+      },
+      { pathClass: 'win32' },
+    );
+    try {
+      try {
+        await client.connect();
+      } catch (error) {
+        throw new Error(
+          `connect failed: ${error instanceof Error ? error.message : String(error)}; stderr: ${client.stderrSnapshot()}`,
+          { cause: error },
+        );
+      }
+      const result = await client.callTool('echo', { text: 'spaced shim' });
+      expect(result.isError).toBe(false);
+      expect(result.content).toEqual([{ type: 'text', text: 'spaced shim' }]);
+    } finally {
+      await client.close();
+      await rm(spacedRoot, { recursive: true, force: true });
+    }
+  }, 15000);
+
   it('propagates server-reported isError', async () => {
     const client = createClient({
       transport: 'stdio',

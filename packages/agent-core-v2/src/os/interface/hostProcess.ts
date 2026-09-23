@@ -10,6 +10,7 @@ export interface HostProcessOptions {
   readonly shell?: boolean | string;
   readonly detached?: boolean;
   readonly windowsHide?: boolean;
+  readonly windowsVerbatimArguments?: boolean;
   readonly mergeStderr?: boolean;
   readonly timeout?: number;
 }
